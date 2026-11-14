@@ -46,6 +46,45 @@ pub(crate) fn headset_mhz() -> Option<u32> {
     }
 }
 
+/// Where the window and game threads spend time, for the headset thread's
+/// hitch line: the longest duration of each stage since the last report.
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+#[derive(Clone, Copy)]
+pub(crate) enum Stage {
+    /// Replaying the game's framebuffer ops (the actual game rendering).
+    Drain,
+    /// Getting the window surface's next image.
+    Acquire,
+    /// Showing the frame, toasts and overlay, and the mirror copy.
+    Draw,
+    /// Presenting to the window.
+    Present,
+    /// The game thread held back because the window had not caught up.
+    GameWait,
+    /// One whole window event, i.e. how long the queue lock was held.
+    Hold,
+}
+
+const STAGES: usize = 6;
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+const STAGE_NAMES: [&str; STAGES] = [
+    "game draw",
+    "window image",
+    "frame draw",
+    "window present",
+    "game held back",
+    "longest window event",
+];
+static STAGE_MAX_US: [AtomicU32; STAGES] = [const { AtomicU32::new(0) }; STAGES];
+
+/// Records `d` for `stage` (only while VR runs).
+pub(crate) fn note(stage: Stage, d: std::time::Duration) {
+    if active() {
+        let us = d.as_micros().min(u32::MAX as u128) as u32;
+        STAGE_MAX_US[stage as usize].fetch_max(us, Ordering::Relaxed);
+    }
+}
+
 #[cfg(any(windows, target_os = "linux"))]
 pub(crate) use real::{Vr, gate, shutdown};
 #[cfg(not(any(windows, target_os = "linux")))]
@@ -116,11 +155,12 @@ mod real {
     static STARTED: AtomicBool = AtomicBool::new(false);
 
     /// The window thread's hold on the queue lock; released on drop.
-    pub(crate) struct Gate;
+    pub(crate) struct Gate(Instant);
 
     impl Drop for Gate {
         fn drop(&mut self) {
             HELD.with(|h| h.borrow_mut().take());
+            super::note(super::Stage::Hold, self.0.elapsed());
         }
     }
 
@@ -135,7 +175,7 @@ mod real {
         let us = waiting.elapsed().as_micros().min(u32::MAX as u128) as u32;
         WINDOW_WAIT_US.fetch_max(us, Ordering::Relaxed);
         HELD.with(|h| *h.borrow_mut() = Some(guard));
-        Some(Gate)
+        Some(Gate(Instant::now()))
     }
 
     /// Before the process exits (window.rs `quit`): ends the VR session
@@ -482,18 +522,32 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 let window_wait =
                     Duration::from_micros(WINDOW_WAIT_US.swap(0, Ordering::Relaxed).into());
                 let ms = |d: Duration| d.as_secs_f64() * 1e3;
-                // Only when something was off: a missed headset frame, or a
-                // thread held up for a good part of a frame.
-                if ms(worst_gap) > period_ms * 1.8 || ms(worst_wait) > 4.0 || ms(window_wait) > 4.0
+                let stages: Vec<f64> = super::STAGE_MAX_US
+                    .iter()
+                    .map(|a| a.swap(0, Ordering::Relaxed) as f64 / 1e3)
+                    .collect();
+                // Only when something was off: a missed headset frame, a
+                // thread held up for a good part of a frame, or the game
+                // held back by the window.
+                let game_wait = stages[super::Stage::GameWait as usize];
+                if ms(worst_gap) > period_ms * 1.8
+                    || ms(worst_wait) > 4.0
+                    || ms(window_wait) > 4.0
+                    || game_wait > 4.0
                 {
+                    let detail: Vec<String> = super::STAGE_NAMES
+                        .iter()
+                        .zip(&stages)
+                        .map(|(name, v)| format!("{name} {v:.1}"))
+                        .collect();
                     eprintln!(
-                        "[vr] hitch in the last 5 s: longest gap between headset frames \
-                         {:.1} ms (one frame is {period_ms:.1} ms); the headset thread \
-                         waited up to {:.1} ms for the window, the window up to {:.1} ms \
-                         for the headset",
+                        "[vr] hitch in the last 5 s: headset frame gap {:.1} ms (one frame \
+                         {period_ms:.1}); headset waited {:.1} for the window, window {:.1} \
+                         for the headset; longest, ms: {}",
                         ms(worst_gap),
                         ms(worst_wait),
-                        ms(window_wait)
+                        ms(window_wait),
+                        detail.join(", ")
                     );
                 }
                 (worst_gap, worst_wait, last_report) =

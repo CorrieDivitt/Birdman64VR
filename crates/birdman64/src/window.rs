@@ -1157,6 +1157,7 @@ impl App {
                     // Backpressure (MAX_QUEUED_OPS): wait for the window to
                     // drain; never while quitting (the window thread is then
                     // waiting for us to park, not draining).
+                    let timing = Instant::now();
                     while q.ops.len() >= MAX_QUEUED_OPS && !QUIT.load(Ordering::Acquire) {
                         q = slot
                             .drained
@@ -1164,6 +1165,7 @@ impl App {
                             .unwrap()
                             .0;
                     }
+                    crate::vr::note(crate::vr::Stage::GameWait, timing.elapsed());
                     q.ops.extend(ops);
                     if show.is_some() {
                         q.show = show;
@@ -1341,9 +1343,11 @@ impl App {
             },
         };
         g.renderer.options.hud_offsets = g.hud_offsets;
+        let timing = Instant::now();
         for op in &q.ops {
             g.renderer.fb_apply(op);
         }
+        crate::vr::note(crate::vr::Stage::Drain, timing.elapsed());
         if q.show.is_some() {
             self.shown = q.show;
         }
@@ -1417,7 +1421,11 @@ impl App {
             }
             return;
         }
-        let Some(tex) = g.acquire() else {
+        let timing = Instant::now();
+        let acquired = g.acquire();
+        crate::vr::note(crate::vr::Stage::Acquire, timing.elapsed());
+        let timing = Instant::now();
+        let Some(tex) = acquired else {
             // W2: while the overlay is open the game is paused (no Frame
             // events), so only this keeps the overlay alive.
             if settings::is_open() {
@@ -1538,8 +1546,11 @@ impl App {
             g.renderer
                 .blit(&view, &surface_view, wgpu::FilterMode::Nearest);
         }
+        crate::vr::note(crate::vr::Stage::Draw, timing.elapsed());
+        let timing = Instant::now();
         g.window.pre_present_notify();
         tex.present();
+        crate::vr::note(crate::vr::Stage::Present, timing.elapsed());
         self.perf.presented();
         // A frame went out: the OS core's Display pacing (V-Sync) ticks on
         // this counter (crates/pw64-platform/src/os/vi.rs).
