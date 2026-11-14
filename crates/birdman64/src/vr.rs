@@ -36,6 +36,15 @@ pub(crate) fn requested() -> bool {
     REQUESTED.load(Ordering::Relaxed) || std::env::var_os("PW64_VR").is_some_and(|v| v != "0")
 }
 
+/// The headset paces the game's frames (window.rs `App::start`). Off with
+/// `PW64_VR_PACING=fixed` (a test switch): the game then runs on its own
+/// timer at the headset's rate, as it does on a monitor.
+pub(crate) fn headset_paced() -> bool {
+    static FIXED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    active()
+        && !*FIXED.get_or_init(|| std::env::var_os("PW64_VR_PACING").is_some_and(|v| v == "fixed"))
+}
+
 /// The headset's refresh rate (mHz) while VR runs: the game's "monitor"
 /// rate then (window.rs `monitor_mhz`), so it produces one frame per
 /// headset frame.
@@ -144,6 +153,9 @@ static HANDOVER_TO_PANEL: Delay = Delay::new();
 /// How old the panel's content is when the headset thread samples it.
 #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 static PANEL_AGE: Delay = Delay::new();
+/// How far ahead the runtime predicts the display of the frame being drawn.
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+static AHEAD: Delay = Delay::new();
 /// When the panel was last drawn.
 static PANEL_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
@@ -502,6 +514,8 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         let (mut last_frame, mut last_report) = (None::<Instant>, Instant::now());
         let (mut worst_gap, mut worst_wait, mut shown) = (Duration::ZERO, Duration::ZERO, 0u32);
         let started = Instant::now();
+        // Headset frames the runtime did not want drawn (headset off the head).
+        let mut not_shown = 0u32;
         while !STOP.load(Ordering::Relaxed) {
             let outcome = xr.frame(&layers, Some(&pw64_gfx::QUEUE_GATE), |frame| {
                 // A headset frame starts. Cue the game `lead()` before the
@@ -509,9 +523,14 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 // its newest frame then reaches the panel just in time to
                 // be sampled, and it starts the frame after.
                 let period = Duration::from_nanos(frame.time.period_ns.max(0) as u64);
-                *CUE_AT.lock().unwrap_or_else(|e| e.into_inner()) =
-                    Some(Instant::now() + period.saturating_sub(lead()));
-                CUE_SET.notify_one();
+                if super::headset_paced() {
+                    *CUE_AT.lock().unwrap_or_else(|e| e.into_inner()) =
+                        Some(Instant::now() + period.saturating_sub(lead()));
+                    CUE_SET.notify_one();
+                }
+                if let Some(ns) = frame.time.ahead_ns {
+                    super::AHEAD.add(Duration::from_nanos(ns.max(0) as u64));
+                }
                 let mhz = (1e12 / frame.time.period_ns.max(1) as f64).round() as u32;
                 HEADSET_MHZ.store(mhz.max(1), Ordering::Relaxed);
                 let Some(eyes) = frame.eyes else { return };
@@ -600,16 +619,26 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                         announced = true;
                         log(
                             &format!(
-                                "showing in the headset at {:.0} Hz",
-                                HEADSET_MHZ.load(Ordering::Relaxed) as f64 / 1000.0
+                                "showing in the headset at {:.0} Hz, game paced by {}, lead {:.1} ms",
+                                HEADSET_MHZ.load(Ordering::Relaxed) as f64 / 1000.0,
+                                if super::headset_paced() {
+                                    "the headset"
+                                } else {
+                                    "its own timer"
+                                },
+                                lead().as_secs_f64() * 1e3
                             ),
                             true,
                         );
                     }
                 }
-                Ok(FrameOutcome::Hidden) => last_frame = None,
+                Ok(FrameOutcome::Hidden) => {
+                    last_frame = None;
+                    not_shown += 1;
+                }
                 Ok(FrameOutcome::Idle) => {
                     last_frame = None;
+                    not_shown += 1;
                     std::thread::sleep(Duration::from_millis(50));
                 }
                 Ok(FrameOutcome::Quit) => {
@@ -650,13 +679,16 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     || stages[super::Stage::GameGap as usize] > period_ms * 2.5;
                 let (_, to_panel_avg, to_panel_max) = super::HANDOVER_TO_PANEL.take();
                 let (_, age_avg, age_max) = super::PANEL_AGE.take();
+                let (_, ahead_avg, ahead_max) = super::AHEAD.take();
+                let idle = std::mem::take(&mut not_shown);
                 log(
                     &format!(
                         "{}t {:.0} s: headset {:.0} fps (frame {period_ms:.1} ms, longest gap \
                          {:.1}, waited {:.1} for the queue), game {game_fps:.0} fps; game \
                          frame: hand-over to panel avg {to_panel_avg:.1} max \
-                         {to_panel_max:.1} ms, age when the headset shows it avg {age_avg:.1} \
-                         max {age_max:.1} ms; longest, ms: {}",
+                         {to_panel_max:.1} ms, age when the headset draws it avg {age_avg:.1} \
+                         max {age_max:.1} ms, then shown {ahead_avg:.1} (max {ahead_max:.1}) ms \
+                         later; headset frames not shown {idle}; longest, ms: {}",
                         if hitch { "hitch, " } else { "" },
                         started.elapsed().as_secs_f64(),
                         shown as f64 / secs,

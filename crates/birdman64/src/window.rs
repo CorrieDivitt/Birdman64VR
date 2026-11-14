@@ -383,7 +383,7 @@ impl Gpu {
             opts::Fps::Monitor | opts::Fps::Uncapped => 0,
         });
         // Birdman64VR: the headset paces the game's frames (see `App::start`).
-        let rate = opts::present_rate(self.fps, mhz, self.vsync || crate::vr::active());
+        let rate = opts::present_rate(self.fps, mhz, self.vsync || crate::vr::headset_paced());
         let tearing = opts::allows_tearing(self.fps, mhz);
         let mode = opts::present_mode(self.vsync, rate.is_some(), tearing, &self.present_modes);
         if self.config.present_mode != mode {
@@ -1030,7 +1030,7 @@ impl App {
         // game makes exactly one frame per headset frame, in step with it.
         // Two free-running 72 Hz clocks instead drift through each other:
         // every 15 s or so, a second or two of doubled and skipped frames.
-        let rate = opts::present_rate(fps, monitor, vsync || self.vr.is_some());
+        let rate = opts::present_rate(fps, monitor, vsync || crate::vr::headset_paced());
         // Present mode (opts::present_mode): V-Sync → Fifo; else with a
         // present tick Mailbox (the newest frame goes out at the next vblank
         // and the window thread never blocks, so a free-running tick at the
@@ -1587,7 +1587,7 @@ impl App {
         // A frame went out: the OS core's Display pacing (V-Sync) ticks on
         // this counter (crates/pw64-platform/src/os/vi.rs).
         // (Birdman64VR: in VR the headset thread ticks it instead.)
-        if !crate::vr::active() {
+        if !crate::vr::headset_paced() {
             os::vi::VBLANK.fetch_add(1, Ordering::Relaxed);
         }
         // The overlay changed fps/vsync (or toggled fullscreen): re-read the

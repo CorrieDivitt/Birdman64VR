@@ -46,6 +46,9 @@ pub struct FrameTime {
     pub display_ns: i64,
     /// The display's frame period in nanoseconds (72 Hz: 13.9 ms).
     pub period_ns: i64,
+    /// How far ahead of now the predicted display time is, when the
+    /// runtime exposes its clock: the delay between drawing and showing.
+    pub ahead_ns: Option<i64>,
 }
 
 /// One eye of the stereo world layer for the frame being drawn.
@@ -117,6 +120,8 @@ pub struct XrContext {
     blend_mode: xr::EnvironmentBlendMode,
     format: wgpu::TextureFormat,
     running: bool,
+    /// The runtime's clock can be read (`Instance::now`).
+    has_clock: bool,
     /// How long the last frame waited for the queue lock.
     queue_wait: std::time::Duration,
     gpu: XrGpu,
@@ -174,6 +179,19 @@ impl XrContext {
         }
         let mut enabled = xr::ExtensionSet::default();
         enabled.khr_vulkan_enable2 = true;
+        // Optional: the runtime's clock, to see how far ahead it predicts
+        // (`FrameTime::ahead_ns`).
+        #[cfg(windows)]
+        let has_clock = {
+            enabled.khr_win32_convert_performance_counter_time =
+                available.khr_win32_convert_performance_counter_time;
+            available.khr_win32_convert_performance_counter_time
+        };
+        #[cfg(not(windows))]
+        let has_clock = {
+            enabled.khr_convert_timespec_time = available.khr_convert_timespec_time;
+            available.khr_convert_timespec_time
+        };
         let instance = entry
             .create_instance(
                 &xr::ApplicationInfo {
@@ -256,6 +274,7 @@ impl XrContext {
             blend_mode,
             format,
             running: false,
+            has_clock,
             queue_wait: std::time::Duration::ZERO,
             gpu,
         })
@@ -426,6 +445,11 @@ impl XrContext {
             time: FrameTime {
                 display_ns: state.predicted_display_time.as_nanos(),
                 period_ns: state.predicted_display_period.as_nanos(),
+                ahead_ns: self
+                    .has_clock
+                    .then(|| self.instance.now().ok())
+                    .flatten()
+                    .map(|now| state.predicted_display_time.as_nanos() - now.as_nanos()),
             },
             panel: panel_image.map(|i| &self.panel.views[i][0]),
             eyes,
