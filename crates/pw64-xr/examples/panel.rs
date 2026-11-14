@@ -3,11 +3,15 @@
 //! Start the VR runtime first (Quest Link), then:
 //! `cargo run --release -p pw64-xr --example panel`
 //!
-//! Expect a 4:3 panel straight ahead with a grid and two bars sweeping left
-//! to right every two seconds: the top one (orange) follows the PC clock at
-//! draw time, the bottom one (green) the display time the runtime predicts.
-//! The green one is the correct way and should be smooth. Ctrl+C or quitting from the headset's
-//! menu ends it.
+//! Expect a 4:3 panel straight ahead with three bands:
+//! - top: a grid and a fast orange bar timed from the PC clock at draw time;
+//! - middle: plain, a fast green bar timed from the predicted display time;
+//! - bottom: plain, a slow white bar (20 s per sweep, about one pixel per
+//!   frame at 72 Hz) timed from the predicted display time.
+//!
+//! The slow bar tells whether every frame reaches the headset: it glides if
+//! so, and moves in visible steps if frames are dropped on the way.
+//! Ctrl+C or quitting from the headset's menu ends it.
 
 use pw64_xr::{FrameOutcome, FrameTime, Panel, XrContext};
 use std::time::{Duration, Instant};
@@ -27,17 +31,23 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
 fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let size = vec2<f32>(1440.0, 1080.0);
     let uv = pos.xy / size;
-    // Sky-to-sea gradient, a 12 x 9 grid, a white frame and a sweeping bar.
+    // Three bands. Top: grid, fast bar on the PC clock (orange). Middle:
+    // plain, fast bar on the display time (green). Bottom: plain, slow bar
+    // on the display time (white, about one pixel per frame at 72 Hz).
     var c = mix(vec3<f32>(0.10, 0.35, 0.80), vec3<f32>(0.02, 0.10, 0.30), uv.y);
-    let cell = fract(pos.xy / 120.0) * 120.0;
-    if (cell.x < 2.0 || cell.y < 2.0) { c = vec3<f32>(0.9, 0.9, 0.9); }
+    if (uv.y < 0.34) {
+        let cell = fract(pos.xy / 120.0) * 120.0;
+        if (cell.x < 2.0 || cell.y < 2.0) { c = vec3<f32>(0.9, 0.9, 0.9); }
+        if (abs(uv.x - fract(u.wall * 0.5)) < 0.01) { c = vec3<f32>(1.0, 0.45, 0.1); }
+    } else if (uv.y < 0.67) {
+        c = vec3<f32>(0.03, 0.08, 0.20);
+        if (abs(uv.x - fract(u.display * 0.5)) < 0.01) { c = vec3<f32>(0.2, 1.0, 0.3); }
+    } else {
+        c = vec3<f32>(0.02, 0.05, 0.12);
+        if (abs(uv.x - fract(u.display * 0.05)) < 0.01) { c = vec3<f32>(1.0, 1.0, 1.0); }
+    }
     let edge = min(min(pos.x, pos.y), min(size.x - pos.x, size.y - pos.y));
     if (edge < 12.0) { c = vec3<f32>(1.0, 1.0, 1.0); }
-    if (uv.y < 0.5) {
-        if (abs(uv.x - fract(u.wall * 0.5)) < 0.01) { c = vec3<f32>(1.0, 0.45, 0.1); }
-    } else {
-        if (abs(uv.x - fract(u.display * 0.5)) < 0.01) { c = vec3<f32>(0.2, 1.0, 0.3); }
-    }
     return vec4<f32>(c, 1.0);
 }
 ";
