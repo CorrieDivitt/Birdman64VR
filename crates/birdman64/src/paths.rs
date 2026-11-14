@@ -26,7 +26,10 @@ use std::sync::OnceLock;
 /// names, so it never shares saves, settings or the game cache with an
 /// installed Birdman64.
 pub const APP_NAME: &str = "Birdman64VR";
+// Gated like `xdg_or_default`: `cache_dir` (first-run only) uses both.
+#[cfg(any(windows, feature = "first-run"))]
 const USER_DIR_WINDOWS: &str = "Birdman64VR";
+#[cfg(any(not(windows), feature = "first-run"))]
 const USER_DIR_UNIX: &str = "birdman64vr";
 
 /// Supplied by an embedding frontend before the first [`data_dir`] call: a
