@@ -3,17 +3,18 @@
 //! [`XrContext::new`] connects to the OpenXR runtime (Quest Link, SteamVR,
 //! ...), lets it pick the Vulkan device, and wraps that device in the
 //! ordinary wgpu types the renderer already uses. [`XrContext::frame`] runs
-//! one headset frame; for now it shows one flat panel (an OpenXR quad
-//! layer) that the caller draws into.
+//! one headset frame: a stereo world layer and, in front of it, one flat
+//! panel (an OpenXR quad layer), both drawn by the caller.
 //!
 //! The OpenXR loader is opened at run time, so a machine without it (or
 //! without a running runtime) gets an [`XrError`] and can start flat.
 
 mod gpu;
+pub mod math;
 mod session;
 
 pub use gpu::XrGpu;
-pub use session::{FrameOutcome, FrameTime, Panel, XrContext};
+pub use session::{Eye, Frame, FrameOutcome, FrameTime, Layers, Panel, XrContext};
 
 /// Why VR could not start or continue; `Display` is a one-line reason.
 #[derive(Debug)]

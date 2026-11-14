@@ -1,6 +1,7 @@
 //! The OpenXR session: loader, lifecycle events, the panel swapchain and
 //! the per-frame wait / begin / end.
 
+use crate::math::{self, Mat4};
 use crate::{XrError, XrGpu};
 use ash::vk::{self, Handle};
 use openxr as xr;
@@ -47,10 +48,42 @@ pub struct FrameTime {
     pub period_ns: i64,
 }
 
+/// One eye of the stereo world layer for the frame being drawn.
+pub struct Eye<'a> {
+    /// Render target (one layer of the eye swapchain).
+    pub target: &'a wgpu::TextureView,
+    /// World → eye for the predicted head pose (`math::view`), in the
+    /// seated space.
+    pub view: Mat4,
+    /// Eye → clip for this eye's field of view (`math::projection`).
+    pub projection: Mat4,
+}
+
+/// What to draw into this frame; handed to the `draw` callback.
+pub struct Frame<'a> {
+    pub time: FrameTime,
+    /// The flat panel's texture, when [`Layers::panel`] is set.
+    pub panel: Option<&'a wgpu::TextureView>,
+    /// Left and right eye, when [`Layers::world`] is set.
+    pub eyes: Option<[Eye<'a>; 2]>,
+}
+
+/// Which layers a frame shows: the stereo world (drawn first, behind) and
+/// the flat panel in front of it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Layers {
+    pub world: bool,
+    pub panel: Option<Panel>,
+}
+
+/// Near and far planes of the eye projections, in metres.
+const NEAR: f32 = 0.05;
+const FAR: f32 = 1000.0;
+
 /// What [`XrContext::frame`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameOutcome {
-    /// The panel was drawn and shown.
+    /// The layers were drawn and shown.
     Rendered,
     /// The session is running but nothing is visible (headset off the
     /// head, system menu): no draw this frame.
@@ -61,9 +94,10 @@ pub enum FrameOutcome {
     Quit,
 }
 
-struct PanelSwapchain {
+/// A swapchain and its images as wgpu views: `views[image][layer]`.
+struct Swapchain {
     handle: xr::Swapchain<xr::Vulkan>,
-    views: Vec<wgpu::TextureView>,
+    views: Vec<Vec<wgpu::TextureView>>,
     size_px: (u32, u32),
 }
 
@@ -72,7 +106,9 @@ struct PanelSwapchain {
 /// Field order matters: the OpenXR objects drop before `gpu`, whose device
 /// they were created on.
 pub struct XrContext {
-    panel: PanelSwapchain,
+    panel: Swapchain,
+    /// Both eyes: one image with two array layers.
+    eyes: Swapchain,
     space: xr::Space,
     frame_stream: xr::FrameStream<xr::Vulkan>,
     frame_waiter: xr::FrameWaiter,
@@ -194,10 +230,23 @@ impl XrContext {
         .into_iter()
         .find(|(f, _)| formats.contains(&(f.as_raw() as u32)))
         .ok_or_else(|| XrError::Unsupported("an 8-bit sRGB swapchain format".into()))?;
-        let panel = create_panel(&session, &gpu.device, vk_format, format, panel.size_px)?;
+        let panel = create_swapchain(&session, &gpu.device, vk_format, format, panel.size_px, 1)?;
+        // The size the runtime recommends for one eye.
+        let eye = instance
+            .enumerate_view_configuration_views(system, VIEW_TYPE)?
+            .first()
+            .map(|v| {
+                (
+                    v.recommended_image_rect_width,
+                    v.recommended_image_rect_height,
+                )
+            })
+            .ok_or_else(|| XrError::Unsupported("a stereo view configuration".into()))?;
+        let eyes = create_swapchain(&session, &gpu.device, vk_format, format, eye, 2)?;
 
         Ok(Self {
             panel,
+            eyes,
             space,
             frame_stream,
             frame_waiter,
@@ -216,14 +265,15 @@ impl XrContext {
         &self.gpu
     }
 
-    /// The panel texture's format (what `draw` in [`Self::frame`] targets).
-    pub fn panel_format(&self) -> wgpu::TextureFormat {
+    /// The format of the panel and eye textures (what `draw` in
+    /// [`Self::frame`] targets).
+    pub fn format(&self) -> wgpu::TextureFormat {
         self.format
     }
 
-    /// How many images the panel swapchain cycles through, for logs.
-    pub fn panel_image_count(&self) -> usize {
-        self.panel.views.len()
+    /// One eye's render size in pixels (the runtime's recommendation).
+    pub fn eye_size(&self) -> (u32, u32) {
+        self.eyes.size_px
     }
 
     /// The runtime's name and version, for logs.
@@ -264,13 +314,13 @@ impl XrContext {
     }
 
     /// One headset frame: blocks until the runtime wants it (its display
-    /// rate), then shows the panel. `draw` renders into the panel texture
-    /// and must submit its commands to the queue before returning; it is
-    /// only called for [`FrameOutcome::Rendered`].
+    /// rate), then shows `layers`. `draw` renders into the targets in its
+    /// [`Frame`] and must submit its commands to the queue before
+    /// returning; it is only called for [`FrameOutcome::Rendered`].
     pub fn frame(
         &mut self,
-        panel: &Panel,
-        draw: impl FnOnce(&wgpu::TextureView, FrameTime),
+        layers: &Layers,
+        draw: impl FnOnce(Frame<'_>),
     ) -> Result<FrameOutcome, XrError> {
         if !self.poll_events()? {
             return Ok(FrameOutcome::Quit);
@@ -285,64 +335,140 @@ impl XrContext {
                 .end(state.predicted_display_time, self.blend_mode, &[])?;
             return Ok(FrameOutcome::Hidden);
         }
-        let index = self.panel.handle.acquire_image()? as usize;
-        self.panel.handle.wait_image(xr::Duration::INFINITE)?;
-        draw(
-            &self.panel.views[index],
-            FrameTime {
+        // Where the eyes will be when this frame is shown.
+        let located = if layers.world {
+            let (_, views) =
+                self.session
+                    .locate_views(VIEW_TYPE, state.predicted_display_time, &self.space)?;
+            (views.len() == 2).then_some(views)
+        } else {
+            None
+        };
+        let eye_image = match &located {
+            Some(_) => {
+                let i = self.eyes.handle.acquire_image()? as usize;
+                self.eyes.handle.wait_image(xr::Duration::INFINITE)?;
+                Some(i)
+            }
+            None => None,
+        };
+        let panel_image = match layers.panel {
+            Some(_) => {
+                let i = self.panel.handle.acquire_image()? as usize;
+                self.panel.handle.wait_image(xr::Duration::INFINITE)?;
+                Some(i)
+            }
+            None => None,
+        };
+        let eyes = located.as_ref().zip(eye_image).map(|(views, image)| {
+            [0, 1].map(|i| {
+                let (p, o, f) = (
+                    views[i].pose.position,
+                    views[i].pose.orientation,
+                    views[i].fov,
+                );
+                Eye {
+                    target: &self.eyes.views[image][i],
+                    view: math::view([o.x, o.y, o.z, o.w], [p.x, p.y, p.z]),
+                    projection: math::projection(
+                        f.angle_left,
+                        f.angle_right,
+                        f.angle_up,
+                        f.angle_down,
+                        NEAR,
+                        FAR,
+                    ),
+                }
+            })
+        });
+        draw(Frame {
+            time: FrameTime {
                 display_ns: state.predicted_display_time.as_nanos(),
                 period_ns: state.predicted_display_period.as_nanos(),
             },
-        );
-        // Wait until the GPU has finished the draw before giving the image
-        // back. Over Quest Link the compositor otherwise sometimes shows the
-        // image's previous content (three frames old with three images):
-        // small backward hops in anything that moves.
-        let _ = self.gpu.device.poll(wgpu::PollType::wait_indefinitely());
-        self.panel.handle.release_image()?;
+            panel: panel_image.map(|i| &self.panel.views[i][0]),
+            eyes,
+        });
+        if eye_image.is_some() {
+            self.eyes.handle.release_image()?;
+        }
+        if panel_image.is_some() {
+            self.panel.handle.release_image()?;
+        }
 
-        let (w, h) = self.panel.size_px;
-        let layer = xr::CompositionLayerQuad::new()
-            .space(&self.space)
-            .eye_visibility(xr::EyeVisibility::BOTH)
-            .sub_image(
-                xr::SwapchainSubImage::new()
-                    .swapchain(&self.panel.handle)
-                    .image_array_index(0)
-                    .image_rect(xr::Rect2Di {
-                        offset: xr::Offset2Di { x: 0, y: 0 },
-                        extent: xr::Extent2Di {
-                            width: w as i32,
-                            height: h as i32,
-                        },
-                    }),
-            )
-            .pose(xr::Posef {
-                orientation: xr::Quaternionf::IDENTITY,
-                position: xr::Vector3f {
-                    x: 0.0,
-                    y: panel.height_m,
-                    z: -panel.distance_m,
-                },
+        let rect = |size: (u32, u32)| xr::Rect2Di {
+            offset: xr::Offset2Di { x: 0, y: 0 },
+            extent: xr::Extent2Di {
+                width: size.0 as i32,
+                height: size.1 as i32,
+            },
+        };
+        let projection_views = located.as_ref().map(|views| {
+            [0usize, 1].map(|i| {
+                xr::CompositionLayerProjectionView::new()
+                    .pose(views[i].pose)
+                    .fov(views[i].fov)
+                    .sub_image(
+                        xr::SwapchainSubImage::new()
+                            .swapchain(&self.eyes.handle)
+                            .image_array_index(i as u32)
+                            .image_rect(rect(self.eyes.size_px)),
+                    )
             })
-            .size(xr::Extent2Df {
-                width: panel.width_m,
-                height: panel.width_m * h as f32 / w as f32,
-            });
+        });
+        let world_layer = projection_views.as_ref().map(|views| {
+            xr::CompositionLayerProjection::new()
+                .space(&self.space)
+                .views(views)
+        });
+        let panel_layer = layers.panel.filter(|_| panel_image.is_some()).map(|panel| {
+            let (w, h) = self.panel.size_px;
+            xr::CompositionLayerQuad::new()
+                .space(&self.space)
+                .eye_visibility(xr::EyeVisibility::BOTH)
+                .sub_image(
+                    xr::SwapchainSubImage::new()
+                        .swapchain(&self.panel.handle)
+                        .image_array_index(0)
+                        .image_rect(rect(self.panel.size_px)),
+                )
+                .pose(xr::Posef {
+                    orientation: xr::Quaternionf::IDENTITY,
+                    position: xr::Vector3f {
+                        x: 0.0,
+                        y: panel.height_m,
+                        z: -panel.distance_m,
+                    },
+                })
+                .size(xr::Extent2Df {
+                    width: panel.width_m,
+                    height: panel.width_m * h as f32 / w as f32,
+                })
+        });
+        // Back to front: the world, then the panel over it.
+        let mut submit: Vec<&xr::CompositionLayerBase<'_, xr::Vulkan>> = Vec::new();
+        if let Some(l) = &world_layer {
+            submit.push(l);
+        }
+        if let Some(l) = &panel_layer {
+            submit.push(l);
+        }
         self.frame_stream
-            .end(state.predicted_display_time, self.blend_mode, &[&layer])?;
+            .end(state.predicted_display_time, self.blend_mode, &submit)?;
         Ok(FrameOutcome::Rendered)
     }
 }
 
-/// The panel's swapchain, its images wrapped as wgpu texture views.
-fn create_panel(
+/// A colour swapchain with `layers` array layers, its images wrapped as
+/// wgpu texture views (one per image and layer).
+fn create_swapchain(
     session: &xr::Session<xr::Vulkan>,
     device: &wgpu::Device,
     vk_format: vk::Format,
     format: wgpu::TextureFormat,
     size_px: (u32, u32),
-) -> Result<PanelSwapchain, XrError> {
+    layers: u32,
+) -> Result<Swapchain, XrError> {
     let handle = session.create_swapchain(&xr::SwapchainCreateInfo {
         create_flags: xr::SwapchainCreateFlags::EMPTY,
         usage_flags: xr::SwapchainUsageFlags::COLOR_ATTACHMENT | xr::SwapchainUsageFlags::SAMPLED,
@@ -351,13 +477,13 @@ fn create_panel(
         width: size_px.0,
         height: size_px.1,
         face_count: 1,
-        array_size: 1,
+        array_size: layers,
         mip_count: 1,
     })?;
     let size = wgpu::Extent3d {
         width: size_px.0,
         height: size_px.1,
-        depth_or_array_layers: 1,
+        depth_or_array_layers: layers,
     };
     let views = handle
         .enumerate_images()?
@@ -365,8 +491,8 @@ fn create_panel(
         .map(|image| {
             // SAFETY: the image belongs to the swapchain created with this
             // size, format and usage; the no-op drop callback leaves it to
-            // the runtime, and `PanelSwapchain` keeps the swapchain alive
-            // as long as the views.
+            // the runtime, and `Swapchain` keeps the swapchain alive as
+            // long as the views.
             let texture = unsafe {
                 let hal_device = device
                     .as_hal::<Vulkan>()
@@ -374,7 +500,7 @@ fn create_panel(
                 let hal_texture = hal_device.texture_from_raw(
                     vk::Image::from_raw(image),
                     &hal::TextureDescriptor {
-                        label: Some("openxr panel"),
+                        label: Some("openxr swapchain"),
                         size,
                         mip_level_count: 1,
                         sample_count: 1,
@@ -389,7 +515,7 @@ fn create_panel(
                 device.create_texture_from_hal::<Vulkan>(
                     hal_texture,
                     &wgpu::TextureDescriptor {
-                        label: Some("openxr panel"),
+                        label: Some("openxr swapchain"),
                         size,
                         mip_level_count: 1,
                         sample_count: 1,
@@ -401,10 +527,19 @@ fn create_panel(
                     },
                 )
             };
-            Ok(texture.create_view(&wgpu::TextureViewDescriptor::default()))
+            Ok((0..layers)
+                .map(|layer| {
+                    texture.create_view(&wgpu::TextureViewDescriptor {
+                        dimension: Some(wgpu::TextureViewDimension::D2),
+                        base_array_layer: layer,
+                        array_layer_count: Some(1),
+                        ..Default::default()
+                    })
+                })
+                .collect())
         })
         .collect::<Result<Vec<_>, XrError>>()?;
-    Ok(PanelSwapchain {
+    Ok(Swapchain {
         handle,
         views,
         size_px,
