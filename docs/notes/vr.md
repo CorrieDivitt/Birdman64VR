@@ -1,8 +1,31 @@
 # VR (Birdman64VR): `crates/pw64-xr`
 
-Status: OpenXR session, Vulkan device through the runtime, a stereo world
-layer and one quad-layer panel (`examples/panel.rs` test pattern). Not wired
-into the game yet.
+Status: `--vr` (or `PW64_VR=1`) shows the flat game on a panel in the headset
+(virtual screen); the world is not in stereo yet. `pw64-xr` = OpenXR session,
+Vulkan device through the runtime, a stereo world layer and an optional
+quad-layer panel.
+
+## Game hookup (`crates/birdman64/src/vr.rs`, window.rs)
+- `App::start`: `vr::requested()` → `Vr::connect` builds the `GpuContext` on
+  the runtime's device (the window surface is created from the same wgpu
+  instance; wgpu-hal's `desired_extensions` include the surface ones). Any
+  error → log + toast + the flat path.
+- **Panel texture:** `App::redraw` draws the frame, toasts and the settings
+  overlay into `Vr::target` (surface format and size, so every pass is
+  unchanged) instead of the surface, then blits it to the surface (desktop
+  mirror). ROM/setup screens still draw to the surface only.
+- **Headset thread** (`pw64-xr`, started by the first `target` call): every
+  headset frame it draws the latest panel texture as a rectangle in both eyes
+  (2.175 m high, 2.5 m ahead, width from the aspect) with the predicted head
+  pose. It never waits for the game or window. Panel values are
+  display-encoded in a non-sRGB format, the eye target is sRGB: the shader
+  decodes.
+- **Pacing:** `vr::headset_mhz()` (from the frame period) overrides
+  `monitor_mhz`, so `fps = monitor` runs the game at the headset rate;
+  V-Sync is forced off. Free-running, not phase-locked to the headset yet.
+- **Reconfigure:** `Gpu::configure_surface` takes `vr::gate()` (the headset
+  thread holds it while it draws and submits) and polls the device idle.
+- A minimised window stops redraws, so the headset picture freezes.
 
 ## Bring-up
 - **Loader:** `openxr` crate 0.22, feature `loaded` only: `openxr_loader` is

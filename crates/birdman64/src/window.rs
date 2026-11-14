@@ -86,6 +86,15 @@ pub fn request_pause() {
     }
 }
 
+/// Birdman64VR: the VR runtime ended the session (quit from the headset's
+/// menu): leave like a normal game stop.
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+pub fn request_quit() {
+    if let Some(p) = PROXY.get() {
+        let _ = p.send_event(UserEvent::Stopped(0, String::new()));
+    }
+}
+
 /// Framebuffer work queued by the game thread (`hle::FrameSink`).
 #[derive(Default)]
 struct Queued {
@@ -410,7 +419,14 @@ impl Gpu {
             "[window] surface configure {}x{} {:?}",
             self.config.width, self.config.height, self.config.present_mode
         );
+        // Birdman64VR: the headset thread submits work all the time; hold it
+        // off and let the GPU come idle first (see `refresh_present`).
+        let gate = crate::vr::gate();
+        if gate.is_some() {
+            let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        }
         surface.configure(&self.device, &self.config);
+        drop(gate);
     }
 
     /// The next surface texture, or `None` (no surface, or a failed acquire:
@@ -529,6 +545,9 @@ struct App {
     proxy: EventLoopProxy<UserEvent>,
     slot: Slot,
     gpu: Option<Gpu>,
+    /// Birdman64VR: the VR mode while it runs (vr.rs). The redraw then
+    /// draws into its panel texture and the window shows a copy.
+    vr: Option<crate::vr::Vr>,
     /// The framebuffer the game last swapped to (None: nothing yet).
     shown: Option<u32>,
     modifiers: ModifiersState,
@@ -650,6 +669,7 @@ pub fn run(setup: bool, ask_rom: bool) -> ! {
         proxy: el.create_proxy(),
         slot: Arc::default(),
         gpu: None,
+        vr: None,
         shown: None,
         modifiers: ModifiersState::empty(),
         fps_timer: Instant::now(),
@@ -771,6 +791,11 @@ fn queue_rate(
 /// `android.rs` reads it via JNI (None until the first read, about a second
 /// after start; the 1 s present re-read then switches to the present tick).
 pub(crate) fn monitor_mhz(window: &Window) -> Option<u32> {
+    // Birdman64VR: while the headset shows frames, its rate is the one the
+    // game follows (one game frame per headset frame).
+    if let Some(mhz) = crate::vr::headset_mhz() {
+        return Some(mhz);
+    }
     #[cfg(target_os = "android")]
     {
         let _ = window;
@@ -905,13 +930,31 @@ impl App {
         }
         // Instance, surface, adapter and device (gpu_context.rs; VR mode
         // will build these on the OpenXR runtime's device instead).
+        // Birdman64VR (`--vr`): the device the OpenXR runtime picks; any
+        // failure (no runtime, no headset) starts the flat game instead.
+        let (context, vr) = if crate::vr::requested() {
+            match crate::vr::Vr::connect(&window) {
+                Ok((context, vr)) => (context, Some(vr)),
+                Err(e) => {
+                    eprintln!("[vr] not available: {e}; starting on the monitor");
+                    self.toast.show(
+                        &format!("VR is not available: {e}. Playing on the monitor."),
+                        10,
+                    );
+                    (GpuContext::for_window(&window), None)
+                }
+            }
+        } else {
+            (GpuContext::for_window(&window), None)
+        };
+        self.vr = vr;
         let GpuContext {
             instance,
             surface,
             adapter,
             device,
             queue,
-        } = GpuContext::for_window(&window);
+        } = context;
         // Only Android keeps the instance (surface recreation on resume).
         #[cfg(not(target_os = "android"))]
         drop(instance);
@@ -957,7 +1000,8 @@ impl App {
         }
         // Game frame rate (`PW64_FPS`, default: this monitor's refresh) and
         // V-Sync (`PW64_VSYNC`, default off — matrix in framerate.md).
-        let vsync = opts::vsync();
+        // VR: never block on the monitor's vblank; the headset sets the pace.
+        let vsync = opts::vsync() && self.vr.is_none();
         let fps = opts::fps(true);
         let monitor = monitor_mhz(&window);
         let rate = opts::present_rate(fps, monitor, vsync);
@@ -1379,7 +1423,18 @@ impl App {
             }
             return;
         };
-        let view = tex.texture.create_view(&Default::default());
+        let surface_view = tex.texture.create_view(&Default::default());
+        // Birdman64VR: draw this frame into the VR panel texture (same
+        // format and size as the surface); the headset thread shows it and
+        // the window gets a copy just before the present below.
+        let panel_view = self.vr.as_mut().and_then(|vr| {
+            vr.target(
+                &g.device,
+                g.config.format,
+                (g.config.width, g.config.height),
+            )
+        });
+        let view = panel_view.clone().unwrap_or_else(|| surface_view.clone());
         // W6: a display switch fell back (unsupported exclusive mode).
         if let Some(msg) = g.notice.take() {
             self.toast.show(&msg, 8);
@@ -1476,6 +1531,11 @@ impl App {
             }
             quit(0);
         }
+        // Birdman64VR: the desktop mirror.
+        if panel_view.is_some() {
+            g.renderer
+                .blit(&view, &surface_view, wgpu::FilterMode::Nearest);
+        }
         g.window.pre_present_notify();
         tex.present();
         self.perf.presented();
@@ -1489,6 +1549,7 @@ impl App {
         // with Mailbox → Fifo). `present()` consumes the texture (its
         // output goes away with it); the view still holds a reference.
         drop(view);
+        drop(surface_view);
         if g.present_dirty {
             g.present_dirty = false;
             let rate = g.refresh_present();

@@ -86,6 +86,8 @@ uuid = "1"
 cc = "1.2"
 corosensei = "0.3"
 # Shared C-build plumbing: pw64-game build.rs + the first-run builder.
+# Birdman64VR: OpenXR session + frame loop (crates/birdman64/src/vr.rs).
+pw64-xr = { path = "crates/pw64-xr" }
 pw64-cbuild = { path = "crates/pw64-cbuild" }# Linux: mmap of the fixed-address RDRAM window / coroutine stacks, SIGSEGV tracer.
 libc = "0.2"
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Diagnostics_Debug", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Kernel", "Win32_System_Threading"] }

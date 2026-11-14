@@ -117,7 +117,6 @@ pub struct XrContext {
     blend_mode: xr::EnvironmentBlendMode,
     format: wgpu::TextureFormat,
     running: bool,
-    events: xr::EventDataBuffer,
     gpu: XrGpu,
 }
 
@@ -255,7 +254,6 @@ impl XrContext {
             blend_mode,
             format,
             running: false,
-            events: xr::EventDataBuffer::new(),
             gpu,
         })
     }
@@ -286,7 +284,10 @@ impl XrContext {
 
     /// Session lifecycle: begin on READY, end on STOPPING. `false` = quit.
     fn poll_events(&mut self) -> Result<bool, XrError> {
-        while let Some(event) = self.instance.poll_event(&mut self.events)? {
+        // Local: the buffer holds raw pointers, which would make the
+        // context impossible to move to the headset thread.
+        let mut events = xr::EventDataBuffer::new();
+        while let Some(event) = self.instance.poll_event(&mut events)? {
             use xr::Event::*;
             match event {
                 SessionStateChanged(e) => {

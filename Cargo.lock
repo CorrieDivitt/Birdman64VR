@@ -353,6 +353,7 @@ dependencies = [
  "pw64-gfx",
  "pw64-platform",
  "pw64-rom",
+ "pw64-xr",
  "resvg",
  "rfd",
  "serde",

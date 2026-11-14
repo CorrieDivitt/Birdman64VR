@@ -57,6 +57,7 @@ mod sys;
 mod toast;
 mod touch;
 pub mod unlock;
+mod vr;
 mod window;
 
 use pw64_platform::{headless, os};
@@ -104,7 +105,12 @@ pub fn desktop_main() {
         }
         return;
     }
-    let rom_arg = std::env::args_os().nth(1).map(std::path::PathBuf::from);
+    // Birdman64VR: `--vr` anywhere on the command line asks for the VR
+    // mode (vr.rs); the first other argument is the ROM path, as before.
+    let vr = std::ffi::OsStr::new("--vr");
+    vr::set_requested(std::env::args_os().skip(1).any(|a| a == vr));
+    let first = std::env::args_os().skip(1).find(|a| a != vr);
+    let rom_arg = first.clone().map(std::path::PathBuf::from);
     start(first.as_deref(), rom_arg);
 }
 

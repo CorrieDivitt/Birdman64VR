@@ -75,6 +75,11 @@ objc2-game-controller.workspace = true
 winit = { workspace = true, features = ["android-native-activity"] }
 jni = "0.22.4"
 
+# Birdman64VR: the VR mode (vr.rs). PC VR runs on Windows and Linux; the
+# Quest build will add Android here.
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+pw64-xr.workspace = true
+
 # Process CPU time for the performance overlay (perf.rs).
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
