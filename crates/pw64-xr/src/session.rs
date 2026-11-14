@@ -294,6 +294,11 @@ impl XrContext {
                 period_ns: state.predicted_display_period.as_nanos(),
             },
         );
+        // Wait until the GPU has finished the draw before giving the image
+        // back. Over Quest Link the compositor otherwise sometimes shows the
+        // image's previous content (three frames old with three images):
+        // small backward hops in anything that moves.
+        let _ = self.gpu.device.poll(wgpu::PollType::wait_indefinitely());
         self.panel.handle.release_image()?;
 
         let (w, h) = self.panel.size_px;
