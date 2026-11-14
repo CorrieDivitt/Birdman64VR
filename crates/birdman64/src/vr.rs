@@ -61,9 +61,11 @@ pub(crate) enum Stage {
     Present,
     /// The game thread held back because the window had not caught up.
     GameWait,
+    /// The time between two new game frames reaching the window.
+    GameGap,
 }
 
-const STAGES: usize = 5;
+const STAGES: usize = 6;
 #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 const STAGE_NAMES: [&str; STAGES] = [
     "game draw",
@@ -71,6 +73,7 @@ const STAGE_NAMES: [&str; STAGES] = [
     "frame draw",
     "window present",
     "game held back",
+    "gap between game frames",
 ];
 static STAGE_MAX_US: [AtomicU32; STAGES] = [const { AtomicU32::new(0) }; STAGES];
 
@@ -82,12 +85,25 @@ pub(crate) fn note(stage: Stage, d: std::time::Duration) {
     }
 }
 
-/// Frames the window presented since the headset thread's last report.
-static REDRAWS: AtomicU32 = AtomicU32::new(0);
+/// New game frames that reached the window since the headset thread's
+/// last report, and when the last one did.
+static GAME_FRAMES: AtomicU32 = AtomicU32::new(0);
+static LAST_GAME_FRAME: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
-/// A game frame went out to the panel and the mirror (window.rs).
-pub(crate) fn count_redraw() {
-    REDRAWS.fetch_add(1, Ordering::Relaxed);
+/// `n` new game frames reached the window (window.rs `drain`).
+pub(crate) fn count_frames(n: u32) {
+    if !active() {
+        return;
+    }
+    GAME_FRAMES.fetch_add(n, Ordering::Relaxed);
+    let now = std::time::Instant::now();
+    let last = LAST_GAME_FRAME
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .replace(now);
+    if let Some(t) = last {
+        note(Stage::GameGap, now - t);
+    }
 }
 
 #[cfg(any(windows, target_os = "linux"))]
@@ -128,7 +144,7 @@ mod real {
     use pw64_xr::math::{self, Mat4};
     use pw64_xr::{FrameOutcome, Layers, Panel, XrContext};
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Condvar, Mutex, OnceLock};
     use std::time::{Duration, Instant};
     use winit::window::Window;
 
@@ -136,6 +152,46 @@ mod real {
     static STOP: AtomicBool = AtomicBool::new(false);
     static DONE: AtomicBool = AtomicBool::new(false);
     static STARTED: AtomicBool = AtomicBool::new(false);
+
+    /// How long before the next headset frame the game is cued to show its
+    /// newest frame (`PW64_VR_LEAD_MS`, default 6). The cue latches the
+    /// frame the game finished and the window then draws it into the panel;
+    /// that must be done when the headset thread samples the panel. A
+    /// longer lead is safer against a late (repeated) frame, a shorter one
+    /// has less input lag.
+    fn lead() -> Duration {
+        static LEAD: OnceLock<Duration> = OnceLock::new();
+        *LEAD.get_or_init(|| {
+            let ms = std::env::var("PW64_VR_LEAD_MS")
+                .ok()
+                .and_then(|v| v.parse::<f64>().ok())
+                .filter(|v| (0.0..=50.0).contains(v))
+                .unwrap_or(6.0);
+            Duration::from_secs_f64(ms / 1e3)
+        })
+    }
+
+    /// When the game's next cue is due (set per headset frame).
+    static CUE_AT: Mutex<Option<Instant>> = Mutex::new(None);
+    static CUE_SET: Condvar = Condvar::new();
+
+    /// Ticks `os::vi::VBLANK` (the game's display-pacing cue, window.rs
+    /// `App::start`) at the times the headset thread sets.
+    fn cue_thread() {
+        loop {
+            let at = {
+                let mut cue = CUE_AT.lock().unwrap_or_else(|e| e.into_inner());
+                loop {
+                    if let Some(at) = cue.take() {
+                        break at;
+                    }
+                    cue = CUE_SET.wait(cue).unwrap_or_else(|e| e.into_inner());
+                }
+            };
+            std::thread::sleep(at.saturating_duration_since(Instant::now()));
+            pw64_platform::os::vi::VBLANK.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 
     /// `[vr]` lines go to stderr and to `vr.log` in the data folder (a new
     /// file per run), so a headset session can be looked at afterwards.
@@ -338,6 +394,9 @@ fn fs(v: V) -> @location(0) vec4<f32> {
 
     /// Runs until the runtime ends the session or fails.
     fn headset_thread(mut xr: XrContext, source: Arc<Mutex<Source>>) {
+        let _ = std::thread::Builder::new()
+            .name("pw64-xr-cue".into())
+            .spawn(cue_thread);
         let device = xr.gpu().device.clone();
         let queue = xr.gpu().queue.clone();
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -393,10 +452,14 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         let started = Instant::now();
         while !STOP.load(Ordering::Relaxed) {
             let outcome = xr.frame(&layers, Some(&pw64_gfx::QUEUE_GATE), |frame| {
-                // A headset frame starts: the game's cue for its next frame
-                // (display pacing, window.rs `App::start`). It then has one
-                // headset frame's time to reach the panel texture.
-                pw64_platform::os::vi::VBLANK.fetch_add(1, Ordering::Relaxed);
+                // A headset frame starts. Cue the game `lead()` before the
+                // next one starts (display pacing, window.rs `App::start`):
+                // its newest frame then reaches the panel just in time to
+                // be sampled, and it starts the frame after.
+                let period = Duration::from_nanos(frame.time.period_ns.max(0) as u64);
+                *CUE_AT.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(Instant::now() + period.saturating_sub(lead()));
+                CUE_SET.notify_one();
                 let mhz = (1e12 / frame.time.period_ns.max(1) as f64).round() as u32;
                 HEADSET_MHZ.store(mhz.max(1), Ordering::Relaxed);
                 let Some(eyes) = frame.eyes else { return };
@@ -524,10 +587,11 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     .zip(&stages)
                     .map(|(name, v)| format!("{name} {v:.1}"))
                     .collect();
-                let game_fps = super::REDRAWS.swap(0, Ordering::Relaxed) as f64 / secs;
+                let game_fps = super::GAME_FRAMES.swap(0, Ordering::Relaxed) as f64 / secs;
                 let hitch = ms(worst_gap) > period_ms * 1.8
                     || ms(worst_wait) > 4.0
-                    || stages[super::Stage::GameWait as usize] > 4.0;
+                    || stages[super::Stage::GameWait as usize] > 4.0
+                    || stages[super::Stage::GameGap as usize] > period_ms * 2.5;
                 log(
                     &format!(
                         "{}t {:.0} s: headset {:.0} fps (frame {period_ms:.1} ms, longest gap \

@@ -1370,6 +1370,7 @@ impl App {
             self.shown = q.show;
         }
         if q.frames > 0 {
+            crate::vr::count_frames(q.frames);
             self.frames += q.frames;
             self.perf.frames(q.frames as u32);
             self.presented += 1;
@@ -1569,7 +1570,6 @@ impl App {
         g.window.pre_present_notify();
         present(tex);
         crate::vr::note(crate::vr::Stage::Present, timing.elapsed());
-        crate::vr::count_redraw();
         self.perf.presented();
         // A frame went out: the OS core's Display pacing (V-Sync) ticks on
         // this counter (crates/pw64-platform/src/os/vi.rs).

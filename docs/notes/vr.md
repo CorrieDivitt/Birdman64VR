@@ -31,6 +31,14 @@ quad-layer panel.
   With every stage on time (`vr.log`: headset 72 fps, gaps ≤ 14.4 ms, game 72
   fps, nothing waiting) play still stuttered for 1 to 2 s about every 15 s:
   the two 72 Hz clocks drifting through each other.
+- **Input lag:** a tick latches the frame the game finished after the
+  previous tick, then the window draws it into the panel and the next headset
+  frame samples it. Ticking at the headset frame's start cost almost two
+  periods before the sample (felt as bad input lag at 72 Hz, on top of the
+  compositor and Link). The headset thread now schedules the tick
+  `PW64_VR_LEAD_MS` (default 6) before the next headset frame (`cue_thread`),
+  so the latched frame reaches the panel just before it is sampled: about
+  one period + lead. Too short a lead shows as repeated frames.
 - **Queue lock (`pw64_gfx::QUEUE_GATE`, `XrContext::frame`'s `queue_lock`):**
   `XR_KHR_vulkan_enable2` lets the runtime use our VkQueue in begin/end frame
   and swapchain acquire/release and forbids any other use meanwhile; wgpu
