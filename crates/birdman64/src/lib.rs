@@ -23,6 +23,7 @@ mod ble;
 mod config;
 #[cfg(feature = "first-run")]
 mod firstrun;
+mod gpu_context;
 mod hle;
 mod hud_edit;
 mod input;

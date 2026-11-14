@@ -15,6 +15,7 @@
 //! Close: `QUIT` → the game thread parks at its next retrace → exit without
 //! dropping GPU state (NVIDIA teardown crash, native-build.md §8).
 
+use crate::gpu_context::GpuContext;
 use crate::{PARKED, QUIT, config, input, opts, paths, settings};
 use pw64_gfx::{FbOp, RenderOptions, Renderer, Widescreen};
 use pw64_platform::os;
@@ -902,29 +903,18 @@ impl App {
                 mp.y + ((ms.height.saturating_sub(outer.height)) / 2) as i32,
             ));
         }
-        // Dev switch (L1): force the software adapter (WARP on DX12) to test
-        // the low-end preset.
-        let force_fallback = std::env::var_os("PW64_FALLBACK_ADAPTER").is_some();
-        let instance = wgpu::Instance::default();
-        let surface = instance.create_surface(window.clone()).unwrap_or_else(|e| {
-            crate::fatal(&format!(
-                "Birdman64 could not set up graphics for its window. Updating your \
-                 graphics driver may help. ({e})"
-            ))
-        });
-        let adapter = pw64_gfx::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: force_fallback,
-        }));
-        let adapter = match adapter {
-            Ok(a) => a,
-            Err(e) => crate::fatal(&format!(
-                "No compatible graphics adapter was found. Birdman64 needs a GPU with \
-                 Vulkan, DirectX 12 or OpenGL support. Updating your graphics driver may \
-                 help. ({e})"
-            )),
-        };
+        // Instance, surface, adapter and device (gpu_context.rs; VR mode
+        // will build these on the OpenXR runtime's device instead).
+        let GpuContext {
+            instance,
+            surface,
+            adapter,
+            device,
+            queue,
+        } = GpuContext::for_window(&window);
+        // Only Android keeps the instance (surface recreation on resume).
+        #[cfg(not(target_os = "android"))]
+        drop(instance);
         // Low-end preset (L1): a software rasteriser gets gentler defaults
         // (60 fps, 75% render resolution); explicit settings still win.
         // Must run before the first `opts::fps` / `opts::scale` read.
@@ -941,15 +931,6 @@ impl App {
                 10,
             );
         }
-        let (device, queue) =
-            pw64_gfx::block_on(adapter.request_device(&pw64_gfx::device_descriptor(&adapter)))
-                .unwrap_or_else(|e| {
-                    crate::fatal(&format!(
-                        "Birdman64 could not set up the graphics device ({}). Updating your \
-                 graphics driver may help. ({e})",
-                        adapter.get_info().name
-                    ))
-                });
         let mut caps = surface.get_capabilities(&adapter);
         let wayland = {
             use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
