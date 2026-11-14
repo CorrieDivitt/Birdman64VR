@@ -1570,8 +1570,12 @@ impl App {
             }
             quit(0);
         }
-        // Birdman64VR: the desktop mirror.
+        // Birdman64VR: the latency probe's bar (off unless asked for), then
+        // the desktop mirror.
         if panel_view.is_some() {
+            if let Some(vr) = &mut self.vr {
+                vr.probe(&g.device, &g.queue, &view);
+            }
             g.renderer
                 .blit(&view, &surface_view, wgpu::FilterMode::Nearest);
         }

@@ -198,6 +198,8 @@ mod stub {
         ) -> Option<wgpu::TextureView> {
             None
         }
+
+        pub(crate) fn probe(&mut self, _: &wgpu::Device, _: &wgpu::Queue, _: &wgpu::TextureView) {}
     }
 }
 
@@ -311,6 +313,8 @@ mod real {
         xr: Option<XrContext>,
         source: Arc<Mutex<Source>>,
         panel: Option<(wgpu::Texture, wgpu::TextureView)>,
+        /// The window thread's probe bar (`probe_on`).
+        probe: Option<Bar>,
     }
 
     impl Vr {
@@ -353,6 +357,7 @@ mod real {
                     xr: Some(xr),
                     source: Arc::default(),
                     panel: None,
+                    probe: None,
                 },
             ))
         }
@@ -406,7 +411,169 @@ mod real {
             }
             self.panel.as_ref().map(|(_, v)| v.clone())
         }
+
+        /// Latency probe ([`probe_on`]): the window thread's bar, drawn
+        /// over the finished frame in the panel.
+        pub(crate) fn probe(
+            &mut self,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            panel: &wgpu::TextureView,
+        ) {
+            if !probe_on() {
+                return;
+            }
+            let format = panel.texture().format();
+            let bar = self
+                .probe
+                .get_or_insert_with(|| Bar::new(device, format, 1));
+            // The panel fills the target: its half-extents are 1 in clip space.
+            let mvp = math::translate_scale(
+                [(probe_phase() - 0.5) * 2.0, PROBE_Y_WINDOW * 2.0, 0.0],
+                [PROBE_SIZE[0] * 2.0, PROBE_SIZE[1] * 2.0, 1.0],
+            );
+            let mut encoder = device.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("vr probe"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: panel,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                bar.draw(queue, &mut pass, 0, &mvp, [1.0, 1.0, 1.0, 1.0]);
+            }
+            pw64_gfx::submit(queue, [encoder.finish()]);
+        }
     }
+
+    /// Latency probe (`PW64_VR_PROBE=1`): two bars sweeping across the top
+    /// of the panel every two seconds, both placed from the same clock.
+    /// The white one is drawn by the window thread into the panel texture,
+    /// like the game frame; the orange one, just above it, by the headset
+    /// thread straight into the eye images. Seen in the headset, a white
+    /// bar trailing the orange one is delay on the way through the panel;
+    /// both together but late is delay after the headset thread (runtime,
+    /// video stream).
+    fn probe_on() -> bool {
+        static ON: OnceLock<bool> = OnceLock::new();
+        *ON.get_or_init(|| std::env::var_os("PW64_VR_PROBE").is_some_and(|v| v != "0"))
+    }
+
+    /// Where the probe bars are now: 0..1 across the panel, 2 s per sweep.
+    fn probe_phase() -> f32 {
+        static START: OnceLock<Instant> = OnceLock::new();
+        (START.get_or_init(Instant::now).elapsed().as_secs_f64() / 2.0).fract() as f32
+    }
+
+    /// A solid-colour rectangle: the unit rectangle through `mvp`.
+    struct Bar {
+        pipeline: wgpu::RenderPipeline,
+        slots: Vec<(wgpu::Buffer, wgpu::BindGroup)>,
+    }
+
+    const BAR_SHADER: &str = r"
+struct U { mvp: mat4x4<f32>, color: vec4<f32> }
+@group(0) @binding(0) var<uniform> u: U;
+
+@vertex
+fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(0.0, 0.0), vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0),
+        vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 1.0));
+    let uv = corners[i];
+    return u.mvp * vec4<f32>(uv.x - 0.5, 0.5 - uv.y, 0.0, 1.0);
+}
+
+@fragment
+fn fs() -> @location(0) vec4<f32> {
+    return u.color;
+}
+";
+
+    impl Bar {
+        /// `slots`: how many rectangles with their own placement per frame.
+        fn new(device: &wgpu::Device, format: wgpu::TextureFormat, slots: usize) -> Self {
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("vr probe"),
+                source: wgpu::ShaderSource::Wgsl(BAR_SHADER.into()),
+            });
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("vr probe"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(format.into())],
+                }),
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview: None,
+                cache: None,
+            });
+            let slots = (0..slots)
+                .map(|_| {
+                    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("vr probe"),
+                        size: 80,
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                    let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("vr probe"),
+                        layout: &pipeline.get_bind_group_layout(0),
+                        entries: &[wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: buffer.as_entire_binding(),
+                        }],
+                    });
+                    (buffer, group)
+                })
+                .collect();
+            Self { pipeline, slots }
+        }
+
+        fn draw(
+            &self,
+            queue: &wgpu::Queue,
+            pass: &mut wgpu::RenderPass<'_>,
+            slot: usize,
+            mvp: &Mat4,
+            color: [f32; 4],
+        ) {
+            let mut bytes = [0u8; 80];
+            bytes[..64].copy_from_slice(&mat_bytes(mvp));
+            for (i, c) in color.iter().enumerate() {
+                bytes[64 + i * 4..68 + i * 4].copy_from_slice(&c.to_ne_bytes());
+            }
+            queue.write_buffer(&self.slots[slot].0, 0, &bytes);
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.slots[slot].1, &[]);
+            pass.draw(0..6, 0..1);
+        }
+    }
+
+    /// The probe bars' size on the panel, in panel widths / heights, and
+    /// their centre heights (panel centre 0, top edge 0.5).
+    const PROBE_SIZE: [f32; 2] = [0.02, 0.05];
+    const PROBE_Y_WINDOW: f32 = 0.425;
+    const PROBE_Y_HEADSET: f32 = 0.475;
 
     /// The rectangle shader: `SRGB_DECODE` is replaced by a decode when the
     /// eye target is sRGB but the panel holds display-encoded values in a
@@ -502,6 +669,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 mapped_at_creation: false,
             })
         });
+        let probe = probe_on().then(|| Bar::new(&device, xr.format(), 2));
         // Per eye, for the current panel texture: (generation, aspect, groups).
         let mut bound: Option<(u64, f32, [wgpu::BindGroup; 2])> = None;
         let layers = Layers {
@@ -598,10 +766,25 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                         timestamp_writes: None,
                         occlusion_query_set: None,
                     });
-                    if let Some((_, _, groups)) = &bound {
+                    if let Some((_, aspect, groups)) = &bound {
                         pass.set_pipeline(&pipeline);
                         pass.set_bind_group(0, &groups[i], &[]);
                         pass.draw(0..6, 0..1);
+                        // Latency probe: this thread's bar, on the panel's
+                        // plane just above the window thread's.
+                        if let Some(bar) = &probe {
+                            let (w, h) = (PANEL_HEIGHT_M * aspect, PANEL_HEIGHT_M);
+                            let model = math::translate_scale(
+                                [
+                                    (probe_phase() - 0.5) * w,
+                                    PROBE_Y_HEADSET * h,
+                                    -PANEL_DISTANCE_M,
+                                ],
+                                [PROBE_SIZE[0] * w, PROBE_SIZE[1] * h, 1.0],
+                            );
+                            let mvp = math::mul(&eye.projection, &math::mul(&eye.view, &model));
+                            bar.draw(&queue, &mut pass, i, &mvp, [1.0, 0.45, 0.1, 1.0]);
+                        }
                     }
                 }
                 // Directly: this thread holds the queue lock for the frame.
@@ -710,12 +893,17 @@ fn fs(v: V) -> @location(0) vec4<f32> {
 
     #[cfg(test)]
     mod tests {
-        /// Both shader variants parse and validate (no GPU needed).
+        /// Every shader parses and validates (no GPU needed).
         #[test]
-        fn shader_variants_are_valid_wgsl() {
+        fn shaders_are_valid_wgsl() {
             use wgpu::naga;
-            for decode in [false, true] {
-                let m = naga::front::wgsl::parse_str(&super::shader(decode)).unwrap();
+            let sources = [
+                super::shader(false),
+                super::shader(true),
+                super::BAR_SHADER.to_string(),
+            ];
+            for source in sources {
+                let m = naga::front::wgsl::parse_str(&source).unwrap();
                 naga::valid::Validator::new(
                     naga::valid::ValidationFlags::all(),
                     naga::valid::Capabilities::empty(),
