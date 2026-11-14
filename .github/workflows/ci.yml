@@ -95,6 +95,8 @@ jobs:
   # packages. continue-on-error while the Darwin port is new.
   macos:
     name: macOS arm64 · fmt, clippy, tests
+    # Birdman64VR: Apple targets are not shipped by the fork; runs upstream only.
+    if: github.repository == 'NoahVl/Birdman64'
     runs-on: macos-14
     continue-on-error: true
     steps:
@@ -205,6 +207,8 @@ jobs:
   # continue-on-error while the iOS port is new.
   ios:
     name: iOS arm64 · clippy, ipa, simulator smoke
+    # Birdman64VR: Apple targets are not shipped by the fork; runs upstream only.
+    if: github.repository == 'NoahVl/Birdman64'
     runs-on: macos-14
     continue-on-error: true
     timeout-minutes: 45
