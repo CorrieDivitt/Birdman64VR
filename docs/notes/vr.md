@@ -34,6 +34,13 @@ quad-layer panel.
   not covered.
 - **Reconfigure:** `Gpu::configure_surface` polls the device idle first
   (the lock is already held).
+- **Exit:** `window::quit` calls `vr::shutdown`: drops this thread's queue
+  lock, stops the headset thread, which runs `XrContext::shutdown`
+  (`request_exit`, wait for STOPPING, `end`, destroy). Exiting with a live
+  session made Quest Link's runtime time out in its own shutdown and abort
+  the process (0xc0000409).
+- **Hitch line:** every 5 s the headset thread logs `[vr] hitch…` if a
+  headset frame was missed or either thread waited > 4 ms for the lock.
 - A minimised window stops redraws, so the headset picture freezes.
 
 ## Bring-up

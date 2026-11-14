@@ -117,6 +117,8 @@ pub struct XrContext {
     blend_mode: xr::EnvironmentBlendMode,
     format: wgpu::TextureFormat,
     running: bool,
+    /// How long the last frame waited for the queue lock.
+    queue_wait: std::time::Duration,
     gpu: XrGpu,
 }
 
@@ -254,6 +256,7 @@ impl XrContext {
             blend_mode,
             format,
             running: false,
+            queue_wait: std::time::Duration::ZERO,
             gpu,
         })
     }
@@ -267,6 +270,31 @@ impl XrContext {
     /// [`Self::frame`] targets).
     pub fn format(&self) -> wgpu::TextureFormat {
         self.format
+    }
+
+    /// How long the last [`Self::frame`] waited for its `queue_lock`.
+    pub fn last_queue_wait(&self) -> std::time::Duration {
+        self.queue_wait
+    }
+
+    /// Ends the session the way the runtime expects before the process
+    /// exits: ask to exit, wait (at most a second) for the runtime to stop
+    /// the session, then destroy everything. Exiting with a live session
+    /// made the Quest Link runtime time out in its own shutdown and abort
+    /// the process.
+    pub fn shutdown(mut self) {
+        if self.running && self.session.request_exit().is_ok() {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+            while self.running && std::time::Instant::now() < deadline {
+                // `poll_events` ends the session on STOPPING.
+                if !matches!(self.poll_events(), Ok(true)) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+        // Drops in field order: swapchains, space, session, instance, then
+        // our references to the wgpu device.
     }
 
     /// One eye's render size in pixels (the runtime's recommendation).
@@ -339,7 +367,9 @@ impl XrContext {
             return Ok(FrameOutcome::Idle);
         }
         let state = self.frame_waiter.wait()?;
+        let waiting = std::time::Instant::now();
         let _queue = queue_lock.map(|m| m.lock().unwrap_or_else(|e| e.into_inner()));
+        self.queue_wait = waiting.elapsed();
         self.frame_stream.begin()?;
         if !state.should_render {
             self.frame_stream

@@ -747,6 +747,8 @@ fn quit(code: i32) -> ! {
     while !PARKED.load(Ordering::Acquire) && t.elapsed() < Duration::from_secs(1) {
         std::thread::sleep(Duration::from_millis(2));
     }
+    // Birdman64VR: end the VR session before the process goes away.
+    crate::vr::shutdown();
     std::process::exit(code)
 }
 
