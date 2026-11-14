@@ -27,6 +27,8 @@ crash.log
 # from the official openxr_loader_windows release zip; docs/notes/vr.md)
 /tools/openxr/
 
+# Birdman64VR: the VR session log of a dev run (vr.rs)
+vr.log
 # Dev-run marker (U14: crash detection)
 running.lock
 instance.lock

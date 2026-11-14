@@ -86,6 +86,15 @@ pub fn request_pause() {
     }
 }
 
+/// `SurfaceTexture::present` under the queue lock (`pw64_gfx::QUEUE_GATE`:
+/// a present uses the device's queue, which VR shares with the runtime).
+fn present(tex: wgpu::SurfaceTexture) {
+    let _gate = pw64_gfx::QUEUE_GATE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    tex.present();
+}
+
 /// Birdman64VR: the VR runtime ended the session (quit from the headset's
 /// menu): leave like a normal game stop.
 #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
@@ -419,13 +428,16 @@ impl Gpu {
             "[window] surface configure {}x{} {:?}",
             self.config.width, self.config.height, self.config.present_mode
         );
-        // Birdman64VR: the headset thread submits work all the time. This
-        // thread holds the queue lock (`vr::gate`, taken per event), so it
-        // can't submit now; let what it already submitted finish first (see
-        // `refresh_present`).
-        if crate::vr::active() {
+        // Birdman64VR: the headset thread submits work all the time; hold
+        // it off (the queue lock) and let what it already submitted finish
+        // first (see `refresh_present`).
+        let _gate = crate::vr::active().then(|| {
+            let gate = pw64_gfx::QUEUE_GATE
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-        }
+            gate
+        });
         surface.configure(&self.device, &self.config);
     }
 
@@ -1268,7 +1280,7 @@ impl App {
             crate::hle::shot_png(&g.device, &g.queue, &tex.texture, "tmp/win_setup_rom.png");
         }
         g.window.pre_present_notify();
-        tex.present();
+        present(tex);
         match next {
             crate::rom_screen::Next::Stay => {}
             // Nothing is running yet.
@@ -1310,7 +1322,7 @@ impl App {
             );
         }
         g.window.pre_present_notify();
-        tex.present();
+        present(tex);
         keep
     }
 
@@ -1549,8 +1561,9 @@ impl App {
         crate::vr::note(crate::vr::Stage::Draw, timing.elapsed());
         let timing = Instant::now();
         g.window.pre_present_notify();
-        tex.present();
+        present(tex);
         crate::vr::note(crate::vr::Stage::Present, timing.elapsed());
+        crate::vr::count_redraw();
         self.perf.presented();
         // A frame went out: the OS core's Display pacing (V-Sync) ticks on
         // this counter (crates/pw64-platform/src/os/vi.rs).
@@ -1885,9 +1898,6 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn user_event(&mut self, _: &ActiveEventLoop, event: UserEvent) {
-        // Birdman64VR: this thread's GPU work must not overlap the headset
-        // thread's frame (the Vulkan queue lock, vr.rs).
-        let _gate = crate::vr::gate();
         match event {
             UserEvent::Frame => {
                 self.drain();
@@ -1917,9 +1927,6 @@ impl ApplicationHandler<UserEvent> for App {
     /// (the bar animates; a download reports nothing for seconds).
     #[cfg(feature = "first-run")]
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
-        // Birdman64VR: this thread's GPU work must not overlap the headset
-        // thread's frame (the Vulkan queue lock, vr.rs).
-        let _gate = crate::vr::gate();
         use winit::event_loop::ControlFlow;
         if self.setup.is_none() {
             el.set_control_flow(ControlFlow::Wait);
@@ -1936,9 +1943,6 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
-        // Birdman64VR: this thread's GPU work must not overlap the headset
-        // thread's frame (the Vulkan queue lock, vr.rs).
-        let _gate = crate::vr::gate();
         match event {
             WindowEvent::CloseRequested => {
                 // No game thread to park during setup (the build worker and

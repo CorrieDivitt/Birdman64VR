@@ -788,7 +788,7 @@ pub(crate) fn shot_png(
         },
         tex.size(),
     );
-    queue.submit([enc.finish()]);
+    pw64_gfx::submit(queue, [enc.finish()]);
     buf.slice(..)
         .map_async(wgpu::MapMode::Read, |r| r.expect("map shot"));
     device

@@ -23,24 +23,27 @@ quad-layer panel.
 - **Pacing:** `vr::headset_mhz()` (from the frame period) overrides
   `monitor_mhz`, so `fps = monitor` runs the game at the headset rate;
   V-Sync is forced off. Free-running, not phase-locked to the headset yet.
-- **Queue lock (`vr::gate`, `XrContext::frame`'s `queue_lock`):**
+- **Queue lock (`pw64_gfx::QUEUE_GATE`, `XrContext::frame`'s `queue_lock`):**
   `XR_KHR_vulkan_enable2` lets the runtime use our VkQueue in begin/end frame
   and swapchain acquire/release and forbids any other use meanwhile; wgpu
-  only serialises itself. The headset thread holds the lock from begin to
-  end of a frame, the window thread while it handles an event (all its GPU
-  work: draw, present, reconfigure). Without it the device was lost
-  (`Parent device is lost` in present / poll) as soon as the settings overlay
-  opened. The game thread only touches the GPU for PNG dumps (env-gated):
-  not covered.
-- **Reconfigure:** `Gpu::configure_surface` polls the device idle first
-  (the lock is already held).
-- **Exit:** `window::quit` calls `vr::shutdown`: drops this thread's queue
-  lock, stops the headset thread, which runs `XrContext::shutdown`
-  (`request_exit`, wait for STOPPING, `end`, destroy). Exiting with a live
-  session made Quest Link's runtime time out in its own shutdown and abort
-  the process (0xc0000409).
-- **Hitch line:** every 5 s the headset thread logs `[vr] hitch…` if a
-  headset frame was missed or either thread waited > 4 ms for the lock.
+  only serialises itself. Without a lock the device was lost (`Parent device
+  is lost` in present / poll) as soon as the settings overlay opened. The
+  headset thread holds the lock from begin to end of a frame; every other
+  queue use takes it per call: all submits go through `pw64_gfx::submit`,
+  presents through `window::present`. (First version: the window thread held
+  it for each whole event. The headset thread then waited 5 to 28 ms for it,
+  missed frames, and play had slowdowns with lagging audio.)
+- **Reconfigure:** `Gpu::configure_surface` takes the lock and polls the
+  device idle first.
+- **Exit:** `window::quit` calls `vr::shutdown`: stops the headset thread,
+  which runs `XrContext::shutdown` (`request_exit`, wait for STOPPING, `end`,
+  destroy). Exiting with a live session made Quest Link's runtime time out
+  in its own shutdown and abort the process (0xc0000409).
+- **`vr.log`** (data folder, new per run): every `[vr]` line, plus one line
+  every 5 s: headset fps, frame period, longest gap between headset frames,
+  longest wait for the queue lock, game fps (window presents) and the
+  longest game draw (fb op replay), surface acquire, frame draw, present and
+  game-thread backpressure wait. Lines with a hitch also go to the console.
 - A minimised window stops redraws, so the headset picture freezes.
 
 ## Bring-up

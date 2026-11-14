@@ -287,7 +287,7 @@ impl Renderer {
             ),
             None => clear_pass(&mut enc, &self.fbs.targets[&dst].view),
         }
-        self.queue.submit([enc.finish()]);
+        crate::submit(&self.queue, [enc.finish()]);
     }
 
     /// Whether `fb` has a target (was drawn or copied into).
@@ -340,13 +340,13 @@ impl Renderer {
                 }
                 drop(pass);
                 if bordered {
-                    self.queue.submit([enc.finish()]);
+                    crate::submit(&self.queue, [enc.finish()]);
                 }
             }
             None => {
                 let mut enc = self.device.create_command_encoder(&Default::default());
                 clear_pass(&mut enc, target);
-                self.queue.submit([enc.finish()]);
+                crate::submit(&self.queue, [enc.finish()]);
             }
         }
     }
@@ -415,7 +415,7 @@ impl Renderer {
         // Opaque black (wgpu's zero-init would leave alpha 0).
         let mut enc = self.device.create_command_encoder(&Default::default());
         clear_pass(&mut enc, &view);
-        self.queue.submit([enc.finish()]);
+        crate::submit(&self.queue, [enc.finish()]);
         Target {
             tex,
             view,

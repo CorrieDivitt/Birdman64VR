@@ -61,11 +61,9 @@ pub(crate) enum Stage {
     Present,
     /// The game thread held back because the window had not caught up.
     GameWait,
-    /// One whole window event, i.e. how long the queue lock was held.
-    Hold,
 }
 
-const STAGES: usize = 6;
+const STAGES: usize = 5;
 #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 const STAGE_NAMES: [&str; STAGES] = [
     "game draw",
@@ -73,7 +71,6 @@ const STAGE_NAMES: [&str; STAGES] = [
     "frame draw",
     "window present",
     "game held back",
-    "longest window event",
 ];
 static STAGE_MAX_US: [AtomicU32; STAGES] = [const { AtomicU32::new(0) }; STAGES];
 
@@ -85,10 +82,18 @@ pub(crate) fn note(stage: Stage, d: std::time::Duration) {
     }
 }
 
+/// Frames the window presented since the headset thread's last report.
+static REDRAWS: AtomicU32 = AtomicU32::new(0);
+
+/// A game frame went out to the panel and the mirror (window.rs).
+pub(crate) fn count_redraw() {
+    REDRAWS.fetch_add(1, Ordering::Relaxed);
+}
+
 #[cfg(any(windows, target_os = "linux"))]
-pub(crate) use real::{Vr, gate, shutdown};
+pub(crate) use real::{Vr, shutdown};
 #[cfg(not(any(windows, target_os = "linux")))]
-pub(crate) use stub::{Vr, gate, shutdown};
+pub(crate) use stub::{Vr, shutdown};
 
 #[cfg(not(any(windows, target_os = "linux")))]
 mod stub {
@@ -97,10 +102,6 @@ mod stub {
     use winit::window::Window;
 
     pub(crate) struct Vr;
-
-    pub(crate) fn gate() -> Option<()> {
-        None
-    }
 
     pub(crate) fn shutdown() {}
 
@@ -126,73 +127,48 @@ mod real {
     use crate::gpu_context::GpuContext;
     use pw64_xr::math::{self, Mat4};
     use pw64_xr::{FrameOutcome, Layers, Panel, XrContext};
-    use std::cell::RefCell;
-    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-    use std::sync::{Arc, Mutex, MutexGuard};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex, OnceLock};
     use std::time::{Duration, Instant};
     use winit::window::Window;
 
-    /// The Vulkan queue lock. OpenXR lets the runtime use our queue while a
-    /// headset frame begins and ends, and nothing else may touch the queue
-    /// then (`XrContext::frame`); losing that race loses the device. The
-    /// headset thread holds this from begin to end of each frame, the
-    /// window thread while it handles an event (all its GPU work happens
-    /// there: draw, present, reconfigure).
-    static GATE: Mutex<()> = Mutex::new(());
-
-    std::thread_local! {
-        /// This thread's hold on [`GATE`] (event handlers can nest, and
-        /// `shutdown` must be able to let go early).
-        static HELD: RefCell<Option<MutexGuard<'static, ()>>> = const { RefCell::new(None) };
-    }
-
-    /// Longest wait of the window thread for [`GATE`] since the headset
-    /// thread last reported, in microseconds.
-    static WINDOW_WAIT_US: AtomicU32 = AtomicU32::new(0);
     /// `shutdown` asked the headset thread to end; it sets `DONE`.
     static STOP: AtomicBool = AtomicBool::new(false);
     static DONE: AtomicBool = AtomicBool::new(false);
     static STARTED: AtomicBool = AtomicBool::new(false);
 
-    /// The window thread's hold on the queue lock; released on drop.
-    pub(crate) struct Gate(Instant);
-
-    impl Drop for Gate {
-        fn drop(&mut self) {
-            HELD.with(|h| h.borrow_mut().take());
-            super::note(super::Stage::Hold, self.0.elapsed());
+    /// `[vr]` lines go to stderr and to `vr.log` in the data folder (a new
+    /// file per run), so a headset session can be looked at afterwards.
+    fn log(line: &str, console: bool) {
+        use std::io::Write;
+        static FILE: OnceLock<Option<Mutex<std::fs::File>>> = OnceLock::new();
+        if console {
+            eprintln!("[vr] {line}");
         }
-    }
-
-    /// Takes the queue lock for the calling (window) thread. `None` when VR
-    /// is off or this thread already holds it.
-    pub(crate) fn gate() -> Option<Gate> {
-        if !super::active() || HELD.with(|h| h.borrow().is_some()) {
-            return None;
+        let file = FILE.get_or_init(|| {
+            std::fs::File::create(crate::paths::data_dir().join("vr.log"))
+                .ok()
+                .map(Mutex::new)
+        });
+        if let Some(f) = file {
+            let _ = writeln!(f.lock().unwrap_or_else(|e| e.into_inner()), "{line}");
         }
-        let waiting = Instant::now();
-        let guard = GATE.lock().unwrap_or_else(|e| e.into_inner());
-        let us = waiting.elapsed().as_micros().min(u32::MAX as u128) as u32;
-        WINDOW_WAIT_US.fetch_max(us, Ordering::Relaxed);
-        HELD.with(|h| *h.borrow_mut() = Some(guard));
-        Some(Gate(Instant::now()))
     }
 
     /// Before the process exits (window.rs `quit`): ends the VR session
-    /// properly. Lets go of the queue lock, asks the headset thread to
-    /// finish and waits for it, at most three seconds.
+    /// properly. Asks the headset thread to finish and waits for it, at
+    /// most three seconds.
     pub(crate) fn shutdown() {
         if !STARTED.load(Ordering::Relaxed) {
             return;
         }
         STOP.store(true, Ordering::Relaxed);
-        HELD.with(|h| h.borrow_mut().take());
         let deadline = Instant::now() + Duration::from_secs(3);
         while !DONE.load(Ordering::Relaxed) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(5));
         }
         if !DONE.load(Ordering::Relaxed) {
-            eprintln!("[vr] the headset thread did not stop in time");
+            log("the headset thread did not stop in time", true);
         }
     }
 
@@ -234,11 +210,14 @@ mod real {
             if surface.get_capabilities(&gpu.adapter).formats.is_empty() {
                 return Err("the headset's GPU cannot draw to this window".into());
             }
-            eprintln!(
-                "[vr] {} on {}, eye {:?}",
-                xr.runtime(),
-                gpu.adapter.get_info().name,
-                xr.eye_size()
+            log(
+                &format!(
+                    "{} on {}, eye {:?}",
+                    xr.runtime(),
+                    gpu.adapter.get_info().name,
+                    xr.eye_size()
+                ),
+                true,
             );
             super::ACTIVE.store(true, Ordering::Relaxed);
             let context = GpuContext {
@@ -302,7 +281,7 @@ mod real {
                     .spawn(move || headset_thread(xr, source));
                 STARTED.store(spawned.is_ok(), Ordering::Relaxed);
                 if let Err(e) = spawned {
-                    eprintln!("[vr] could not start the headset thread: {e}");
+                    log(&format!("could not start the headset thread: {e}"), true);
                 }
             }
             self.panel.as_ref().map(|(_, v)| v.clone())
@@ -410,9 +389,10 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         // Hitch report: the longest gap between shown headset frames and
         // the longest waits for the queue lock, per five seconds.
         let (mut last_frame, mut last_report) = (None::<Instant>, Instant::now());
-        let (mut worst_gap, mut worst_wait) = (Duration::ZERO, Duration::ZERO);
+        let (mut worst_gap, mut worst_wait, mut shown) = (Duration::ZERO, Duration::ZERO, 0u32);
+        let started = Instant::now();
         while !STOP.load(Ordering::Relaxed) {
-            let outcome = xr.frame(&layers, Some(&GATE), |frame| {
+            let outcome = xr.frame(&layers, Some(&pw64_gfx::QUEUE_GATE), |frame| {
                 let mhz = (1e12 / frame.time.period_ns.max(1) as f64).round() as u32;
                 HEADSET_MHZ.store(mhz.max(1), Ordering::Relaxed);
                 let Some(eyes) = frame.eyes else { return };
@@ -482,6 +462,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                         pass.draw(0..6, 0..1);
                     }
                 }
+                // Directly: this thread holds the queue lock for the frame.
                 queue.submit([encoder.finish()]);
             });
             match outcome {
@@ -491,11 +472,15 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                         worst_gap = worst_gap.max(now - t);
                     }
                     worst_wait = worst_wait.max(xr.last_queue_wait());
+                    shown += 1;
                     if !announced {
                         announced = true;
-                        eprintln!(
-                            "[vr] showing in the headset at {:.0} Hz",
-                            HEADSET_MHZ.load(Ordering::Relaxed) as f64 / 1000.0
+                        log(
+                            &format!(
+                                "showing in the headset at {:.0} Hz",
+                                HEADSET_MHZ.load(Ordering::Relaxed) as f64 / 1000.0
+                            ),
+                            true,
                         );
                     }
                 }
@@ -505,53 +490,56 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     std::thread::sleep(Duration::from_millis(50));
                 }
                 Ok(FrameOutcome::Quit) => {
-                    eprintln!("[vr] the VR runtime ended the session; quitting");
+                    log("the VR runtime ended the session; quitting", true);
                     crate::window::request_quit();
                     break;
                 }
                 Err(e) => {
-                    eprintln!("[vr] stopped: {e}");
+                    log(&format!("stopped: {e}"), true);
                     crate::window::notify_toast(format!(
                         "VR stopped ({e}). The game continues on the monitor."
                     ));
                     break;
                 }
             }
-            if last_report.elapsed() >= Duration::from_secs(5) {
+            // Every five seconds, one line to vr.log (and to the console
+            // when something was off): rates, the longest gap between
+            // headset frames, the longest wait for the queue lock and the
+            // longest window / game stages (`Stage`).
+            let since = last_report.elapsed();
+            if since >= Duration::from_secs(5) {
+                let secs = since.as_secs_f64();
                 let period_ms = 1e6 / HEADSET_MHZ.load(Ordering::Relaxed).max(1) as f64;
-                let window_wait =
-                    Duration::from_micros(WINDOW_WAIT_US.swap(0, Ordering::Relaxed).into());
                 let ms = |d: Duration| d.as_secs_f64() * 1e3;
                 let stages: Vec<f64> = super::STAGE_MAX_US
                     .iter()
                     .map(|a| a.swap(0, Ordering::Relaxed) as f64 / 1e3)
                     .collect();
-                // Only when something was off: a missed headset frame, a
-                // thread held up for a good part of a frame, or the game
-                // held back by the window.
-                let game_wait = stages[super::Stage::GameWait as usize];
-                if ms(worst_gap) > period_ms * 1.8
+                let detail: Vec<String> = super::STAGE_NAMES
+                    .iter()
+                    .zip(&stages)
+                    .map(|(name, v)| format!("{name} {v:.1}"))
+                    .collect();
+                let game_fps = super::REDRAWS.swap(0, Ordering::Relaxed) as f64 / secs;
+                let hitch = ms(worst_gap) > period_ms * 1.8
                     || ms(worst_wait) > 4.0
-                    || ms(window_wait) > 4.0
-                    || game_wait > 4.0
-                {
-                    let detail: Vec<String> = super::STAGE_NAMES
-                        .iter()
-                        .zip(&stages)
-                        .map(|(name, v)| format!("{name} {v:.1}"))
-                        .collect();
-                    eprintln!(
-                        "[vr] hitch in the last 5 s: headset frame gap {:.1} ms (one frame \
-                         {period_ms:.1}); headset waited {:.1} for the window, window {:.1} \
-                         for the headset; longest, ms: {}",
+                    || stages[super::Stage::GameWait as usize] > 4.0;
+                log(
+                    &format!(
+                        "{}t {:.0} s: headset {:.0} fps (frame {period_ms:.1} ms, longest gap \
+                         {:.1}, waited {:.1} for the queue), game {game_fps:.0} fps; longest, \
+                         ms: {}",
+                        if hitch { "hitch, " } else { "" },
+                        started.elapsed().as_secs_f64(),
+                        shown as f64 / secs,
                         ms(worst_gap),
                         ms(worst_wait),
-                        ms(window_wait),
                         detail.join(", ")
-                    );
-                }
-                (worst_gap, worst_wait, last_report) =
-                    (Duration::ZERO, Duration::ZERO, Instant::now());
+                    ),
+                    hitch,
+                );
+                (worst_gap, worst_wait, shown, last_report) =
+                    (Duration::ZERO, Duration::ZERO, 0u32, Instant::now());
             }
         }
         // The game's rate goes back to the monitor's.

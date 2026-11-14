@@ -43,6 +43,25 @@ pub fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'sta
     }
 }
 
+/// Birdman64VR: serialises every use of the device's queue (submit and
+/// surface present) across threads and with the OpenXR runtime. In VR the
+/// runtime may use our Vulkan queue while a headset frame begins and ends,
+/// and nothing else may touch the queue then (`XR_KHR_vulkan_enable2`);
+/// wgpu only serialises its own calls. The headset thread holds this for
+/// each frame; everything else takes it per call through [`submit`] (or
+/// around `SurfaceTexture::present`). Uncontended, and so free, without VR.
+pub static QUEUE_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// `queue.submit(commands)` under [`QUEUE_GATE`]. All submits in this
+/// workspace go through here.
+pub fn submit<I: IntoIterator<Item = wgpu::CommandBuffer>>(
+    queue: &wgpu::Queue,
+    commands: I,
+) -> wgpu::SubmissionIndex {
+    let _gate = QUEUE_GATE.lock().unwrap_or_else(|e| e.into_inner());
+    queue.submit(commands)
+}
+
 /// Minimal executor for wgpu's futures (they resolve immediately or after a
 /// device poll on native backends).
 pub fn block_on<F: std::future::Future>(f: F) -> F::Output {

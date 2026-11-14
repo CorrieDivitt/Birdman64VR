@@ -3289,7 +3289,7 @@ pub(crate) fn paint(
         .forget_lifetime();
     renderer.render(&mut pass, &prims, &screen);
     drop(pass);
-    gpu.queue.submit(Some(encoder.finish()));
+    pw64_gfx::submit(&gpu.queue, Some(encoder.finish()));
     for id in &out.textures_delta.free {
         renderer.free_texture(id);
     }

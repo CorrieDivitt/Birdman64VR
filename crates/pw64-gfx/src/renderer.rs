@@ -1369,7 +1369,7 @@ impl Renderer {
                 }
             }
         }
-        self.queue.submit([enc.finish()]);
+        crate::submit(&self.queue, [enc.finish()]);
     }
 
     /// Renders offscreen and reads the result back as tightly packed RGBA8
@@ -1524,7 +1524,7 @@ impl Renderer {
             pass.set_viewport(vx as f32, vy as f32, vw as f32, vh as f32, 0.0, 1.0);
             pass.draw(0..3, 0..1);
         }
-        self.queue.submit([enc.finish()]);
+        crate::submit(&self.queue, [enc.finish()]);
     }
 }
 
@@ -1552,7 +1552,7 @@ fn read_rgba(device: &wgpu::Device, queue: &wgpu::Queue, tex: &wgpu::Texture) ->
         },
         tex.size(),
     );
-    queue.submit([enc.finish()]);
+    crate::submit(queue, [enc.finish()]);
     buf.slice(..)
         .map_async(wgpu::MapMode::Read, |r| r.expect("map readback"));
     device
