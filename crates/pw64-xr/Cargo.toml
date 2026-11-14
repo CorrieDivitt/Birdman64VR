@@ -1,0 +1,15 @@
+[package]
+name = "pw64-xr"
+description = "Birdman64VR: OpenXR session, swapchains and frame loop on wgpu's Vulkan backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# `loaded`: openxr_loader is opened at run time, so a machine without an
+# OpenXR runtime still starts the flat game (no link-time dependency).
+openxr = { version = "0.22", default-features = false, features = ["loaded"] }
+wgpu = { workspace = true }
+# The same ash wgpu-hal 27 uses (raw Vulkan handles shared with OpenXR).
+ash = "0.38"
+log.workspace = true
