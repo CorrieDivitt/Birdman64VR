@@ -23,8 +23,17 @@ quad-layer panel.
 - **Pacing:** `vr::headset_mhz()` (from the frame period) overrides
   `monitor_mhz`, so `fps = monitor` runs the game at the headset rate;
   V-Sync is forced off. Free-running, not phase-locked to the headset yet.
-- **Reconfigure:** `Gpu::configure_surface` takes `vr::gate()` (the headset
-  thread holds it while it draws and submits) and polls the device idle.
+- **Queue lock (`vr::gate`, `XrContext::frame`'s `queue_lock`):**
+  `XR_KHR_vulkan_enable2` lets the runtime use our VkQueue in begin/end frame
+  and swapchain acquire/release and forbids any other use meanwhile; wgpu
+  only serialises itself. The headset thread holds the lock from begin to
+  end of a frame, the window thread while it handles an event (all its GPU
+  work: draw, present, reconfigure). Without it the device was lost
+  (`Parent device is lost` in present / poll) as soon as the settings overlay
+  opened. The game thread only touches the GPU for PNG dumps (env-gated):
+  not covered.
+- **Reconfigure:** `Gpu::configure_surface` polls the device idle first
+  (the lock is already held).
 - A minimised window stops redraws, so the headset picture freezes.
 
 ## Bring-up

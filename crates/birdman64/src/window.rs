@@ -419,14 +419,14 @@ impl Gpu {
             "[window] surface configure {}x{} {:?}",
             self.config.width, self.config.height, self.config.present_mode
         );
-        // Birdman64VR: the headset thread submits work all the time; hold it
-        // off and let the GPU come idle first (see `refresh_present`).
-        let gate = crate::vr::gate();
-        if gate.is_some() {
+        // Birdman64VR: the headset thread submits work all the time. This
+        // thread holds the queue lock (`vr::gate`, taken per event), so it
+        // can't submit now; let what it already submitted finish first (see
+        // `refresh_present`).
+        if crate::vr::active() {
             let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
         }
         surface.configure(&self.device, &self.config);
-        drop(gate);
     }
 
     /// The next surface texture, or `None` (no surface, or a failed acquire:
@@ -1872,6 +1872,9 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn user_event(&mut self, _: &ActiveEventLoop, event: UserEvent) {
+        // Birdman64VR: this thread's GPU work must not overlap the headset
+        // thread's frame (the Vulkan queue lock, vr.rs).
+        let _gate = crate::vr::gate();
         match event {
             UserEvent::Frame => {
                 self.drain();
@@ -1901,6 +1904,9 @@ impl ApplicationHandler<UserEvent> for App {
     /// (the bar animates; a download reports nothing for seconds).
     #[cfg(feature = "first-run")]
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        // Birdman64VR: this thread's GPU work must not overlap the headset
+        // thread's frame (the Vulkan queue lock, vr.rs).
+        let _gate = crate::vr::gate();
         use winit::event_loop::ControlFlow;
         if self.setup.is_none() {
             el.set_control_flow(ControlFlow::Wait);
@@ -1917,6 +1923,9 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        // Birdman64VR: this thread's GPU work must not overlap the headset
+        // thread's frame (the Vulkan queue lock, vr.rs).
+        let _gate = crate::vr::gate();
         match event {
             WindowEvent::CloseRequested => {
                 // No game thread to park during setup (the build worker and

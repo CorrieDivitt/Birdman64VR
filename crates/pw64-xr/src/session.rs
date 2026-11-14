@@ -318,9 +318,18 @@ impl XrContext {
     /// rate), then shows `layers`. `draw` renders into the targets in its
     /// [`Frame`] and must submit its commands to the queue before
     /// returning; it is only called for [`FrameOutcome::Rendered`].
+    ///
+    /// `queue_lock`: `XR_KHR_vulkan_enable2` lets the runtime use our
+    /// Vulkan queue inside begin/end frame and swapchain acquire/release,
+    /// and requires that nothing else touches the queue meanwhile. wgpu
+    /// only serialises its own use. So when another thread also submits or
+    /// presents on this device, both sides must hold this lock: it is taken
+    /// here after the wait, until the frame has ended. Racing the runtime
+    /// loses the device (seen with Quest Link).
     pub fn frame(
         &mut self,
         layers: &Layers,
+        queue_lock: Option<&std::sync::Mutex<()>>,
         draw: impl FnOnce(Frame<'_>),
     ) -> Result<FrameOutcome, XrError> {
         if !self.poll_events()? {
@@ -330,6 +339,7 @@ impl XrContext {
             return Ok(FrameOutcome::Idle);
         }
         let state = self.frame_waiter.wait()?;
+        let _queue = queue_lock.map(|m| m.lock().unwrap_or_else(|e| e.into_inner()));
         self.frame_stream.begin()?;
         if !state.should_render {
             self.frame_stream

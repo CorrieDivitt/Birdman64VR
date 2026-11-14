@@ -178,7 +178,7 @@ fn main() {
     let mut display_step = (f64::MAX, 0f64);
     let mut period_ms = 0.0;
     loop {
-        let outcome = xr.frame(&layers, |frame| {
+        let outcome = xr.frame(&layers, None, |frame| {
             let time = frame.time;
             let wall = start.elapsed().as_secs_f64();
             let t0 = *first_display.get_or_insert(time.display_ns);

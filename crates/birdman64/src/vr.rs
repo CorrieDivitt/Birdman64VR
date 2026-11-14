@@ -18,6 +18,14 @@ static REQUESTED: AtomicBool = AtomicBool::new(false);
 /// The headset's refresh rate in mHz once frames flow (0: not known).
 static HEADSET_MHZ: AtomicU32 = AtomicU32::new(0);
 
+/// A VR session exists on the game's device (set once, by `Vr::connect`).
+static ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// VR is running: the GPU queue is shared with the OpenXR runtime.
+pub(crate) fn active() -> bool {
+    ACTIVE.load(Ordering::Relaxed)
+}
+
 /// `--vr` on the command line (lib.rs `desktop_main`).
 pub(crate) fn set_requested(on: bool) {
     REQUESTED.store(on, Ordering::Relaxed);
@@ -51,7 +59,7 @@ mod stub {
 
     pub(crate) struct Vr;
 
-    pub(crate) fn gate() -> Option<std::sync::MutexGuard<'static, ()>> {
+    pub(crate) fn gate() -> Option<()> {
         None
     }
 
@@ -77,21 +85,43 @@ mod real {
     use crate::gpu_context::GpuContext;
     use pw64_xr::math::{self, Mat4};
     use pw64_xr::{FrameOutcome, Layers, Panel, XrContext};
+    use std::cell::Cell;
     use std::sync::atomic::Ordering;
     use std::sync::{Arc, Mutex, MutexGuard};
     use std::time::Duration;
     use winit::window::Window;
 
-    /// Held by the headset thread while it draws and submits, and by the
-    /// window thread around a surface reconfigure: wgpu wants no
-    /// submissions in flight then (window.rs `refresh_present`).
+    /// The Vulkan queue lock. OpenXR lets the runtime use our queue while a
+    /// headset frame begins and ends, and nothing else may touch the queue
+    /// then (`XrContext::frame`); losing that race loses the device. The
+    /// headset thread holds this from begin to end of each frame, the
+    /// window thread while it handles an event (all its GPU work happens
+    /// there: draw, present, reconfigure).
     static GATE: Mutex<()> = Mutex::new(());
 
-    /// See [`GATE`]. `None` when VR is not running.
-    pub(crate) fn gate() -> Option<MutexGuard<'static, ()>> {
-        super::headset_mhz()
-            .is_some()
-            .then(|| GATE.lock().unwrap_or_else(|e| e.into_inner()))
+    std::thread_local! {
+        /// This thread holds [`GATE`] (event handlers can nest).
+        static HELD: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// The window thread's hold on [`GATE`]; released on drop.
+    pub(crate) struct Gate(#[allow(dead_code)] MutexGuard<'static, ()>);
+
+    impl Drop for Gate {
+        fn drop(&mut self) {
+            HELD.set(false);
+        }
+    }
+
+    /// Takes the queue lock for the calling (window) thread. `None` when VR
+    /// is off or this thread already holds it.
+    pub(crate) fn gate() -> Option<Gate> {
+        if !super::active() || HELD.get() {
+            return None;
+        }
+        let guard = GATE.lock().unwrap_or_else(|e| e.into_inner());
+        HELD.set(true);
+        Some(Gate(guard))
     }
 
     /// The panel's height in metres and its distance in front of the
@@ -138,6 +168,7 @@ mod real {
                 gpu.adapter.get_info().name,
                 xr.eye_size()
             );
+            super::ACTIVE.store(true, Ordering::Relaxed);
             let context = GpuContext {
                 instance: gpu.instance.clone(),
                 surface,
@@ -304,8 +335,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         };
         let mut announced = false;
         loop {
-            let outcome = xr.frame(&layers, |frame| {
-                let _gate = GATE.lock().unwrap_or_else(|e| e.into_inner());
+            let outcome = xr.frame(&layers, Some(&GATE), |frame| {
                 let mhz = (1e12 / frame.time.period_ns.max(1) as f64).round() as u32;
                 HEADSET_MHZ.store(mhz.max(1), Ordering::Relaxed);
                 let Some(eyes) = frame.eyes else { return };
