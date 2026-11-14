@@ -12,7 +12,7 @@
 //! Only on Windows and Linux; other targets get a stub that is never
 //! requested.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 static REQUESTED: AtomicBool = AtomicBool::new(false);
 /// The headset's refresh rate in mHz once frames flow (0: not known).
@@ -103,6 +103,58 @@ pub(crate) fn count_frames(n: u32) {
         .replace(now);
     if let Some(t) = last {
         note(Stage::GameGap, now - t);
+    }
+}
+
+/// Latency log: a running average and maximum of a delay, in microseconds.
+struct Delay {
+    sum_us: AtomicU64,
+    count: AtomicU32,
+    max_us: AtomicU32,
+}
+
+impl Delay {
+    const fn new() -> Self {
+        Self {
+            sum_us: AtomicU64::new(0),
+            count: AtomicU32::new(0),
+            max_us: AtomicU32::new(0),
+        }
+    }
+
+    fn add(&self, d: std::time::Duration) {
+        let us = d.as_micros().min(u32::MAX as u128) as u32;
+        self.sum_us.fetch_add(us.into(), Ordering::Relaxed);
+        self.count.fetch_add(1, Ordering::Relaxed);
+        self.max_us.fetch_max(us, Ordering::Relaxed);
+    }
+
+    /// (samples, average ms, max ms) since the last call.
+    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+    fn take(&self) -> (u32, f64, f64) {
+        let n = self.count.swap(0, Ordering::Relaxed);
+        let sum = self.sum_us.swap(0, Ordering::Relaxed);
+        let max = self.max_us.swap(0, Ordering::Relaxed);
+        (n, sum as f64 / 1e3 / n.max(1) as f64, max as f64 / 1e3)
+    }
+}
+
+/// From the game thread handing a frame over to it being in the panel.
+static HANDOVER_TO_PANEL: Delay = Delay::new();
+/// How old the panel's content is when the headset thread samples it.
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+static PANEL_AGE: Delay = Delay::new();
+/// When the panel was last drawn.
+static PANEL_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// The window drew a frame into the panel (window.rs `redraw`);
+/// `handed_over`: when the game thread handed it over, for a new frame.
+pub(crate) fn panel_updated(handed_over: Option<std::time::Instant>) {
+    let now = std::time::Instant::now();
+    if let Some(t) = handed_over {
+        HANDOVER_TO_PANEL.add(now - t);
+        // Only a new game frame resets the panel's age.
+        *PANEL_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some(now);
     }
 }
 
@@ -463,6 +515,10 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 let mhz = (1e12 / frame.time.period_ns.max(1) as f64).round() as u32;
                 HEADSET_MHZ.store(mhz.max(1), Ordering::Relaxed);
                 let Some(eyes) = frame.eyes else { return };
+                // Latency log: how old is the game frame we are about to show?
+                if let Some(t) = *super::PANEL_AT.lock().unwrap_or_else(|e| e.into_inner()) {
+                    super::PANEL_AGE.add(t.elapsed());
+                }
                 {
                     let s = source.lock().unwrap();
                     if bound.as_ref().map(|b| b.0) != Some(s.generation) {
@@ -592,11 +648,15 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     || ms(worst_wait) > 4.0
                     || stages[super::Stage::GameWait as usize] > 4.0
                     || stages[super::Stage::GameGap as usize] > period_ms * 2.5;
+                let (_, to_panel_avg, to_panel_max) = super::HANDOVER_TO_PANEL.take();
+                let (_, age_avg, age_max) = super::PANEL_AGE.take();
                 log(
                     &format!(
                         "{}t {:.0} s: headset {:.0} fps (frame {period_ms:.1} ms, longest gap \
-                         {:.1}, waited {:.1} for the queue), game {game_fps:.0} fps; longest, \
-                         ms: {}",
+                         {:.1}, waited {:.1} for the queue), game {game_fps:.0} fps; game \
+                         frame: hand-over to panel avg {to_panel_avg:.1} max \
+                         {to_panel_max:.1} ms, age when the headset shows it avg {age_avg:.1} \
+                         max {age_max:.1} ms; longest, ms: {}",
                         if hitch { "hitch, " } else { "" },
                         started.elapsed().as_secs_f64(),
                         shown as f64 / secs,

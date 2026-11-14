@@ -113,6 +113,9 @@ struct Queued {
     show: Option<u32>,
     /// Newly shown frames since the last drain (fps counter).
     frames: u32,
+    /// Birdman64VR: when the game thread handed over the latest shown
+    /// frame (latency log, vr.rs).
+    shown_at: Option<Instant>,
 }
 
 /// The game → window queue. Bounded (`MAX_QUEUED_OPS`): when the window
@@ -561,6 +564,8 @@ struct App {
     /// Birdman64VR: the VR mode while it runs (vr.rs). The redraw then
     /// draws into its panel texture and the window shows a copy.
     vr: Option<crate::vr::Vr>,
+    /// When the game handed over the frame the next redraw shows (`Queued`).
+    vr_shown_at: Option<Instant>,
     /// The framebuffer the game last swapped to (None: nothing yet).
     shown: Option<u32>,
     modifiers: ModifiersState,
@@ -683,6 +688,7 @@ pub fn run(setup: bool, ask_rom: bool) -> ! {
         slot: Arc::default(),
         gpu: None,
         vr: None,
+        vr_shown_at: None,
         shown: None,
         modifiers: ModifiersState::empty(),
         fps_timer: Instant::now(),
@@ -1188,6 +1194,7 @@ impl App {
                     if show.is_some() {
                         q.show = show;
                         q.frames += 1;
+                        q.shown_at = Some(Instant::now());
                     }
                     drop(q);
                     let _ = proxy.send_event(UserEvent::Frame);
@@ -1368,6 +1375,9 @@ impl App {
         crate::vr::note(crate::vr::Stage::Drain, timing.elapsed());
         if q.show.is_some() {
             self.shown = q.show;
+        }
+        if q.shown_at.is_some() {
+            self.vr_shown_at = q.shown_at;
         }
         if q.frames > 0 {
             crate::vr::count_frames(q.frames);
@@ -1566,6 +1576,9 @@ impl App {
                 .blit(&view, &surface_view, wgpu::FilterMode::Nearest);
         }
         crate::vr::note(crate::vr::Stage::Draw, timing.elapsed());
+        if panel_view.is_some() {
+            crate::vr::panel_updated(self.vr_shown_at.take());
+        }
         let timing = Instant::now();
         g.window.pre_present_notify();
         present(tex);
