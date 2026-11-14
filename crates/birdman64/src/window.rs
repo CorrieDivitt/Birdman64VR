@@ -379,7 +379,8 @@ impl Gpu {
             opts::Fps::Hz(hz) => hz * 1000,
             opts::Fps::Monitor | opts::Fps::Uncapped => 0,
         });
-        let rate = opts::present_rate(self.fps, mhz, self.vsync);
+        // Birdman64VR: the headset paces the game's frames (see `App::start`).
+        let rate = opts::present_rate(self.fps, mhz, self.vsync || crate::vr::active());
         let tearing = opts::allows_tearing(self.fps, mhz);
         let mode = opts::present_mode(self.vsync, rate.is_some(), tearing, &self.present_modes);
         if self.config.present_mode != mode {
@@ -1018,7 +1019,12 @@ impl App {
         let vsync = opts::vsync() && self.vr.is_none();
         let fps = opts::fps(true);
         let monitor = monitor_mhz(&window);
-        let rate = opts::present_rate(fps, monitor, vsync);
+        // Birdman64VR: display pacing, with the headset as the display. The
+        // headset thread ticks `os::vi::VBLANK` once per headset frame, so the
+        // game makes exactly one frame per headset frame, in step with it.
+        // Two free-running 72 Hz clocks instead drift through each other:
+        // every 15 s or so, a second or two of doubled and skipped frames.
+        let rate = opts::present_rate(fps, monitor, vsync || self.vr.is_some());
         // Present mode (opts::present_mode): V-Sync → Fifo; else with a
         // present tick Mailbox (the newest frame goes out at the next vblank
         // and the window thread never blocks, so a free-running tick at the
@@ -1567,7 +1573,10 @@ impl App {
         self.perf.presented();
         // A frame went out: the OS core's Display pacing (V-Sync) ticks on
         // this counter (crates/pw64-platform/src/os/vi.rs).
-        os::vi::VBLANK.fetch_add(1, Ordering::Relaxed);
+        // (Birdman64VR: in VR the headset thread ticks it instead.)
+        if !crate::vr::active() {
+            os::vi::VBLANK.fetch_add(1, Ordering::Relaxed);
+        }
         // The overlay changed fps/vsync (or toggled fullscreen): re-read the
         // present rate/mode (R-a). Only after `present`, and only once the
         // acquired texture is DROPPED: wgpu rejects a reconfigure while the

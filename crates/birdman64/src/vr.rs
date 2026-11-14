@@ -393,6 +393,10 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         let started = Instant::now();
         while !STOP.load(Ordering::Relaxed) {
             let outcome = xr.frame(&layers, Some(&pw64_gfx::QUEUE_GATE), |frame| {
+                // A headset frame starts: the game's cue for its next frame
+                // (display pacing, window.rs `App::start`). It then has one
+                // headset frame's time to reach the panel texture.
+                pw64_platform::os::vi::VBLANK.fetch_add(1, Ordering::Relaxed);
                 let mhz = (1e12 / frame.time.period_ns.max(1) as f64).round() as u32;
                 HEADSET_MHZ.store(mhz.max(1), Ordering::Relaxed);
                 let Some(eyes) = frame.eyes else { return };

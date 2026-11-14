@@ -20,9 +20,17 @@ quad-layer panel.
   pose. It never waits for the game or window. Panel values are
   display-encoded in a non-sRGB format, the eye target is sRGB: the shader
   decodes.
-- **Pacing:** `vr::headset_mhz()` (from the frame period) overrides
-  `monitor_mhz`, so `fps = monitor` runs the game at the headset rate;
-  V-Sync is forced off. Free-running, not phase-locked to the headset yet.
+- **Pacing:** display pacing with the headset as the display: in VR
+  `opts::present_rate` gets `vsync = true` (`PresentRate::Display`) and the
+  headset thread ticks `os::vi::VBLANK` at the start of each headset frame
+  (the window's present doesn't in VR), so the game makes one frame per
+  headset frame, in step, shown one headset frame later. The surface's
+  present mode stays non-blocking (V-Sync off). `vr::headset_mhz()` (from
+  the frame period) overrides `monitor_mhz` for the fallback cadence (headset
+  off the head). First version: `Fixed` at the headset's rate, free-running.
+  With every stage on time (`vr.log`: headset 72 fps, gaps ≤ 14.4 ms, game 72
+  fps, nothing waiting) play still stuttered for 1 to 2 s about every 15 s:
+  the two 72 Hz clocks drifting through each other.
 - **Queue lock (`pw64_gfx::QUEUE_GATE`, `XrContext::frame`'s `queue_lock`):**
   `XR_KHR_vulkan_enable2` lets the runtime use our VkQueue in begin/end frame
   and swapchain acquire/release and forbids any other use meanwhile; wgpu
