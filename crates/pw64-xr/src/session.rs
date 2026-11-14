@@ -35,6 +35,18 @@ impl Default for Panel {
     }
 }
 
+/// When the frame being drawn will be shown. Animate from this, not from
+/// the clock at draw time: the runtime wakes the app at uneven moments but
+/// shows frames at even ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameTime {
+    /// Predicted display time on the runtime's clock, in nanoseconds. Only
+    /// differences between frames mean anything.
+    pub display_ns: i64,
+    /// The display's frame period in nanoseconds (72 Hz: 13.9 ms).
+    pub period_ns: i64,
+}
+
 /// What [`XrContext::frame`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameOutcome {
@@ -209,6 +221,11 @@ impl XrContext {
         self.format
     }
 
+    /// How many images the panel swapchain cycles through, for logs.
+    pub fn panel_image_count(&self) -> usize {
+        self.panel.views.len()
+    }
+
     /// The runtime's name and version, for logs.
     pub fn runtime(&self) -> String {
         self.instance.properties().map_or_else(
@@ -253,7 +270,7 @@ impl XrContext {
     pub fn frame(
         &mut self,
         panel: &Panel,
-        draw: impl FnOnce(&wgpu::TextureView),
+        draw: impl FnOnce(&wgpu::TextureView, FrameTime),
     ) -> Result<FrameOutcome, XrError> {
         if !self.poll_events()? {
             return Ok(FrameOutcome::Quit);
@@ -270,7 +287,13 @@ impl XrContext {
         }
         let index = self.panel.handle.acquire_image()? as usize;
         self.panel.handle.wait_image(xr::Duration::INFINITE)?;
-        draw(&self.panel.views[index]);
+        draw(
+            &self.panel.views[index],
+            FrameTime {
+                display_ns: state.predicted_display_time.as_nanos(),
+                period_ns: state.predicted_display_period.as_nanos(),
+            },
+        );
         self.panel.handle.release_image()?;
 
         let (w, h) = self.panel.size_px;

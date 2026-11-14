@@ -13,7 +13,7 @@ mod gpu;
 mod session;
 
 pub use gpu::XrGpu;
-pub use session::{FrameOutcome, Panel, XrContext};
+pub use session::{FrameOutcome, FrameTime, Panel, XrContext};
 
 /// Why VR could not start or continue; `Display` is a one-line reason.
 #[derive(Debug)]
