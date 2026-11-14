@@ -1,6 +1,6 @@
 [package]
 name = "birdman64"
-description = "Birdman64: native PC port of Pilotwings 64"
+description = "Birdman64VR: VR fork of Birdman64, the native PC port of Pilotwings 64"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

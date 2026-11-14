@@ -876,7 +876,7 @@ impl App {
             ))
         );
         let base = Window::default_attributes()
-            .with_title("Birdman64")
+            .with_title(crate::paths::APP_NAME)
             .with_window_icon(window_icon());
         // Android: the requested size letterboxes inside the activity; iOS:
         // windows are always the whole screen (a requested size makes winit
@@ -1521,10 +1521,11 @@ impl App {
             // U25: the fps suffix only while "Show FPS" is on; the title is
             // written on change only (show_fps flips live in the overlay).
             if g.show_fps {
-                g.window.set_title(&format!("Birdman64 ({fps:.0} fps)"));
+                g.window
+                    .set_title(&format!("{} ({fps:.0} fps)", crate::paths::APP_NAME));
                 g.title_fps = true;
             } else if g.title_fps {
-                g.window.set_title("Birdman64");
+                g.window.set_title(crate::paths::APP_NAME);
                 g.title_fps = false;
             }
             self.frames = 0;

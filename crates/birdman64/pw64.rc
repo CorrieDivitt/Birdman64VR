@@ -1,4 +1,4 @@
-// Windows resource for the Birdman64 exe: app icon + version metadata.
+// Windows resource for the Birdman64VR exe: app icon + version metadata.
 // Embedded by crates/birdman64/build.rs via embed-resource on windows targets
 // only; the VER_* macros come from CARGO_PKG_VERSION in build.rs.
 //
@@ -25,13 +25,13 @@ BEGIN
   BEGIN
     BLOCK "040904b0"
     BEGIN
-      VALUE "CompanyName",      "Birdman64 contributors"
-      VALUE "FileDescription",  "Birdman64"
+      VALUE "CompanyName",      "Birdman64 and Birdman64VR contributors"
+      VALUE "FileDescription",  "Birdman64VR"
       VALUE "FileVersion",      VER_STR(VER_VERSION)
-      VALUE "InternalName",     "birdman64"
+      VALUE "InternalName",     "birdman64vr"
       VALUE "LegalCopyright",   "MIT licence; not affiliated with Nintendo"
-      VALUE "OriginalFilename", "Birdman64.exe"
-      VALUE "ProductName",      "Birdman64"
+      VALUE "OriginalFilename", "Birdman64VR.exe"
+      VALUE "ProductName",      "Birdman64VR"
       VALUE "ProductVersion",   VER_STR(VER_VERSION)
     END
   END

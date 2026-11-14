@@ -15,12 +15,19 @@
 //!    ux-1.0 D1: the marker means the portability is on purpose; a plain
 //!    extraction has none, so it stays per-user and an update unzipped
 //!    into a new folder keeps saves, settings and the remembered ROM.
-//! 4. Per-user fallback: `%APPDATA%\Birdman64` (Windows) /
-//!    `$XDG_DATA_HOME/birdman64`, else `$HOME/.local/share/birdman64`
+//! 4. Per-user fallback: `%APPDATA%\Birdman64VR` (Windows) /
+//!    `$XDG_DATA_HOME/birdman64vr`, else `$HOME/.local/share/birdman64vr`
 //!    (Linux), created when missing.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+
+/// Birdman64VR: the fork's own name (window title) and per-user folder
+/// names, so it never shares saves, settings or the game cache with an
+/// installed Birdman64.
+pub const APP_NAME: &str = "Birdman64VR";
+const USER_DIR_WINDOWS: &str = "Birdman64VR";
+const USER_DIR_UNIX: &str = "birdman64vr";
 
 /// Supplied by an embedding frontend before the first [`data_dir`] call: a
 /// future Android build points this at its app storage dir. Later calls
@@ -44,8 +51,8 @@ pub fn data_dir() -> &'static Path {
 /// The first-run build cache (decomp download + the compiled game module,
 /// first-run-build.md "Cache"): `<data dir>/cache`, except for the per-user
 /// data dir (rule 4), whose roaming profile is no place for 20 MB of
-/// rebuildable files: `%LOCALAPPDATA%\Birdman64\cache` /
-/// `$XDG_CACHE_HOME/birdman64` (else `~/.cache/birdman64`) then.
+/// rebuildable files: `%LOCALAPPDATA%\Birdman64VR\cache` /
+/// `$XDG_CACHE_HOME/birdman64vr` (else `~/.cache/birdman64vr`) then.
 /// XDG base spec: an override is honoured only when it is an absolute
 /// path; an empty or relative value falls back to the default (S10 review:
 /// saves otherwise followed the cwd). Pure, so tests can pin the rule
@@ -59,14 +66,15 @@ fn xdg_or_default(value: Option<PathBuf>, default: Option<PathBuf>) -> Option<Pa
 pub fn cache_dir() -> PathBuf {
     let data = data_dir();
     let local = if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("Birdman64").join("cache"))
+        std::env::var_os("LOCALAPPDATA")
+            .map(|d| PathBuf::from(d).join(USER_DIR_WINDOWS).join("cache"))
     } else {
         // XDG base spec: only an absolute $XDG_CACHE_HOME overrides the
         // default; `None` (no valid variable, no $HOME) falls back to
         // <data dir>/cache below, as before.
         xdg_or_default(
-            std::env::var_os("XDG_CACHE_HOME").map(|d| PathBuf::from(d).join("birdman64")),
-            std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/birdman64")),
+            std::env::var_os("XDG_CACHE_HOME").map(|d| PathBuf::from(d).join(USER_DIR_UNIX)),
+            std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache").join(USER_DIR_UNIX)),
         )
     };
     match (per_user_dir(), local) {
@@ -351,7 +359,7 @@ fn dir_writable(dir: &Path) -> bool {
 /// Rule 4: the per-user data directory (not created yet; `compute` does).
 #[cfg(windows)]
 fn per_user_dir() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("Birdman64"))
+    std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join(USER_DIR_WINDOWS))
 }
 
 /// iOS: the app's Documents folder, straight from Foundation
@@ -379,8 +387,8 @@ fn per_user_dir() -> Option<PathBuf> {
     // default; empty or relative falls back to $HOME, so the saves never
     // follow the cwd (S10 review). None when neither is set, as before.
     xdg_or_default(
-        std::env::var_os("XDG_DATA_HOME").map(|d| PathBuf::from(d).join("birdman64")),
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share/birdman64")),
+        std::env::var_os("XDG_DATA_HOME").map(|d| PathBuf::from(d).join(USER_DIR_UNIX)),
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share").join(USER_DIR_UNIX)),
     )
 }
 

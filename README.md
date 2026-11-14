@@ -1,3 +1,31 @@
+# Birdman64VR
+
+**Pilotwings 64 in seated VR.** An unofficial fork of
+[Birdman64](https://github.com/NoahVl/Birdman64) that adds a VR mode through
+OpenXR: fly in stereo with head tracking, in the chase camera or first person,
+with a gamepad. Developed and tested on a Meta Quest 3 over Quest Link.
+
+> **Status: early development.** There is no VR release yet. To play
+> Pilotwings 64 on a monitor, use [Birdman64](https://github.com/NoahVl/Birdman64/releases/latest).
+
+- **Separate from Birdman64.** Birdman64VR keeps its own saves and settings
+  (`%APPDATA%\Birdman64VR`), so it can be installed next to Birdman64.
+- **Bugs go here, not upstream.** Please report problems with this fork in
+  [its issue tracker](https://github.com/CorrieDivitt/Birdman64VR/issues),
+  never to the Birdman64 project.
+- **Same rules.** You need your own US Pilotwings 64 ROM. No game code, assets
+  or ROM data are included or accepted in contributions.
+
+All of the flat game (the native port itself, the renderer, controls,
+settings, Android and iOS support) is the work of Birdman64's authors and
+contributors. This fork only adds VR. MIT licence, like the original; not
+affiliated with Nintendo, Paradigm or the Birdman64 project.
+
+The rest of this README is Birdman64's own and describes the flat game. It
+will be rewritten for the Birdman64VR 1.0 release.
+
+---
+
 # Birdman64
 
 **Pilotwings 64 as a native PC game for Windows and Linux.** Widescreen up to
