@@ -169,8 +169,13 @@ if [ "$FLAVOUR" = release ]; then
     # Same LLVM licence as release.yml (LLVM_LICENSE_URL): zig bundles
     # clang/LLD 21.
     LLVM_LICENSE=tools/zig-android/LLVM-LICENSE.txt
+    # Birdman64VR: a checked-in copy (LLVM 21.1.0), because CI runners get
+    # HTTP 429 from raw.githubusercontent.com; the download is the fallback.
+    if [ ! -s "$LLVM_LICENSE" ] && [ -s packaging/licenses/LLVM-LICENSE.txt ]; then
+        cp packaging/licenses/LLVM-LICENSE.txt "$LLVM_LICENSE"
+    fi
     if [ ! -s "$LLVM_LICENSE" ]; then
-        curl -fsSL -o "$LLVM_LICENSE" \
+        curl -fsSL --retry 3 --retry-delay 10 -o "$LLVM_LICENSE" \
             https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-21.1.0/llvm/LICENSE.TXT
     fi
 fi
