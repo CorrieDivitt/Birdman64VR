@@ -139,6 +139,18 @@ menus and everything else stay on the panel.
   swapchain and submits the projection layer with *those* poses
   (`Layers::eyes`), so the runtime reprojects when the game is late or
   paused. The panel (toasts, settings) is drawn over it by alpha.
+- The headset thread picks the eye set after `xrWaitFrame` returns
+  (`XrContext::frame`'s `layers` closure), so the game frame drawn during the
+  wait is the one shown, with the pose it was drawn for. The 5 s report
+  counts eye pictures shown new and shown again, and the longest
+  "eye pictures" draw time (window thread, CPU).
+- No border bars in VR (`pw64_fill_frame` set with the world tag): they
+  floated in the world as black bars.
+- **Rocket belt first person:** in VR the R button switches between the chase
+  camera and camera mode 1, which the game already has for it (pilot matrix +
+  per-pilot eye offset `camera->unk68`, head part hidden, 80% levelled to
+  the horizon) instead of tilting the chase camera down
+  (`code_AC1A0.c.patch`).
 - Units: metres (physics notes use m and m/s); `PW64_VR_WORLD_SCALE` to try
   others. Near plane 0.1 m, no far plane (reversed depth).
 - Test without a headset: `stereo_eye_matches_the_flat_picture` (pw64-gfx),

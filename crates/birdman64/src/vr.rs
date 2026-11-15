@@ -120,9 +120,11 @@ pub(crate) enum Stage {
     GameWait,
     /// The time between two new game frames reaching the window.
     GameGap,
+    /// Drawing both eyes' pictures of the stereo world.
+    Eyes,
 }
 
-const STAGES: usize = 6;
+const STAGES: usize = 7;
 #[cfg_attr(
     not(any(windows, target_os = "linux", target_os = "android")),
     allow(dead_code)
@@ -134,6 +136,7 @@ const STAGE_NAMES: [&str; STAGES] = [
     "window present",
     "game held back",
     "gap between game frames",
+    "eye pictures",
 ];
 static STAGE_MAX_US: [AtomicU32; STAGES] = [const { AtomicU32::new(0) }; STAGES];
 
@@ -402,9 +405,10 @@ mod real {
         front: usize,
         eye_generation: u64,
         eye_views: Option<[[wgpu::TextureView; 2]; 3]>,
-        /// The published eye set and the eye poses it was drawn for;
-        /// `None`: no stereo world (menus), the panel is the picture.
-        world: Option<(usize, [EyePose; 2])>,
+        /// The published eye set, the eye poses it was drawn for and its
+        /// number (one per game frame); `None`: no stereo world (menus),
+        /// the panel is the picture.
+        world: Option<(usize, [EyePose; 2], u64)>,
         reading: Option<usize>,
     }
 
@@ -487,6 +491,8 @@ mod real {
         eyes: Option<(wgpu::TextureFormat, [[wgpu::TextureView; 2]; 3])>,
         /// The headset shows the stereo world (the last game frame had one).
         stereo: bool,
+        /// Eye picture sets drawn so far.
+        eye_serial: u64,
         /// The window thread's probe bar (`probe_on`).
         probe: Option<Bar>,
     }
@@ -548,6 +554,7 @@ mod real {
                     eye_size,
                     eyes: None,
                     stereo: false,
+                    eye_serial: 0,
                     probe: None,
                 },
             ))
@@ -684,7 +691,9 @@ mod real {
             for (eye, pose) in poses.iter().enumerate() {
                 renderer.render_stereo(frame, &views[back][eye], self.eye_size, &stereo_eye(pose));
             }
-            self.source.lock().unwrap_or_else(|e| e.into_inner()).world = Some((back, poses));
+            self.eye_serial += 1;
+            self.source.lock().unwrap_or_else(|e| e.into_inner()).world =
+                Some((back, poses, self.eye_serial));
             if !self.stereo {
                 self.stereo = true;
                 log(
@@ -1056,7 +1065,10 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         );
         // For the current eye pictures: (generation, bind groups per set
         // and eye).
-        let mut eye_bound: Option<(u64, [[wgpu::BindGroup; 2]; 3])> = None;
+        let eye_bound = std::cell::RefCell::new(None::<(u64, [[wgpu::BindGroup; 2]; 3])>);
+        // Stereo report: headset frames that showed a new eye picture and
+        // ones that showed the previous one again.
+        let (mut eyes_new, mut eyes_repeated, mut last_serial) = (0u32, 0u32, 0u64);
         let probe = probe_on().then(|| Bar::new(&device, xr.format(), 2));
         // For the current panel textures: (generation, aspect, bind groups
         // per texture and eye).
@@ -1074,13 +1086,17 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         let mut not_shown = 0u32;
         while !STOP.load(Ordering::Relaxed) {
             // The stereo world's eye pictures for this frame, if the game
-            // is showing one: marked as being read, so the window thread
-            // leaves that set alone.
-            let world = {
+            // is showing one: chosen when the frame starts (after the wait
+            // for it, so the game frame drawn meanwhile is the one shown)
+            // and marked as being read, so the window thread leaves that
+            // set alone.
+            let world = std::cell::Cell::new(None::<(usize, [EyePose; 2], u64)>);
+            let choose = || {
                 let mut s = source.lock().unwrap_or_else(|e| e.into_inner());
+                let mut eye_bound = eye_bound.borrow_mut();
                 s.reading = s.world.map(|w| w.0);
                 if eye_bound.as_ref().map(|b| b.0) != Some(s.eye_generation) {
-                    eye_bound = s.eye_views.as_ref().map(|views| {
+                    *eye_bound = s.eye_views.as_ref().map(|views| {
                         let groups = [0, 1, 2].map(|set| {
                             [0, 1].map(|eye| {
                                 device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1108,16 +1124,28 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                         (s.eye_generation, groups)
                     });
                 }
-                s.world.filter(|_| eye_bound.is_some())
+                world.set(s.world.filter(|_| eye_bound.is_some()));
+                Layers {
+                    world: true,
+                    panel: None,
+                    // The pictures were drawn for these poses: this frame's
+                    // prediction made one frame ago, or older ones (game
+                    // late, paused, loading); the runtime reprojects.
+                    eyes: world.get().map(|w| w.1),
+                }
             };
-            let layers = Layers {
-                world: true,
-                panel: None,
-                // The pictures were drawn for these poses, one frame ago or
-                // (game paused, loading) longer: the runtime reprojects.
-                eyes: world.map(|w| w.1),
-            };
-            let outcome = xr.frame(&layers, Some(&pw64_gfx::QUEUE_GATE), |frame| {
+            let outcome = xr.frame(choose, Some(&pw64_gfx::QUEUE_GATE), |frame| {
+                let world = world.get();
+                let eye_bound = eye_bound.borrow();
+                // Stereo report: a new picture, or the last one again?
+                if let Some((_, _, serial)) = world {
+                    if serial == last_serial {
+                        eyes_repeated += 1;
+                    } else {
+                        eyes_new += 1;
+                    }
+                    last_serial = serial;
+                }
                 *NEXT_EYES.lock().unwrap_or_else(|e| e.into_inner()) = frame.next_eyes;
                 // A headset frame starts. Cue the game `lead()` before the
                 // next one starts (display pacing, window.rs `App::start`):
@@ -1205,7 +1233,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     });
                     // The stereo world: this eye's picture, then the panel
                     // over it where the window drew something.
-                    if let (Some((set, _)), Some((_, groups))) = (world, &eye_bound) {
+                    if let (Some((set, _, _)), Some((_, groups))) = (world, &*eye_bound) {
                         pass.set_pipeline(&pipeline);
                         pass.set_bind_group(0, &groups[set][i], &[]);
                         pass.draw(0..6, 0..1);
@@ -1338,12 +1366,15 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                          frame: hand-over to panel avg {to_panel_avg:.1} max \
                          {to_panel_max:.1} ms, age when the headset draws it avg {age_avg:.1} \
                          max {age_max:.1} ms, then shown {ahead_avg:.1} (max {ahead_max:.1}) ms \
-                         later; headset frames not shown {idle}; longest, ms: {}",
+                         later; headset frames not shown {idle}; stereo: {} new eye pictures, \
+                         {} shown again; longest, ms: {}",
                         if hitch { "hitch, " } else { "" },
                         started.elapsed().as_secs_f64(),
                         shown as f64 / secs,
                         ms(worst_gap),
                         ms(worst_wait),
+                        std::mem::take(&mut eyes_new),
+                        std::mem::take(&mut eyes_repeated),
                         detail.join(", ")
                     ),
                     hitch,

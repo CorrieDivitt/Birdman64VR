@@ -25,7 +25,33 @@
          }
  
          rbData->unk70 = func_80313F08(&D_80371070, ABS_NOEQ(stickX));
-@@ -369,11 +378,14 @@ void rocketBeltMovementFrame(RocketBeltData* rbData, u8 gameState) {
+@@ -214,14 +223,23 @@ void rocketBeltMovementFrame(RocketBeltData* rbData, u8 gameState) {
+             rbData->unk78 = 0.0f;
+         }
+         if ((demoButtonPress(rbData->contIdx, R_TRIG) != 0) && (gameState != GAME_STATE_RESULTS)) {
+-            if (rbData->unk5C != 1) {
++            // PW64 VR (pw64_widescreen_aspect < 0): R switches between the
++            // chase camera and the pilot's eyes (camera mode 1: the pilot's
++            // matrix plus the eye offset, head hidden) instead of tilting
++            // the chase camera down.
++            if (pw64_widescreen_aspect < 0.0f) {
++                rbData->unk5C = (rbData->unk5C == 1) ? 4 : 1;
++                rbData->unk58 = 0.0f;
++            } else if (rbData->unk5C != 1) {
+                 if (rbData->unk58 == 1.5707961f) {
+                     rbData->unk58 = 0.0f;
+                 } else {
+                     rbData->unk58 = 1.5707961f;
+                 }
+             }
+-            rbData->unk5C = 4;
++            if (pw64_widescreen_aspect >= 0.0f) {
++                rbData->unk5C = 4;
++            }
+             rbData->unk60 = 0.8f;
+             if (gameState != GAME_STATE_RESULTS) {
+                 sndPlaySfxVolPitchPan(SFX_UI_CAMERA_MOVE, 0.3f, 0.65f, 0.0f);
+@@ -369,11 +387,14 @@ void rocketBeltMovementFrame(RocketBeltData* rbData, u8 gameState) {
                  } else {
                      hud->speed = rbData->unk1F4 * 3.6f * 0.7f;
                  }
@@ -42,7 +68,7 @@
                  } else {
                      if ((rbData->unkF8 <= 0.0f) && (rbData->unkEC == 0)) {
                          hudWarningText(TEXT_FUEL_OUT, 1.5f, 8.0f);
-@@ -851,3 +863,8 @@ void func_80326E40(RocketBeltData* rbData) {
+@@ -851,3 +872,8 @@ void func_80326E40(RocketBeltData* rbData) {
      }
      uvDobjState(rbData->objId, rbData->unk2);
 +    // PW64 split-screen: the first-person near draw and pilot hide apply to

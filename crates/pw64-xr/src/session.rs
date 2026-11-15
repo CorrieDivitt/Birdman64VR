@@ -484,7 +484,8 @@ impl XrContext {
     }
 
     /// One headset frame: blocks until the runtime wants it (its display
-    /// rate), then shows `layers`. `draw` renders into the targets in its
+    /// rate), then shows `layers()`, asked for only then so it can name the
+    /// newest pictures ([`Layers::eyes`]). `draw` renders into the targets in its
     /// [`Frame`] and must submit its commands to the queue before
     /// returning; it is only called for [`FrameOutcome::Rendered`].
     ///
@@ -497,7 +498,7 @@ impl XrContext {
     /// loses the device (seen with Quest Link).
     pub fn frame(
         &mut self,
-        layers: &Layers,
+        layers: impl FnOnce() -> Layers,
         queue_lock: Option<&std::sync::Mutex<()>>,
         draw: impl FnOnce(Frame<'_>),
     ) -> Result<FrameOutcome, XrError> {
@@ -508,6 +509,7 @@ impl XrContext {
             return Ok(FrameOutcome::Idle);
         }
         let state = self.frame_waiter.wait()?;
+        let layers = layers();
         let waiting = std::time::Instant::now();
         let _queue = queue_lock.map(|m| m.lock().unwrap_or_else(|e| e.into_inner()));
         self.queue_wait = waiting.elapsed();

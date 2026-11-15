@@ -181,68 +181,72 @@ fn main() {
     let mut display_step = (f64::MAX, 0f64);
     let mut period_ms = 0.0;
     loop {
-        let outcome = xr.frame(&layers, None, |frame| {
-            let time = frame.time;
-            let wall = start.elapsed().as_secs_f64();
-            let t0 = *first_display.get_or_insert(time.display_ns);
-            let display = (time.display_ns - t0) as f64 / 1e9;
-            if let Some((w, d)) = prev {
-                let (ws, ds) = ((wall - w) * 1e3, (time.display_ns - d) as f64 / 1e6);
-                wall_step = (wall_step.0.min(ws), wall_step.1.max(ws));
-                display_step = (display_step.0.min(ds), display_step.1.max(ds));
-            }
-            prev = Some((wall, time.display_ns));
-            period_ms = time.period_ns as f64 / 1e6;
+        let outcome = xr.frame(
+            || layers,
+            None,
+            |frame| {
+                let time = frame.time;
+                let wall = start.elapsed().as_secs_f64();
+                let t0 = *first_display.get_or_insert(time.display_ns);
+                let display = (time.display_ns - t0) as f64 / 1e9;
+                if let Some((w, d)) = prev {
+                    let (ws, ds) = ((wall - w) * 1e3, (time.display_ns - d) as f64 / 1e6);
+                    wall_step = (wall_step.0.min(ws), wall_step.1.max(ws));
+                    display_step = (display_step.0.min(ds), display_step.1.max(ds));
+                }
+                prev = Some((wall, time.display_ns));
+                period_ms = time.period_ns as f64 / 1e6;
 
-            // (target, uniform slot, mvp or None = clear only, clear colour)
-            let dark = wgpu::Color {
-                r: 0.0,
-                g: 0.004,
-                b: 0.012,
-                a: 1.0,
-            };
-            let mut passes: Vec<(&wgpu::TextureView, usize, Option<Mat4>)> = Vec::new();
-            if let Some(view) = frame.panel {
-                passes.push((view, 0, Some(fill)));
-            }
-            if let Some(eyes) = &frame.eyes {
-                for (i, eye) in eyes.iter().enumerate() {
-                    let mvp = layers
-                        .panel
-                        .is_none()
-                        .then(|| math::mul(&eye.projection, &math::mul(&eye.view, &in_world)));
-                    passes.push((eye.target, 1 + i, mvp));
+                // (target, uniform slot, mvp or None = clear only, clear colour)
+                let dark = wgpu::Color {
+                    r: 0.0,
+                    g: 0.004,
+                    b: 0.012,
+                    a: 1.0,
+                };
+                let mut passes: Vec<(&wgpu::TextureView, usize, Option<Mat4>)> = Vec::new();
+                if let Some(view) = frame.panel {
+                    passes.push((view, 0, Some(fill)));
                 }
-            }
-            let mut encoder = device.create_command_encoder(&Default::default());
-            for (target, slot, mvp) in passes {
-                if let Some(mvp) = &mvp {
-                    let bytes = uniform_bytes(mvp, wall as f32, display as f32);
-                    queue.write_buffer(&slots[slot].0, 0, &bytes);
+                if let Some(eyes) = &frame.eyes {
+                    for (i, eye) in eyes.iter().enumerate() {
+                        let mvp = layers
+                            .panel
+                            .is_none()
+                            .then(|| math::mul(&eye.projection, &math::mul(&eye.view, &in_world)));
+                        passes.push((eye.target, 1 + i, mvp));
+                    }
                 }
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: None,
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: target,
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(dark),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
-                if mvp.is_some() {
-                    pass.set_pipeline(&pipeline);
-                    pass.set_bind_group(0, &slots[slot].1, &[]);
-                    pass.draw(0..6, 0..1);
+                let mut encoder = device.create_command_encoder(&Default::default());
+                for (target, slot, mvp) in passes {
+                    if let Some(mvp) = &mvp {
+                        let bytes = uniform_bytes(mvp, wall as f32, display as f32);
+                        queue.write_buffer(&slots[slot].0, 0, &bytes);
+                    }
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: None,
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: target,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(dark),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+                    if mvp.is_some() {
+                        pass.set_pipeline(&pipeline);
+                        pass.set_bind_group(0, &slots[slot].1, &[]);
+                        pass.draw(0..6, 0..1);
+                    }
                 }
-            }
-            queue.submit([encoder.finish()]);
-        });
+                queue.submit([encoder.finish()]);
+            },
+        );
         match outcome {
             Ok(FrameOutcome::Rendered) => {
                 frames += 1;

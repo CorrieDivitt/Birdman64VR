@@ -1418,12 +1418,14 @@ impl App {
                     .shown
                     .and_then(|fb| g.renderer.fb_last_frame(fb))
                     .cloned();
+                let timing = Instant::now();
                 vr.world(
                     &mut g.renderer,
                     &g.device,
                     g.config.format,
                     frame.as_deref(),
                 );
+                crate::vr::note(crate::vr::Stage::Eyes, timing.elapsed());
             }
             crate::vr::count_frames(q.frames);
             self.frames += q.frames;

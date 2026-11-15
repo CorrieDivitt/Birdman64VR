@@ -182,7 +182,9 @@ void pw64_widescreen_tag(const void* chan, int on) {
     if (pw64_widescreen_xscale(chan) <= 1.0f && !pw64_fill_view(chan)) {
         return;
     }
-    if (on && pw64_fill_view(chan)) {
+    /* VR: no border bars either: the eye pictures have no screen edge for
+     * them to sit on (they showed as black bars floating in the world). */
+    if (on && (pw64_fill_view(chan) || pw64_widescreen_aspect < 0.0f)) {
         pw64_fill_frame = 1;
     }
     gGfxDisplayListHead->words.w0 = (u32)G_NOOP << 24;
