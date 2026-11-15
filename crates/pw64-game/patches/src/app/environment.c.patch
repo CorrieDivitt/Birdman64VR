@@ -8,7 +8,7 @@
  
  typedef struct {
      Vec3F unk0;
-@@ -57,6 +58,53 @@
+@@ -57,6 +58,63 @@
  void env_802E1C1C(s32);
  void env_802E23E0(void);
  void env_802E2504(void);
@@ -16,45 +16,55 @@
 +// PW64 VR: env_802E0CF0's haze band is a card across the view at the far
 +// plane, where the far plane cuts the camera-following sea: on a monitor it
 +// blends that cut into the sky. In the headset there is no far-plane cut
-+// and the player looks all around: the card stood in the sea at a fixed
-+// distance and the sea went on behind it. This is the same band as a ring
-+// around the camera on the sea (z = 0): clear at 0.875 far, fog-coloured
-+// from far out to 30 km, past the sea model's edge, so the sea fades into
-+// the haze in every direction. Vertices are s16, hence the 30 km.
++// and the player looks all around, so the band is a ring around the camera
++// on the sea (z = 0) instead. It thickens with distance like real haze:
++// clear at 0.875 far (as the card), then rising quickly and levelling off,
++// fully fog-coloured at 17 km (the sea model ends at about 17.7 km) and on
++// out to 30 km (vertices are s16). A solid band from the far plane looked
++// like a wall from altitude. One triangle strip per segment, outwards:
++// 24 x 14 dynamic vertices of the frame's 800.
++#define PW64_HAZE_SEGMENTS 24
++#define PW64_HAZE_STEPS 7
 +static void pw64_vr_haze_ring(f32 cx, f32 cy, f32 far, u8 r, u8 g, u8 b) {
++    // Where along the haze (0 at its start, 1 at full) each step is.
++    static const f32 along[PW64_HAZE_STEPS] = { 0.0f, 0.1f, 0.25f, 0.45f, 0.7f, 1.0f, 1.0f };
 +    Mtx4F m;
-+    f32 radius[3];
-+    f32 c0, s0, c1, s1;
++    f32 radius[PW64_HAZE_STEPS];
++    u8 alpha[PW64_HAZE_STEPS];
++    f32 start, full, t, c0, s0, c1, s1;
 +    s32 i, k;
 +
-+    radius[0] = 0.875f * far;
-+    radius[1] = far;
-+    radius[2] = 30000.0f;
-+    if (radius[1] >= radius[2]) {
-+        return;
++    // Infinite view distance can make far huge: the haze still starts
++    // within the sea.
++    start = 0.875f * ((far < 8000.0f) ? far : 8000.0f);
++    full = 17000.0f;
++    for (k = 0; k < PW64_HAZE_STEPS; k++) {
++        t = along[k];
++        radius[k] = start + (full - start) * t;
++        // Ease out: 1 - (1 - t)^2.
++        alpha[k] = (u8)(255.0f * (1.0f - (1.0f - t) * (1.0f - t)));
 +    }
++    radius[PW64_HAZE_STEPS - 1] = 30000.0f;
 +    uvMat4SetIdentity(&m);
 +    m.m[3][0] = cx;
 +    m.m[3][1] = cy;
 +    uvGfxStatePush();
 +    uvGfxSetFlags(GFX_STATE_XLU | GFX_STATE_AA | GFX_STATE_GOURAUD | GFX_STATE_TEXTURE_NONE);
 +    // Both faces: the ring is seen from above and its winding is not the
-+    // card's (the first build without this showed nothing).
++    // card's (with culling on it did not show).
 +    uvGfxClearFlags(GFX_STATE_DECAL | GFX_STATE_ZBUFFER | GFX_STATE_CULL_FRONT | GFX_STATE_CULL_BACK);
 +    uvGfx_802236CC(&m);
-+    for (i = 0; i < 32; i++) {
-+        c0 = uvCosF(i * (6.2831855f / 32.0f));
-+        s0 = uvSinF(i * (6.2831855f / 32.0f));
-+        c1 = uvCosF((i + 1) * (6.2831855f / 32.0f));
-+        s1 = uvSinF((i + 1) * (6.2831855f / 32.0f));
-+        for (k = 0; k < 2; k++) {
-+            uvVtxBeginPoly();
-+            uvVtx(c0 * radius[k], s0 * radius[k], 0, 0, 0, r, g, b, (k == 0) ? 0 : 0xFF);
-+            uvVtx(c1 * radius[k], s1 * radius[k], 0, 0, 0, r, g, b, (k == 0) ? 0 : 0xFF);
-+            uvVtx(c1 * radius[k + 1], s1 * radius[k + 1], 0, 0, 0, r, g, b, 0xFF);
-+            uvVtx(c0 * radius[k + 1], s0 * radius[k + 1], 0, 0, 0, r, g, b, 0xFF);
-+            uvVtxEndPoly();
++    for (i = 0; i < PW64_HAZE_SEGMENTS; i++) {
++        c0 = uvCosF(i * (6.2831855f / PW64_HAZE_SEGMENTS));
++        s0 = uvSinF(i * (6.2831855f / PW64_HAZE_SEGMENTS));
++        c1 = uvCosF((i + 1) * (6.2831855f / PW64_HAZE_SEGMENTS));
++        s1 = uvSinF((i + 1) * (6.2831855f / PW64_HAZE_SEGMENTS));
++        uvBeginTmesh();
++        for (k = 0; k < PW64_HAZE_STEPS; k++) {
++            uvVtx(c0 * radius[k], s0 * radius[k], 0, 0, 0, r, g, b, alpha[k]);
++            uvVtx(c1 * radius[k], s1 * radius[k], 0, 0, 0, r, g, b, alpha[k]);
 +        }
++        uvEndTmesh();
 +    }
 +    uvGfxMtxViewPop();
 +    uvGfxStatePop();
@@ -62,7 +72,7 @@
  
  s32 env_802E0CF0(void) {
      f32 pad_sp174;
-@@ -93,10 +141,21 @@ s32 env_802E0CF0(void) {
+@@ -93,10 +151,21 @@ s32 env_802E0CF0(void) {
      u8 fogA;
      f32 sp3C;
      f32 sp38;
@@ -84,7 +94,7 @@
 +    }
      sp154.x = sp68.m[1][0];
      sp154.y = sp68.m[1][1];
-@@ -106,16 +165,16 @@ s32 env_802E0CF0(void) {
+@@ -106,16 +175,16 @@ s32 env_802E0CF0(void) {
      sp130.z = 0.0f;
      uvVec3Cross(&sp13C, &sp130, &sp154);
      uvVec3Normal(&sp13C, &sp13C);
@@ -108,7 +118,7 @@
          uvEnvProps(D_80362690->envId, ENV_PROP_FOG_FACTOR(0.996f), ENV_PROP_END);
          return 0;
      }
-@@ -127,12 +186,12 @@ s32 env_802E0CF0(void) {
+@@ -127,12 +196,12 @@ s32 env_802E0CF0(void) {
      }
      sp16C = (sp54 * sp60) + spF4;
      sp170 = (sp54 * sp5C) + spF8;
@@ -127,7 +137,7 @@
      if (var_fa1 == spFC) {
          sp54 = 0.0f;
      } else {
-@@ -140,7 +199,7 @@ s32 env_802E0CF0(void) {
+@@ -140,7 +209,7 @@ s32 env_802E0CF0(void) {
      }
      var_fa1 = 1.0f / camera->unk20;
      var_ft4 = (camera->clipX1 * (var_fa1));
@@ -136,7 +146,7 @@
      sp148 = sp154.y * sp38;
      sp14C = -sp154.x * sp38;
      sp38 = sp68.m[3][2] / 15.0f;
-@@ -313,7 +368,9 @@ void env_802E14E8(Vec3F* arg0, f32 arg1, f32 arg2, f32 arg3, f32 arg4) {
+@@ -313,7 +378,9 @@ void env_802E14E8(Vec3F* arg0, f32 arg1, f32 arg2, f32 arg3, f32 arg4) {
  void env_802E15F0(void) {
      f32 var_fv1;
  
@@ -147,7 +157,7 @@
      if ((D_80359D80.unk20 < D_80359D80.unk10) && (var_fv1 > 0.0f)) {
          var_fv1 = -var_fv1;
      }
-@@ -321,7 +378,7 @@ void env_802E15F0(void) {
+@@ -321,7 +388,7 @@ void env_802E15F0(void) {
          var_fv1 = -var_fv1;
      }
      D_80359D80.unk10 += var_fv1;
