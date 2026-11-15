@@ -57,6 +57,16 @@ pub(crate) fn headless() -> bool {
     cfg!(target_os = "android") && active()
 }
 
+/// The headset thread wants the game paused whatever the player's
+/// "pause in background" setting says (headset taken off, system menu).
+static PAUSE: AtomicBool = AtomicBool::new(false);
+
+/// Whether a pause request (window.rs `UserEvent::Pause`) came from the
+/// headset thread; clears it.
+pub(crate) fn take_pause() -> bool {
+    PAUSE.swap(false, Ordering::Relaxed)
+}
+
 /// The size of the window's picture when it is not the window's
 /// ([`headless`]): a 4:3 panel about as sharp as the headset can show it at
 /// the panel's distance.
@@ -243,6 +253,8 @@ mod stub {
         }
 
         pub(crate) fn probe(&mut self, _: &wgpu::Device, _: &wgpu::Queue, _: &wgpu::TextureView) {}
+
+        pub(crate) fn publish(&mut self) {}
     }
 }
 
@@ -345,19 +357,30 @@ mod real {
     const PANEL_HEIGHT_M: f32 = 2.175;
     const PANEL_DISTANCE_M: f32 = 2.5;
 
-    /// The panel texture the window draws into; `generation` changes when
-    /// it is replaced (window resize).
+    /// The panel textures. The window thread draws a frame into one (many
+    /// passes, each its own submit) while the headset thread shows the
+    /// other, `front`: the last finished frame ([`Vr::publish`]). With one
+    /// texture the headset caught frames between passes (a settings menu
+    /// that flickers: frames without it). `generation` changes when the
+    /// textures are replaced (window resize).
+    ///
+    /// The headset thread keeps this locked from choosing `front` until it
+    /// has submitted the commands that read it, so a publish (and with it
+    /// the window's next draw into that texture) cannot get in between.
     #[derive(Default)]
     struct Source {
         generation: u64,
-        view: Option<wgpu::TextureView>,
+        views: Option<[wgpu::TextureView; 2]>,
+        front: usize,
     }
 
     pub(crate) struct Vr {
         /// Until the first [`Vr::target`] call starts the headset thread.
         xr: Option<XrContext>,
         source: Arc<Mutex<Source>>,
-        panel: Option<(wgpu::Texture, wgpu::TextureView)>,
+        panel: Option<[(wgpu::Texture, wgpu::TextureView); 2]>,
+        /// The texture of `panel` the window draws the next frame into.
+        back: usize,
         /// The window thread's probe bar (`probe_on`).
         probe: Option<Bar>,
     }
@@ -414,6 +437,7 @@ mod real {
                     xr: Some(xr),
                     source: Arc::default(),
                     panel: None,
+                    back: 1,
                     probe: None,
                 },
             ))
@@ -421,7 +445,8 @@ mod real {
 
         /// The texture the window draws its frame into instead of the
         /// surface (same format and size as the surface, so every pass
-        /// works unchanged). Starts the headset thread on the first call.
+        /// works unchanged); [`Self::publish`] it when the frame is
+        /// complete. Starts the headset thread on the first call.
         pub(crate) fn target(
             &mut self,
             device: &wgpu::Device,
@@ -431,30 +456,35 @@ mod real {
             let stale = self
                 .panel
                 .as_ref()
-                .is_none_or(|(t, _)| (t.width(), t.height()) != size || t.format() != format);
+                .is_none_or(|[(t, _), _]| (t.width(), t.height()) != size || t.format() != format);
             if stale {
-                let texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("vr panel"),
-                    size: wgpu::Extent3d {
-                        width: size.0.max(1),
-                        height: size.1.max(1),
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_SRC,
-                    view_formats: &[],
+                let panel = [0, 1].map(|_| {
+                    let texture = device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("vr panel"),
+                        size: wgpu::Extent3d {
+                            width: size.0.max(1),
+                            height: size.1.max(1),
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::TEXTURE_BINDING
+                            | wgpu::TextureUsages::COPY_SRC,
+                        view_formats: &[],
+                    });
+                    let view = texture.create_view(&Default::default());
+                    (texture, view)
                 });
-                let view = texture.create_view(&Default::default());
-                let mut s = self.source.lock().unwrap();
+                let mut s = self.source.lock().unwrap_or_else(|e| e.into_inner());
                 s.generation += 1;
-                s.view = Some(view.clone());
+                s.views = Some([panel[0].1.clone(), panel[1].1.clone()]);
+                s.front = 0;
                 drop(s);
-                self.panel = Some((texture, view));
+                self.back = 1;
+                self.panel = Some(panel);
             }
             if let Some(xr) = self.xr.take() {
                 let source = self.source.clone();
@@ -466,7 +496,18 @@ mod real {
                     log(&format!("could not start the headset thread: {e}"), true);
                 }
             }
-            self.panel.as_ref().map(|(_, v)| v.clone())
+            self.panel.as_ref().map(|p| p[self.back].1.clone())
+        }
+
+        /// The frame drawn into [`Self::target`]'s texture is complete:
+        /// the headset shows it from now on, and the next frame is drawn
+        /// into the other texture.
+        pub(crate) fn publish(&mut self) {
+            if self.panel.is_none() {
+                return;
+            }
+            self.source.lock().unwrap_or_else(|e| e.into_inner()).front = self.back;
+            self.back ^= 1;
         }
 
         /// Latency probe ([`probe_on`]): the window thread's bar, drawn
@@ -727,8 +768,12 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             })
         });
         let probe = probe_on().then(|| Bar::new(&device, xr.format(), 2));
-        // Per eye, for the current panel texture: (generation, aspect, groups).
-        let mut bound: Option<(u64, f32, [wgpu::BindGroup; 2])> = None;
+        // For the current panel textures: (generation, aspect, bind groups
+        // per texture and eye).
+        let mut bound: Option<(u64, f32, [[wgpu::BindGroup; 2]; 2])> = None;
+        // Session state, to pause the game when the player is away.
+        let mut was_focused = false;
+        let mut last_outcome = None;
         let layers = Layers {
             world: true,
             panel: None,
@@ -763,23 +808,26 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 if let Some(t) = *super::PANEL_AT.lock().unwrap_or_else(|e| e.into_inner()) {
                     super::PANEL_AGE.add(t.elapsed());
                 }
-                {
-                    let s = source.lock().unwrap();
-                    if bound.as_ref().map(|b| b.0) != Some(s.generation) {
-                        bound = s.view.as_ref().map(|view| {
-                            let t = view.texture();
-                            let groups = [0, 1].map(|i| {
+                // Locked until the submit below (see `Source`).
+                let s = source.lock().unwrap_or_else(|e| e.into_inner());
+                if bound.as_ref().map(|b| b.0) != Some(s.generation) {
+                    bound = s.views.as_ref().map(|views| {
+                        let t = views[0].texture();
+                        let groups = [0, 1].map(|texture| {
+                            [0, 1].map(|eye| {
                                 device.create_bind_group(&wgpu::BindGroupDescriptor {
                                     label: Some("vr panel"),
                                     layout: &pipeline.get_bind_group_layout(0),
                                     entries: &[
                                         wgpu::BindGroupEntry {
                                             binding: 0,
-                                            resource: uniforms[i].as_entire_binding(),
+                                            resource: uniforms[eye].as_entire_binding(),
                                         },
                                         wgpu::BindGroupEntry {
                                             binding: 1,
-                                            resource: wgpu::BindingResource::TextureView(view),
+                                            resource: wgpu::BindingResource::TextureView(
+                                                &views[texture],
+                                            ),
                                         },
                                         wgpu::BindGroupEntry {
                                             binding: 2,
@@ -787,12 +835,13 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                                         },
                                     ],
                                 })
-                            });
-                            let aspect = t.width() as f32 / t.height().max(1) as f32;
-                            (s.generation, aspect, groups)
+                            })
                         });
-                    }
+                        let aspect = t.width() as f32 / t.height().max(1) as f32;
+                        (s.generation, aspect, groups)
+                    });
                 }
+                let front = s.front;
                 let mut encoder = device.create_command_encoder(&Default::default());
                 for (i, eye) in eyes.iter().enumerate() {
                     if let Some((_, aspect, _)) = &bound {
@@ -825,7 +874,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     });
                     if let Some((_, aspect, groups)) = &bound {
                         pass.set_pipeline(&pipeline);
-                        pass.set_bind_group(0, &groups[i], &[]);
+                        pass.set_bind_group(0, &groups[front][i], &[]);
                         pass.draw(0..6, 0..1);
                         // Latency probe: this thread's bar, on the panel's
                         // plane just above the window thread's.
@@ -846,7 +895,25 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 }
                 // Directly: this thread holds the queue lock for the frame.
                 queue.submit([encoder.finish()]);
+                drop(s);
             });
+            for line in xr.take_log() {
+                log(&line, true);
+            }
+            let kind = outcome.as_ref().ok().copied();
+            if kind.is_some() && kind != last_outcome {
+                last_outcome = kind;
+                log(&format!("frames: {kind:?}"), true);
+            }
+            // The player is away (headset off, system menu in front): pause
+            // the game. On the Quest nothing else does: the activity keeps
+            // running.
+            let focused = xr.focused();
+            if was_focused && !focused && super::headless() {
+                super::PAUSE.store(true, Ordering::Relaxed);
+                crate::window::request_pause();
+            }
+            was_focused = focused;
             match outcome {
                 Ok(FrameOutcome::Rendered) => {
                     let now = Instant::now();

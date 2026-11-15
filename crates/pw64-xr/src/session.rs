@@ -120,6 +120,11 @@ pub struct XrContext {
     blend_mode: xr::EnvironmentBlendMode,
     format: wgpu::TextureFormat,
     running: bool,
+    /// The session has the player's attention (state FOCUSED): the headset
+    /// is on and no system menu is in front.
+    focused: bool,
+    /// Session state changes since the last [`Self::take_log`].
+    log: Vec<String>,
     /// The runtime's clock can be read (`Instance::now`).
     has_clock: bool,
     /// How long the last frame waited for the queue lock.
@@ -297,6 +302,8 @@ impl XrContext {
             blend_mode,
             format,
             running: false,
+            focused: false,
+            log: Vec::new(),
             has_clock,
             queue_wait: std::time::Duration::ZERO,
             gpu,
@@ -344,6 +351,17 @@ impl XrContext {
         self.eyes.size_px
     }
 
+    /// The session has the player's attention: the headset is worn and no
+    /// system menu is in front of the app.
+    pub fn focused(&self) -> bool {
+        self.focused
+    }
+
+    /// One line per session state change since the last call, for logs.
+    pub fn take_log(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.log)
+    }
+
     /// The runtime's name and version, for logs.
     pub fn runtime(&self) -> String {
         self.instance.properties().map_or_else(
@@ -362,6 +380,8 @@ impl XrContext {
             match event {
                 SessionStateChanged(e) => {
                     log::debug!("OpenXR session state {:?}", e.state());
+                    self.log.push(format!("session state {:?}", e.state()));
+                    self.focused = e.state() == xr::SessionState::FOCUSED;
                     match e.state() {
                         xr::SessionState::READY => {
                             self.session.begin(VIEW_TYPE)?;
@@ -377,7 +397,10 @@ impl XrContext {
                         _ => {}
                     }
                 }
-                InstanceLossPending(_) => return Ok(false),
+                InstanceLossPending(_) => {
+                    self.log.push("instance loss pending".into());
+                    return Ok(false);
+                }
                 _ => {}
             }
         }

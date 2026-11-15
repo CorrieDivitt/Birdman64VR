@@ -79,7 +79,7 @@ pub fn notify_toast(text: String) {
 /// Called by the input thread when the last controller disconnected (U26).
 /// Same route as [`notify_toast`]: the decision (the player's setting, a
 /// running game, no automation) is made on the window thread.
-#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
+#[cfg_attr(target_os = "ios", allow(dead_code))]
 pub fn request_pause() {
     if let Some(p) = PROXY.get() {
         let _ = p.send_event(UserEvent::Pause);
@@ -573,6 +573,9 @@ struct App {
     vr: Option<crate::vr::Vr>,
     /// When the game handed over the frame the next redraw shows (`Queued`).
     vr_shown_at: Option<Instant>,
+    /// Birdman64VR on the Quest: when the last redraw started (`redraw`
+    /// paces the open settings overlay by it).
+    headless_drawn: Instant,
     /// The framebuffer the game last swapped to (None: nothing yet).
     shown: Option<u32>,
     modifiers: ModifiersState,
@@ -696,6 +699,7 @@ pub fn run(setup: bool, ask_rom: bool) -> ! {
         gpu: None,
         vr: None,
         vr_shown_at: None,
+        headless_drawn: Instant::now(),
         shown: None,
         modifiers: ModifiersState::empty(),
         fps_timer: Instant::now(),
@@ -1459,6 +1463,16 @@ impl App {
         // Birdman64VR on the Quest: no surface image; the frame is drawn
         // into the VR panel only (vr.rs `headless`).
         let headless = self.vr.is_some() && crate::vr::headless();
+        if headless {
+            // The open overlay redraws by itself and no present blocks
+            // here: hold it to one redraw per headset frame.
+            if settings::is_open() {
+                let mhz = crate::vr::headset_mhz().unwrap_or(72_000).max(1);
+                let period = Duration::from_secs_f64(1000.0 / mhz as f64);
+                std::thread::sleep(period.saturating_sub(self.headless_drawn.elapsed()));
+            }
+            self.headless_drawn = Instant::now();
+        }
         if !headless && !g.surface_ready() {
             if settings::is_open() {
                 g.window.request_redraw();
@@ -1606,6 +1620,10 @@ impl App {
         }
         crate::vr::note(crate::vr::Stage::Draw, timing.elapsed());
         if panel_view.is_some() {
+            // The frame is complete: the headset shows it from here on.
+            if let Some(vr) = &mut self.vr {
+                vr.publish();
+            }
             crate::vr::panel_updated(self.vr_shown_at.take());
         }
         let timing = Instant::now();
@@ -1970,6 +1988,13 @@ impl ApplicationHandler<UserEvent> for App {
                 quit(code);
             }
             UserEvent::Settings => self.toggle_settings(),
+            // Birdman64VR: the headset thread's pause (player away) does
+            // not depend on the "pause in background" setting.
+            UserEvent::Pause if crate::vr::take_pause() => {
+                if self.game_started() && !settings::is_open() {
+                    self.open_settings();
+                }
+            }
             UserEvent::Pause => self.auto_pause(),
             UserEvent::Toast(text) => self.toast.show(&text, 6),
             #[cfg(feature = "first-run")]
