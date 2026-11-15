@@ -109,6 +109,35 @@ quad-layer panel.
 - The predicted display time re-syncs now and then (steps of 0 or hundreds
   of ms, e.g. around putting the headset on): clamp dt when the game uses it.
 
+## Quest (native, Android)
+- **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
+  The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`
+  on the launcher intent, or the app starts as a 2D panel; head-tracking
+  feature; `com.oculus.supportedDevices`; the Khronos loader's permissions
+  and `<queries>`, which its AAR would merge in under Gradle) and the Khronos
+  loader (`libopenxr_loader.so`, from the release AAR, sha256-pinned) is
+  packed next to `libbirdman64.so`. Meta supports the Khronos loader from
+  1.0.34 on (OS v62+). The loader needs only libc/liblog/libandroid.
+- **Start:** no command line on Android, so `vr::requested()` is "the loader
+  library is in the native lib dir". The phone flavour never asks.
+- **Loader and instance:** `XrContext::new` takes the VM and activity
+  (`pw64_xr::AndroidApp`, from android-activity): `xrInitializeLoaderKHR`
+  right after loading (`XR_KHR_loader_init_android`), then the instance with
+  `XR_KHR_android_create_instance`. Called from `App::start`, i.e. after the
+  activity and its window exist.
+- **Headless window:** in VR the activity's surface is not shown, so it is
+  never configured, acquired or presented (`vr::headless()`); `redraw` draws
+  the frame, toasts and overlay into the panel texture only. The panel's
+  size is fixed (`vr::panel_size()`, 1440x1080) instead of the window's. No
+  touch controls there.
+- **Lifecycle:** headset off → the runtime stops the session (`Idle` until
+  READY again) and Android suspends the activity, which pauses the game in
+  the settings overlay as on a phone. The headset thread failing quits the
+  app (nothing else to show the game on).
+- `[vr]` lines all go to logcat (`adb logcat -s birdman64`).
+- Not done yet: Touch controllers, refresh rate above the default, quad
+  layer recheck, foveation.
+
 ## Test
 `cargo run --release -p pw64-xr --example panel -- <quad|both|world>` with
 Quest Link running: a three-band pattern panel straight ahead (fast bar on

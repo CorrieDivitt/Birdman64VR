@@ -119,6 +119,8 @@ low 4 GB doesn't matter. The fixed-window modes (`strict`/`alias`) still compile
 - `ANDROID_HOME=… ANDROID_NDK_HOME=… packaging/android/build-apk.sh` (no Gradle,
   16 KB-aligned) → `target/android-apk/birdman64.apk`, ~21 MB, debug-signed. It has
   the game C linked in, so it is for development only.
+  Birdman64VR: `--quest` builds the Meta Quest (VR) flavour,
+  `birdman64-quest.apk` (docs/notes/vr.md "Quest").
 - `adb install -r` it, start once, `adb push <rom>.z64
   /sdcard/Android/data/app.birdman64vr/files/rom/`, restart; `adb logcat -s birdman64`.
 - Test order: platform test binaries via `adb push` + `adb shell` first, then boot to
