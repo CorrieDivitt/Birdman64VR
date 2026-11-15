@@ -498,7 +498,7 @@ impl Hud {
             self.gpu_smooth = None;
             self.gpu_us.store(0, Ordering::Relaxed);
         }
-        let ppp = gpu.window.scale_factor() as f32;
+        let ppp = gpu.scale_factor();
         let zoom = settings::ui_zoom(gpu.config.height, ppp);
         if (self.ctx.zoom_factor() - zoom).abs() > f32::EPSILON {
             self.ctx.set_zoom_factor(zoom);

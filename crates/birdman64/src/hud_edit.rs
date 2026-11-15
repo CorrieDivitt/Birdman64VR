@@ -391,7 +391,7 @@ impl Painter {
     }
 
     pub fn render(&mut self, gpu: &crate::window::Gpu, view: &wgpu::TextureView, e: &Editor) {
-        let ppp = gpu.window.scale_factor() as f32;
+        let ppp = gpu.scale_factor();
         let raw = crate::settings::raw_input_zoom(
             gpu,
             ppp,

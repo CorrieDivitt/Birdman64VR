@@ -120,9 +120,13 @@ pub struct XrContext {
     blend_mode: xr::EnvironmentBlendMode,
     format: wgpu::TextureFormat,
     running: bool,
-    /// The session has the player's attention (state FOCUSED): the headset
-    /// is on and no system menu is in front.
+    /// The session has input focus (state FOCUSED): no system menu is in
+    /// front. On a Quest this outlasts taking the headset off by about ten
+    /// seconds, hence `present`.
     focused: bool,
+    /// The headset is worn (`XR_EXT_user_presence`; true where the runtime
+    /// does not report it).
+    present: bool,
     /// Session state changes since the last [`Self::take_log`].
     log: Vec<String>,
     /// The runtime's clock can be read (`Instance::now`).
@@ -197,6 +201,8 @@ impl XrContext {
         }
         let mut enabled = xr::ExtensionSet::default();
         enabled.khr_vulkan_enable2 = true;
+        // Optional: tells us when the headset is taken off and put on.
+        enabled.ext_user_presence = available.ext_user_presence;
         // Android: the instance is created for an activity.
         #[cfg(target_os = "android")]
         {
@@ -303,6 +309,7 @@ impl XrContext {
             format,
             running: false,
             focused: false,
+            present: true,
             log: Vec::new(),
             has_clock,
             queue_wait: std::time::Duration::ZERO,
@@ -354,7 +361,7 @@ impl XrContext {
     /// The session has the player's attention: the headset is worn and no
     /// system menu is in front of the app.
     pub fn focused(&self) -> bool {
-        self.focused
+        self.focused && self.present
     }
 
     /// One line per session state change since the last call, for logs.
@@ -396,6 +403,13 @@ impl XrContext {
                         }
                         _ => {}
                     }
+                }
+                UserPresenceChangedEXT(e) => {
+                    self.present = e.is_user_present();
+                    self.log.push(format!(
+                        "headset {}",
+                        if self.present { "put on" } else { "taken off" }
+                    ));
                 }
                 InstanceLossPending(_) => {
                     self.log.push("instance loss pending".into());

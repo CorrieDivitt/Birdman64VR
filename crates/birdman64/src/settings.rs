@@ -850,7 +850,7 @@ impl Overlay {
         self.running_mode = gpu.display_mode;
         self.running_res = gpu.fullscreen_res;
         // U1: pointer coordinates divide by ppp * zoom.
-        let native_ppp = gpu.window.scale_factor() as f32;
+        let native_ppp = gpu.scale_factor();
         self.ppp = native_ppp * ui_zoom(gpu.config.height, native_ppp);
         self.volume = (audio::volume() * 1000.0).round().clamp(0.0, 1000.0) as u32;
         // D2: what the screen shows right now; close() saves what differs.
@@ -1490,7 +1490,7 @@ impl Overlay {
         self.running_res = gpu.fullscreen_res;
         // U1: the UI zooms with the window height (readable on a TV).
         // Pointer coordinates divide by ppp * zoom.
-        let native_ppp = gpu.window.scale_factor() as f32;
+        let native_ppp = gpu.scale_factor();
         let zoom = ui_zoom(gpu.config.height, native_ppp);
         if (self.ctx.zoom_factor() - zoom).abs() > f32::EPSILON {
             // Takes effect at the start of the next pass. Only on change:
@@ -1643,7 +1643,8 @@ impl Overlay {
         // (body + `chrome`) at 80% of the (safe) screen height.
         let cap = (0.8 * screen.height() - self.chrome).max(MIN_BODY);
         let body = self.body_h.min(cap);
-        if MOBILE {
+        // (Birdman64VR: not on the Quest's VR panel, which no finger reaches.)
+        if MOBILE && !crate::vr::headless() {
             // Finger-sized rows with a gap between them, and a wider scroll
             // bar to grab. Rows only react to taps; a drag scrolls the list.
             ctx.style_mut(|s| {

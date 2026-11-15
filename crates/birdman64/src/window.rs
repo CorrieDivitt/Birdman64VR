@@ -477,6 +477,17 @@ impl Gpu {
         }
     }
 
+    /// The display scale the UI layers lay out with (egui's native pixels
+    /// per point). Birdman64VR on the Quest: 1, since the picture is the VR
+    /// panel's and the hidden window's density means nothing for it.
+    pub(crate) fn scale_factor(&self) -> f32 {
+        if crate::vr::headless() {
+            1.0
+        } else {
+            self.window.scale_factor() as f32
+        }
+    }
+
     /// Before a redraw: retries a skipped configure; false = skip this frame.
     fn surface_ready(&mut self) -> bool {
         if self.surface.is_none() {

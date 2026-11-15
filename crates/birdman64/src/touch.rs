@@ -797,7 +797,7 @@ impl Painter {
         if c.layout().buttons.is_empty() {
             return;
         }
-        let ppp = gpu.window.scale_factor() as f32;
+        let ppp = gpu.scale_factor();
         let raw = crate::settings::raw_input_zoom(
             gpu,
             ppp,

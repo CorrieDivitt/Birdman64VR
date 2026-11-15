@@ -578,7 +578,7 @@ impl Screen {
                 self.spawn_worker();
             }
         }
-        let ppp = gpu.window.scale_factor() as f32;
+        let ppp = gpu.scale_factor();
         let zoom = crate::settings::ui_zoom(gpu.config.height, ppp);
         // Same pattern as the settings overlay: only on change, because a
         // pending zoom makes egui keep the previous pass's screen rect.
