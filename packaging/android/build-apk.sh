@@ -62,6 +62,13 @@ case "$(uname -s)" in
     *) HOST=linux-x86_64 EXE= CMD= BAT= ;;
 esac
 BT=$(ls -d "$SDK"/build-tools/* | sort -V | tail -n 1)
+# Birdman64VR, Windows: d8.bat and apksigner.bat take java from JAVA_HOME,
+# else the first java on PATH, which can be an old Java 8 runtime (d8 needs
+# 11+). Use the JDK whose javac is on PATH (Android Studio's jbr).
+if command -v cygpath > /dev/null && command -v javac > /dev/null; then
+    JAVA_HOME=$(cygpath -m "$(dirname "$(dirname "$(command -v javac)")")")
+    export JAVA_HOME
+fi
 OUT=target/android-apk
 
 # Signs aligned APK $1 into $2 with the debug key ($3 = debug) or the release
