@@ -282,8 +282,12 @@ pub struct Frame {
 pub struct Diorama {
     /// The game camera's world matrix: rows right, forward, up, position.
     pub camera: [[f32; 3]; 4],
-    /// The terrain's bounds: min x, y, z, max x, y, z.
+    /// The island's bounds: min x, y, z, max x, y, z.
     pub bounds: [f32; 6],
+    /// On the title: the camera's world matrix at the end of its drop
+    /// (same layout as `camera`). The headset's view stays there, at full
+    /// size, instead of showing a model.
+    pub fixed_view: Option<[[f32; 3]; 4]>,
 }
 
 impl Diorama {
@@ -293,13 +297,20 @@ impl Diorama {
         Self {
             camera: [r(0), r(1), r(2), r(3)],
             bounds: [v[12], v[13], v[14], v[15], v[16], v[17]],
+            fixed_view: None,
         }
     }
 
     /// Camera space ([`Frame::views`]: x right, y up, -z forward) → game
     /// world (z up), row-vector convention.
     pub fn camera_to_world(&self) -> [[f32; 4]; 4] {
-        let [right, forward, up, pos] = self.camera;
+        Self::to_world(&self.camera)
+    }
+
+    /// [`Diorama::camera_to_world`] for a camera world matrix `camera`
+    /// (rows right, forward, up, position).
+    pub fn to_world(camera: &[[f32; 3]; 4]) -> [[f32; 4]; 4] {
+        let [right, forward, up, pos] = *camera;
         let row = |v: [f32; 3], w: f32| [v[0], v[1], v[2], w];
         [
             row(right, 0.0),

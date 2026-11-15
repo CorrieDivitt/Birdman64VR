@@ -92,3 +92,12 @@
 @@ -487,1 +501,2 @@
          menuRender();
 +        pw64_title_hint();
+@@ -502,1 +516,8 @@
+     uvChan_80204B34(camera->unk22C, &camera->unk108);
++    // PW64 VR: where this path ends (the camera once it has dropped in),
++    // for the headset's fixed view of the title (pw64_widescreen.c).
++    extern Mtx4F pw64_vr_title_end;
++    extern int pw64_vr_title_end_set;
++    spathUpdate(&pw64_vr_title_end, D_80378CE0->unk14, 100.0f, 1.0f);
++    uvMat4Mul(&pw64_vr_title_end, &pw64_vr_title_end, &D_80378CE0->unk1EC);
++    pw64_vr_title_end_set = 1;

@@ -114,16 +114,23 @@ int pw64_vr_diorama(const void* chan) {
 
 int pw64_vr_stereo_view = 0;
 
+/* The title camera's pose at the end of its drop (title_screen.c.patch
+ * func_80343B5C): the headset's fixed view of the title. */
+Mtx4F pw64_vr_title_end;
+int pw64_vr_title_end_set = 0;
+
 /* Must match pw64-gfx `interp::DIORAMA_TAG`: G_NOOP with this in w0's low
  * 24 bits (+ the value's index in the low byte) and an f32's bits in w1. */
 #define PW64_DIORAMA_TAG 0x445200u /* "DR" */
 
 /* The diorama's data for the renderer, right after the world tag: the
  * game camera's world matrix (rows right, forward, up, position; xyz) and
- * the island's bounds (min xyz, max xyz). 18 values. */
+ * the island's bounds (min xyz, max xyz), 18 values; on the title, 12
+ * more: the camera's pose at the end of its drop (same layout), where the
+ * headset's view stays fixed instead of showing a model. */
 static void pw64_diorama_tag(const UnkStruct_80204D94* c) {
-    float v[18];
-    int i, k;
+    float v[30];
+    int i, k, n = 18;
     for (i = 0; i < 4; i++) {
         for (k = 0; k < 3; k++) {
             v[i * 3 + k] = c->unk110.m[i][k];
@@ -132,7 +139,16 @@ static void pw64_diorama_tag(const UnkStruct_80204D94* c) {
     if (!pw64_diorama_bounds(c, &v[12])) {
         return;
     }
-    for (i = 0; i < 18; i++) {
+    if (pw64_vr_title_end_set && !(c->unk0 & 2) && D_80362690 != NULL &&
+        D_80362690->state == GAME_STATE_TITLE) {
+        for (i = 0; i < 4; i++) {
+            for (k = 0; k < 3; k++) {
+                v[18 + i * 3 + k] = pw64_vr_title_end.m[i][k];
+            }
+        }
+        n = 30;
+    }
+    for (i = 0; i < n; i++) {
         union {
             float f;
             u32 u;

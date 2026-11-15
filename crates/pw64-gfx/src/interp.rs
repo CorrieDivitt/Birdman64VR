@@ -164,7 +164,7 @@ pub struct Interpreter {
     /// an 'X' marker and the active rect; reset per run.
     split_x: [f32; 2],
     /// Birdman64VR: the island model's values as their tags arrive.
-    diorama_in: [f32; 18],
+    diorama_in: [f32; 30],
     split: Option<[f32; 4]>,
     /// Current movable HUD element (`HUD_ELEM_TAG` markers, 0 = none);
     /// reset per run.
@@ -329,7 +329,7 @@ impl Interpreter {
             vanchor: VAnchor::Middle,
             hud: false,
             split_x: [0.0; 2],
-            diorama_in: [0.0; 18],
+            diorama_in: [0.0; 30],
             split: None,
             elem: 0,
             commands: 0,
@@ -481,8 +481,16 @@ impl Interpreter {
                 let i = (w0 & 0xFF) as usize;
                 if i < self.diorama_in.len() {
                     self.diorama_in[i] = f32::from_bits(w1);
-                    if i == self.diorama_in.len() - 1 {
-                        self.frame.diorama = Some(Diorama::from_values(&self.diorama_in));
+                    if i == 17 {
+                        let v = self.diorama_in[..18].try_into().unwrap();
+                        self.frame.diorama = Some(Diorama::from_values(v));
+                    }
+                    if i == 29
+                        && let Some(d) = self.frame.diorama.as_mut()
+                    {
+                        let v = &self.diorama_in[18..];
+                        d.fixed_view =
+                            Some([0, 1, 2, 3].map(|r| [v[r * 3], v[r * 3 + 1], v[r * 3 + 2]]));
                     }
                 }
             }

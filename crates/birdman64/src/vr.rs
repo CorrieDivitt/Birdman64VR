@@ -573,17 +573,36 @@ mod real {
 
     /// The island model (outside flight, [`pw64_gfx::Diorama`]): how wide
     /// it is, in metres.
-    const MODEL_DIAMETER_M: f32 = 1.6;
+    const MODEL_DIAMETER_M: f32 = 2.2;
     /// Where its centre (the island's middle at sea level) sits in the
     /// seated space, in metres: on a table below the menus, about where a
-    /// desk would be (from about 0.6 to 2.2 m ahead). The first try, 3 m
-    /// wide behind the panel, was hidden by the level select's big menus.
-    const MODEL_CENTRE_M: [f32; 3] = [0.0, -0.6, -1.4];
+    /// desk would be (from about 0.3 to 2.5 m ahead). The first try, 3 m
+    /// wide behind the panel, was hidden by the level select's big menus;
+    /// the second, 1.6 m, was a little far away.
+    const MODEL_CENTRE_M: [f32; 3] = [0.0, -0.65, -1.4];
     /// How much higher the menus float while the model is shown, so they
     /// clear it: their lower edge about 13 degrees below eye level.
     const MODEL_PANEL_UP_M: f32 = 0.5;
     /// Around the model: a dim, slightly blue room.
     const MODEL_BACKGROUND: [f64; 3] = [0.012, 0.016, 0.026];
+
+    /// A camera world matrix (rows right, forward, up, position; z up)
+    /// turned level: facing the same way, no pitch or roll.
+    fn level(camera: [[f32; 3]; 4]) -> [[f32; 3]; 4] {
+        let f = camera[1];
+        let len = f[0].hypot(f[1]);
+        let forward = if len > 1e-4 {
+            [f[0] / len, f[1] / len, 0.0]
+        } else {
+            [0.0, 1.0, 0.0]
+        };
+        [
+            [forward[1], -forward[0], 0.0],
+            forward,
+            [0.0, 0.0, 1.0],
+            camera[3],
+        ]
+    }
 
     /// [`stereo_eye`] for a world view shown as a small model of the island
     /// ([`pw64_gfx::Diorama`]): the model stays put in front of the player
@@ -595,6 +614,18 @@ mod real {
     /// leaves out the far sea and the sky dome.
     pub(super) fn diorama_eye(pose: &EyePose, d: &pw64_gfx::Diorama) -> pw64_gfx::StereoEye {
         use pw64_gfx::matrix::mul;
+        // The title: the view stays where the camera's drop ends, at full
+        // size and level, so the drop doesn't move the player and the logo
+        // builds in front of them.
+        if let Some(end) = d.fixed_view {
+            let mut eye = stereo_eye(pose);
+            if let Some(world_to_end) =
+                pw64_gfx::matrix::inverse(&pw64_gfx::Diorama::to_world(&level(end)))
+            {
+                eye.world = mul(&mul(&d.camera_to_world(), &world_to_end), &eye.world);
+            }
+            return eye;
+        }
         let mut eye = stereo_eye_panel_at(pose, MODEL_PANEL_UP_M);
         let [x0, y0, _, x1, y1, z1] = d.bounds;
         let radius = 0.5 * (x1 - x0).max(y1 - y0).max(1.0);
@@ -897,7 +928,13 @@ mod real {
             if frame.diorama.is_some() != self.model {
                 self.model = frame.diorama.is_some();
                 let what = match &frame.diorama {
-                    Some(d) => format!("island model on: terrain bounds {:?}", d.bounds),
+                    Some(d) if d.fixed_view.is_some() => {
+                        format!(
+                            "title: fixed view at the drop's end, island bounds {:?}",
+                            d.bounds
+                        )
+                    }
+                    Some(d) => format!("island model on: bounds {:?}", d.bounds),
                     None => "island model off".into(),
                 };
                 log(&what, true);
@@ -1656,6 +1693,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     [100.0, 200.0, 50.0],
                 ],
                 bounds: [0.0, 0.0, -10.0, 2000.0, 2000.0, 300.0],
+                fixed_view: None,
             };
             let eye = super::diorama_eye(&pose, &d);
             let apply = |m: &super::Mat4, p: [f32; 4]| -> [f32; 4] {
@@ -1687,6 +1725,48 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             assert!(ndc([1000.0, 2000.0, 0.0])[2] > mid[2], "north is away");
             assert!(ndc([2000.0, 1000.0, 0.0])[0] > 0.0, "east is right");
             assert!(ndc([1000.0, 1000.0, 300.0])[1] > mid[1], "up is up");
+        }
+
+        /// The title's fixed view: with the game camera at the drop's end
+        /// (here level), the view is the flight view from there.
+        #[test]
+        fn title_view_stays_at_the_drops_end() {
+            let fov = std::f32::consts::FRAC_PI_4;
+            let pose = pw64_xr::EyePose {
+                orientation: [0.0, 0.0, 0.0, 1.0],
+                position: [0.0; 3],
+                fov: [-fov, fov, fov, -fov],
+            };
+            let end = [
+                [0.0, -1.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [100.0, 200.0, 50.0],
+            ];
+            let mut d = pw64_gfx::Diorama {
+                camera: end,
+                bounds: [0.0, 0.0, 0.0, 2000.0, 2000.0, 300.0],
+                fixed_view: Some(end),
+            };
+            let same = super::stereo_eye(&pose).world;
+            let near = |a: &super::Mat4, b: &super::Mat4| {
+                (0..4).all(|i| (0..4).all(|j| (a[i][j] - b[i][j]).abs() < 1e-4))
+            };
+            let eye = super::diorama_eye(&pose, &d);
+            assert!(near(&eye.world, &same) && eye.clip.is_none());
+            // Mid-drop (higher up): the world is drawn from the end, so
+            // the view of it does not change.
+            d.camera[3] = [100.0, 200.0, 900.0];
+            let mid = super::diorama_eye(&pose, &d);
+            let apply = |m: &super::Mat4, p: [f32; 4]| -> [f32; 4] {
+                [0, 1, 2, 3].map(|j| (0..4).map(|k| p[k] * m[k][j]).sum())
+            };
+            // A world point 10 m east of the end: camera space at the end
+            // is (0, 0, -10); from the mid-drop camera (850 m higher) it is
+            // (0, -850, -10). Both land in the same place.
+            let a = apply(&eye.world, [0.0, 0.0, -10.0, 1.0]);
+            let b = apply(&mid.world, [0.0, -850.0, -10.0, 1.0]);
+            assert!((0..4).all(|i| (a[i] - b[i]).abs() < 1e-3), "{a:?} {b:?}");
         }
 
         /// Every shader parses and validates (no GPU needed).
