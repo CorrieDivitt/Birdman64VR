@@ -164,11 +164,15 @@ menus and everything else stay on the panel.
   settling around 7 ms; the lead is now quantised to whole ms over 256
   frames so the cue (the game's time step) does not wander. The game itself
   runs 70-71 of 72 fps in flight (a 28 ms gap about once a second): open.
-- Open, reported in the headset: far out at sea a long white line, and the
-  distant water seeming to rise with altitude; both keep their distance and
-  orientation to the camera. Probably the environment models (sea disc and
-  sky dome follow the camera in x/y, `_uvEnvDraw` flag 8); needs a
-  screenshot before changing anything.
+- **Fog by distance in VR** (`Interpreter::radial_fog`, set in hle.rs). F3D
+  fog is a function of clip z/w, i.e. of depth along the game camera's
+  view axis: equal fog lies on planes across that axis. On a monitor that
+  is invisible; in the headset the player looks along other axes and saw
+  the fog start as a flat layer across sea and land that kept its distance
+  and orientation to the camera, and (the plane tilting with the chase
+  camera's pitch) distant water seeming to rise when climbing. Now z/w is
+  taken for the point straight ahead at the vertex's distance. Reported by
+  the user as a white line "like a wake" at sea, "a layer of fog" over land.
 - No border bars in VR (`pw64_fill_frame` set with the world tag): they
   floated in the world as black bars.
 - **Rocket belt first person:** in VR the R button switches between the chase

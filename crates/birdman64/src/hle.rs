@@ -333,6 +333,9 @@ impl Hle {
         // The C side brackets the world view with widescreen tags
         // (pw64_widescreen.c): only that is extended past 4:3.
         interp.wide_tags = true;
+        // Birdman64VR: fog by distance, not by depth along the game
+        // camera's axis (pw64-gfx `Interpreter::radial_fog`).
+        interp.radial_fog = crate::vr::active();
         // `PW64_DUMP_DL`: trace every list, written next to each dumped frame.
         if std::env::var_os("PW64_DUMP_DL").is_some() {
             interp.trace = Some(String::new());

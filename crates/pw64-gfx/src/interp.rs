@@ -142,6 +142,12 @@ pub struct Interpreter {
     /// view (widescreen `Wide::Extend`); otherwise all of them are. Set for
     /// the native game, whose C side emits the tags. Kept across runs.
     pub wide_tags: bool,
+    /// Birdman64VR: fog of world-view draws by distance from the camera
+    /// instead of by depth along its view axis (`load_vertices`). Set for
+    /// VR, where the player looks along other axes than the game camera's
+    /// and would see the fog start on a flat wall across the landscape.
+    /// Kept across runs.
+    pub radial_fog: bool,
     /// Inside a world-view bracket.
     wide_view: bool,
     /// Birdman64VR: the projection and viewport of the last
@@ -310,6 +316,7 @@ impl Interpreter {
             template: None,
             frame: Frame::default(),
             wide_tags: false,
+            radial_fog: false,
             wide_view: false,
             view_memo: None,
             anchor: Anchor::Centre,
@@ -364,9 +371,11 @@ impl Interpreter {
             s
         });
         let wide_tags = self.wide_tags;
+        let radial_fog = self.radial_fog;
         let load_buf = std::mem::take(&mut self.load_buf);
         *self = Self::new();
         self.wide_tags = wide_tags;
+        self.radial_fog = radial_fog;
         self.textures = textures;
         self.unknown = unknown;
         self.trace = trace;
@@ -766,6 +775,13 @@ impl Interpreter {
         let mv = *self.mtx.modelview();
         let gm = self.geometry_mode;
         let (vs, vt) = self.viewport;
+        // Radial fog (see below): world-view draws under a perspective
+        // projection. `fog_axis`: which way the camera looks along z in
+        // view space (-z for the usual frustum, where w = -z).
+        let fog_proj = self.mtx.projection;
+        let radial_fog =
+            self.radial_fog && self.wide_tags && self.wide_view && fog_proj[2][3] != 0.0;
+        let fog_axis = if fog_proj[2][3] < 0.0 { 1.0 } else { -1.0 };
         for (i, b) in buf.as_chunks::<16>().0.iter().enumerate() {
             let slot = v0 + i;
             if slot >= 16 {
@@ -797,7 +813,22 @@ impl Interpreter {
             }
             if gm & geom::G_FOG != 0 {
                 // F3D: shade alpha = clamp(z/w * fm + fo) (fixed-point in ucode).
-                let z = if c[3] > 0.0 { c[2] / c[3] } else { -1.0 };
+                let mut z = if c[3] > 0.0 { c[2] / c[3] } else { -1.0 };
+                // Birdman64VR: z/w of the point as far away straight ahead
+                // as this vertex is in any direction, so equal fog lies on
+                // a sphere around the camera, not on a plane across its
+                // view axis. The same value for a vertex on that axis.
+                if radial_fog {
+                    let v = matrix::transform(pos, &mv);
+                    let r = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                    let (cz, cw) = (
+                        fog_proj[3][2] - r * fog_proj[2][2] * fog_axis,
+                        fog_proj[3][3] - r * fog_proj[2][3] * fog_axis,
+                    );
+                    if cw > 0.0 {
+                        z = cz / cw;
+                    }
+                }
                 color[3] = ((z * self.fog_mul + self.fog_off) / 255.0).clamp(0.0, 1.0);
             }
             let w = c[3];
@@ -1846,6 +1877,63 @@ mod tests {
         let main = mem.push_words(&words(&list));
         let f = Interpreter::new().run(&mem, main);
         assert!(f.draws[0].textures[0].as_ref().unwrap().sampler.linear);
+    }
+
+    /// Birdman64VR: with `radial_fog`, a world-view vertex off the view
+    /// axis gets the fog of the on-axis point at the same distance, not of
+    /// the one at the same depth.
+    #[test]
+    fn radial_fog_goes_by_distance() {
+        let mut mem = VecMemory::default();
+        // uvMat4SetFrustrum(-1, 1, -1, 1, near 1, far 100).
+        let (n, f) = (1.0f32, 100.0f32);
+        let mut proj = [[0.0f32; 4]; 4];
+        proj[0][0] = 1.0;
+        proj[1][1] = 1.0;
+        proj[2][2] = -(f + n) / (f - n);
+        proj[2][3] = -1.0;
+        proj[3][2] = -(2.0 * n * f) / (f - n);
+        let proj = mem.push(&matrix::to_fixed(&proj), 8);
+        let ident = mem.push(&matrix::to_fixed(&matrix::IDENTITY), 8);
+        // On the axis 10 away; off it at depth 8, 10 away; on it at depth 8.
+        let mut v = Vec::new();
+        for p in [[0i16, 0, -10], [6, 0, -8], [0, 0, -8]] {
+            for c in [p[0], p[1], p[2], 0, 0, 0] {
+                v.extend_from_slice(&c.to_be_bytes());
+            }
+            v.extend_from_slice(&[255, 255, 255, 255]);
+        }
+        let v = mem.push(&v, 8);
+        let main = mem.push_words(&words(&[
+            (0xC000_0000, WIDE_TAG_ON),
+            (0x0103_0040, proj),
+            (0x0102_0040, ident),
+            (0xB700_0000, geom::G_FOG | geom::G_SHADE),
+            (0xBC00_0008, (1000u32 << 16) | (0x1_0000 - 800)), // fm 1000, fo -800
+            (0x0420_0030, v),
+            (0xBF00_0000, 0x0000_0A14),
+            (0xB800_0000, 0),
+        ]));
+        let fog = |radial: bool| {
+            let mut it = Interpreter::new();
+            it.wide_tags = true;
+            it.radial_fog = radial;
+            let f = it.run(&mem, main);
+            [0, 1, 2].map(|i| f.vertices[i].color[3])
+        };
+        let planar = fog(false);
+        assert!((planar[1] - planar[2]).abs() < 1e-6, "by depth: {planar:?}");
+        assert!(
+            planar[0] > planar[1] + 0.01,
+            "farther is foggier: {planar:?}"
+        );
+        let radial = fog(true);
+        assert!(
+            (radial[0] - radial[1]).abs() < 1e-4,
+            "by distance: {radial:?}"
+        );
+        assert_eq!(radial[0], planar[0], "unchanged on the axis");
+        assert_eq!(radial[2], planar[2]);
     }
 
     /// Clip ratio 1 (`gSPClipRatio(FRUSTRATIO_1)`): 3D triangles stay in the
