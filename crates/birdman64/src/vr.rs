@@ -9,8 +9,13 @@
 //! game or the window: it shows the latest panel content with the head
 //! pose predicted for each frame.
 //!
-//! Only on Windows and Linux; other targets get a stub that is never
-//! requested.
+//! On the Quest (Android, docs/notes/vr.md "Quest") there is no window to
+//! mirror to: the activity's own surface is not shown while the app is in
+//! VR, so the window thread draws the panel and nothing else
+//! ([`headless`]).
+//!
+//! Only on Windows, Linux and Android; other targets get a stub that is
+//! never requested.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
@@ -32,8 +37,31 @@ pub(crate) fn set_requested(on: bool) {
 }
 
 /// VR was asked for: `--vr`, or `PW64_VR` set to anything but `0`.
+/// Android has neither: there the Quest flavour of the APK
+/// (`build-apk.sh --quest`) is the request, recognised by the OpenXR
+/// loader it packs next to this library.
 pub(crate) fn requested() -> bool {
+    #[cfg(target_os = "android")]
+    if crate::android::native_lib_dir()
+        .join("libopenxr_loader.so")
+        .is_file()
+    {
+        return true;
+    }
     REQUESTED.load(Ordering::Relaxed) || std::env::var_os("PW64_VR").is_some_and(|v| v != "0")
+}
+
+/// The picture goes to the headset only (the Quest): the window thread
+/// draws the VR panel and never touches the window's surface.
+pub(crate) fn headless() -> bool {
+    cfg!(target_os = "android") && active()
+}
+
+/// The size of the window's picture when it is not the window's
+/// ([`headless`]): a 4:3 panel about as sharp as the headset can show it at
+/// the panel's distance.
+pub(crate) fn panel_size() -> Option<(u32, u32)> {
+    headless().then_some((1440, 1080))
 }
 
 /// The headset paces the game's frames (window.rs `App::start`). Off with
@@ -57,7 +85,10 @@ pub(crate) fn headset_mhz() -> Option<u32> {
 
 /// Where the window and game threads spend time, for the headset thread's
 /// hitch line: the longest duration of each stage since the last report.
-#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+#[cfg_attr(
+    not(any(windows, target_os = "linux", target_os = "android")),
+    allow(dead_code)
+)]
 #[derive(Clone, Copy)]
 pub(crate) enum Stage {
     /// Replaying the game's framebuffer ops (the actual game rendering).
@@ -75,7 +106,10 @@ pub(crate) enum Stage {
 }
 
 const STAGES: usize = 6;
-#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+#[cfg_attr(
+    not(any(windows, target_os = "linux", target_os = "android")),
+    allow(dead_code)
+)]
 const STAGE_NAMES: [&str; STAGES] = [
     "game draw",
     "window image",
@@ -139,7 +173,10 @@ impl Delay {
     }
 
     /// (samples, average ms, max ms) since the last call.
-    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+    #[cfg_attr(
+        not(any(windows, target_os = "linux", target_os = "android")),
+        allow(dead_code)
+    )]
     fn take(&self) -> (u32, f64, f64) {
         let n = self.count.swap(0, Ordering::Relaxed);
         let sum = self.sum_us.swap(0, Ordering::Relaxed);
@@ -151,10 +188,16 @@ impl Delay {
 /// From the game thread handing a frame over to it being in the panel.
 static HANDOVER_TO_PANEL: Delay = Delay::new();
 /// How old the panel's content is when the headset thread samples it.
-#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+#[cfg_attr(
+    not(any(windows, target_os = "linux", target_os = "android")),
+    allow(dead_code)
+)]
 static PANEL_AGE: Delay = Delay::new();
 /// How far ahead the runtime predicts the display of the frame being drawn.
-#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+#[cfg_attr(
+    not(any(windows, target_os = "linux", target_os = "android")),
+    allow(dead_code)
+)]
 static AHEAD: Delay = Delay::new();
 /// When the panel was last drawn.
 static PANEL_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
@@ -170,12 +213,12 @@ pub(crate) fn panel_updated(handed_over: Option<std::time::Instant>) {
     }
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "android"))]
 pub(crate) use real::{Vr, shutdown};
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "android")))]
 pub(crate) use stub::{Vr, shutdown};
 
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "android")))]
 mod stub {
     use crate::gpu_context::GpuContext;
     use std::sync::Arc;
@@ -203,7 +246,7 @@ mod stub {
     }
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "android"))]
 mod real {
     use super::HEADSET_MHZ;
     use crate::gpu_context::GpuContext;
@@ -264,7 +307,9 @@ mod real {
     fn log(line: &str, console: bool) {
         use std::io::Write;
         static FILE: OnceLock<Option<Mutex<std::fs::File>>> = OnceLock::new();
-        if console {
+        // Android: everything, since logcat is the log that is easy to read
+        // (`adb logcat -s birdman64`).
+        if console || cfg!(target_os = "android") {
             eprintln!("[vr] {line}");
         }
         let file = FILE.get_or_init(|| {
@@ -325,7 +370,19 @@ mod real {
             // The optional features pw64-gfx asks for (`device_descriptor`).
             let features = wgpu::Features::DEPTH32FLOAT_STENCIL8
                 | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
-            let xr = XrContext::new(features, Panel::default()).map_err(|e| e.to_string())?;
+            #[cfg(not(target_os = "android"))]
+            let xr = XrContext::new(features, Panel::default());
+            #[cfg(target_os = "android")]
+            let xr = {
+                let app = crate::android::app();
+                // SAFETY: the process's VM and the activity's global
+                // reference; the activity outlives the session (the process
+                // exits with it).
+                let app =
+                    unsafe { pw64_xr::AndroidApp::new(app.vm_as_ptr(), app.activity_as_ptr()) };
+                XrContext::new(features, Panel::default(), &app)
+            };
+            let xr = xr.map_err(|e| e.to_string())?;
             let gpu = xr.gpu();
             let surface = gpu
                 .instance
@@ -831,9 +888,14 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 }
                 Err(e) => {
                     log(&format!("stopped: {e}"), true);
-                    crate::window::notify_toast(format!(
-                        "VR stopped ({e}). The game continues on the monitor."
-                    ));
+                    if super::headless() {
+                        // No monitor to continue on.
+                        crate::window::request_quit();
+                    } else {
+                        crate::window::notify_toast(format!(
+                            "VR stopped ({e}). The game continues on the monitor."
+                        ));
+                    }
                     break;
                 }
             }

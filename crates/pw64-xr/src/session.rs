@@ -130,8 +130,11 @@ pub struct XrContext {
 const VIEW_TYPE: xr::ViewConfigurationType = xr::ViewConfigurationType::PRIMARY_STEREO;
 
 /// The loader library: `PW64_OPENXR_LOADER`, next to the exe, the dev
-/// tree's `tools/openxr/`, then the system search path.
-fn load_entry() -> Result<xr::Entry, XrError> {
+/// tree's `tools/openxr/`, then the system search path (Android: the APK's
+/// `lib/arm64-v8a/libopenxr_loader.so`). `platform`: `()`, or on Android
+/// the VM and activity the loader is initialised with
+/// (`XR_KHR_loader_init_android`) as soon as it is loaded.
+fn load_entry(platform: &impl xr::PlatformInfo) -> Result<xr::Entry, XrError> {
     #[cfg(windows)]
     const NAME: &str = "openxr_loader.dll";
     #[cfg(not(windows))]
@@ -150,13 +153,13 @@ fn load_entry() -> Result<xr::Entry, XrError> {
     let mut last = String::from("not found");
     for p in candidates.iter().filter(|p| p.is_file()) {
         // SAFETY: a file with the loader's name; it is the Khronos loader.
-        match unsafe { xr::Entry::load_from(p, &()) } {
+        match unsafe { xr::Entry::load_from(p, platform) } {
             Ok(e) => return Ok(e),
             Err(e) => last = format!("{}: {e}", p.display()),
         }
     }
     // SAFETY: as above, found by the OS loader.
-    unsafe { xr::Entry::load(&()) }.map_err(|e| {
+    unsafe { xr::Entry::load(platform) }.map_err(|e| {
         if last == "not found" {
             last = e.to_string();
         }
@@ -166,9 +169,19 @@ fn load_entry() -> Result<xr::Entry, XrError> {
 
 impl XrContext {
     /// Connects to the active OpenXR runtime and creates the wgpu device on
-    /// the GPU it picks. `wanted_features`: see [`XrGpu`].
-    pub fn new(wanted_features: wgpu::Features, panel: Panel) -> Result<Self, XrError> {
-        let entry = load_entry()?;
+    /// the GPU it picks. `wanted_features`: see [`XrGpu`]. Android: `app`
+    /// is the activity the session belongs to; call this once it exists.
+    pub fn new(
+        wanted_features: wgpu::Features,
+        panel: Panel,
+        #[cfg(target_os = "android")] app: &crate::AndroidApp,
+    ) -> Result<Self, XrError> {
+        // SAFETY: `AndroidApp::new`'s contract is this one's.
+        #[cfg(target_os = "android")]
+        let platform = unsafe { xr::AndroidPlatformInfo::new(app.java_vm, app.activity) };
+        #[cfg(not(target_os = "android"))]
+        let platform = ();
+        let entry = load_entry(&platform)?;
         let available = entry
             .enumerate_extensions()
             .map_err(|e| XrError::NoHeadset(format!("is the VR runtime running? {e}")))?;
@@ -179,6 +192,16 @@ impl XrContext {
         }
         let mut enabled = xr::ExtensionSet::default();
         enabled.khr_vulkan_enable2 = true;
+        // Android: the instance is created for an activity.
+        #[cfg(target_os = "android")]
+        {
+            if !available.khr_android_create_instance {
+                return Err(XrError::Unsupported(
+                    "Android support (XR_KHR_android_create_instance)".into(),
+                ));
+            }
+            enabled.khr_android_create_instance = true;
+        }
         // Optional: the runtime's clock, to see how far ahead it predicts
         // (`FrameTime::ahead_ns`).
         #[cfg(windows)]
@@ -203,7 +226,7 @@ impl XrContext {
                 },
                 &enabled,
                 &[],
-                &(),
+                &platform,
             )
             .map_err(|e| XrError::NoHeadset(format!("is the VR runtime running? {e}")))?;
         if let Ok(p) = instance.properties() {

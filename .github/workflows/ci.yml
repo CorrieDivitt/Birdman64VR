@@ -199,6 +199,19 @@ jobs:
         with:
           name: Birdman64-android-arm64-debugsigned
           path: target/android-apk/Birdman64-android-arm64-debugsigned.apk
+      # Birdman64VR: the Quest flavour (VR manifest entries, OpenXR loader).
+      # Same library, so only the packaging runs again.
+      - name: build-apk.sh --release-flavour --quest
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          bash packaging/android/build-apk.sh --release-flavour --quest
+          unzip -l target/android-apk/Birdman64-android-arm64-quest-debugsigned.apk \
+            | grep -q 'lib/arm64-v8a/libopenxr_loader.so'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Birdman64-android-arm64-quest-debugsigned
+          path: target/android-apk/Birdman64-android-arm64-quest-debugsigned.apk
 
   # iOS arm64 (macos-14): clippy for the device target, then the ipa builds
   # (device + simulator) and a simulator smoke run: the app must reach the

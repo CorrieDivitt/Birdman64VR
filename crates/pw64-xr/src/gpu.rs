@@ -97,7 +97,9 @@ impl XrGpu {
                 entry.clone(),
                 raw_instance.clone(),
                 instance_api_version,
-                0,
+                // Android only, where it picks the window surface's acquire
+                // timeout (below 30: none). Horizon OS is API 32 or later.
+                if cfg!(target_os = "android") { 32 } else { 0 },
                 None,
                 extensions,
                 flags,

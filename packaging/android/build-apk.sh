@@ -9,7 +9,7 @@
 # example); ANDROID_NDK_HOME (NDK r27+); ANDROID_HOME (build-tools + one
 # platform). Runs on Linux and Git Bash on Windows.
 #
-# Usage: packaging/android/build-apk.sh [--debug] [--release-flavour]
+# Usage: packaging/android/build-apk.sh [--debug] [--release-flavour] [--quest]
 #        packaging/android/build-apk.sh --sign-only <unsigned.apk>
 #
 # Default: dev APK → target/android-apk/birdman64.apk: game C linked into
@@ -22,6 +22,12 @@
 # release key: → target/android-apk/Birdman64-android-arm64-unsigned.apk
 # (aligned) + Birdman64-android-arm64-debugsigned.apk (local debug key; test
 # builds only: a phone can't update it in place to a release-signed APK).
+# --quest (Birdman64VR): the Meta Quest flavour, a VR app: the manifest's
+# QUEST blocks are switched on and the Khronos OpenXR loader is packed as
+# lib/arm64-v8a/libopenxr_loader.so (downloaded once into
+# tools/openxr-android/, sha256-checked; needs curl and unzip). The app
+# starts in VR when it finds that library (vr.rs). Output names get a
+# -quest suffix. Does not install on phones.
 # --sign-only: signs an unsigned APK with the release key from
 # ANDROID_KEYSTORE (path) or ANDROID_KEYSTORE_B64 (base64), with
 # ANDROID_KEYSTORE_PASSWORD (store = key password) and ANDROID_KEY_ALIAS →
@@ -36,6 +42,8 @@ CARGO_PROFILE=(--release)
 FEATURES=()
 FLAVOUR=dev
 SIGN_ONLY=
+QUEST=
+SUFFIX=
 while [ $# -gt 0 ]; do
     case "$1" in
         --debug) PROFILE=debug CARGO_PROFILE=() ;;
@@ -43,6 +51,7 @@ while [ $# -gt 0 ]; do
             FLAVOUR=release
             FEATURES=(--no-default-features --features first-run)
             ;;
+        --quest) QUEST=1 SUFFIX=-quest ;;
         --sign-only)
             SIGN_ONLY="${2:?--sign-only needs the unsigned APK}"
             shift
@@ -217,6 +226,42 @@ javac --release 8 -classpath "$PLATFORM/android.jar" -d "$CLASSES" \
     "$CLASSES/app/birdman64/PwActivity.class"
 cp "$CLASSES/classes.dex" "$OUT/stage/classes.dex"
 LIBS+=(classes.dex)
+
+# Birdman64VR, Quest flavour: the Khronos OpenXR loader for Android, from
+# the official AAR attached to the OpenXR-SDK-Source release (the same file
+# as org.khronos.openxr:openxr_loader_for_android on Maven Central). Meta
+# supports the Khronos loader from 1.0.34 on.
+MANIFEST=packaging/android/AndroidManifest.xml
+if [ -n "$QUEST" ]; then
+    XR_VERSION=1.1.54
+    XR_SHA256=66702fc24475d7a5362688e77444670124c2fa119745d14c2524bcf3eb584834
+    XR_DIR=tools/openxr-android
+    if [ ! -s "$XR_DIR/libopenxr_loader.so" ] ||
+        [ "$(cat "$XR_DIR/VERSION" 2> /dev/null)" != "$XR_VERSION" ]; then
+        mkdir -p "$XR_DIR"
+        curl -fsSL --retry 3 --retry-delay 10 -o "$XR_DIR/loader.aar" \
+            "https://github.com/KhronosGroup/OpenXR-SDK-Source/releases/download/release-$XR_VERSION/openxr_loader_for_android-$XR_VERSION.aar"
+        echo "$XR_SHA256 *$XR_DIR/loader.aar" | sha256sum -c - > /dev/null || {
+            echo "error: the OpenXR loader download does not match its checksum" >&2
+            rm -f "$XR_DIR/loader.aar"
+            exit 1
+        }
+        unzip -o -j -q "$XR_DIR/loader.aar" \
+            jni/arm64-v8a/libopenxr_loader.so META-INF/LICENSE -d "$XR_DIR"
+        rm -f "$XR_DIR/loader.aar"
+        echo "$XR_VERSION" > "$XR_DIR/VERSION"
+    fi
+    cp "$XR_DIR/libopenxr_loader.so" "$OUT/stage/lib/arm64-v8a/"
+    LIBS+=(lib/arm64-v8a/libopenxr_loader.so)
+    # Switch the manifest's QUEST blocks on: drop their marker lines.
+    MANIFEST="$OUT/AndroidManifest.xml"
+    sed -e '/^ *<!--QUEST[[:space:]]*$/d' -e '/^ *QUEST-->[[:space:]]*$/d' \
+        packaging/android/AndroidManifest.xml > "$MANIFEST"
+    grep -q 'com.oculus.intent.category.VR' "$MANIFEST" && ! grep -q 'QUEST-->' "$MANIFEST" || {
+        echo "error: the Quest manifest was not generated as expected" >&2
+        exit 1
+    }
+fi
 if [ "$FLAVOUR" = release ]; then
     # Debug info is ~3/4 of the library; crash reports symbolize offline.
     "$BIN/llvm-strip$EXE" --strip-debug "$OUT/stage/lib/arm64-v8a/libbirdman64.so"
@@ -232,6 +277,10 @@ if [ "$FLAVOUR" = release ]; then
     cp tools/zig-android/LLVM-LICENSE.txt "$L/LLVM-LICENSE.txt"
     cp LICENSE "$L/LICENSE.txt"
     cp packaging/DECOMP-LICENSE-NOTE.txt "$L/DECOMP-LICENSE-NOTE.txt"
+    if [ -n "$QUEST" ]; then
+        cp "$XR_DIR/LICENSE" "$L/OpenXR-loader-LICENSE.txt"
+        LIBS+=(assets/licenses/OpenXR-loader-LICENSE.txt)
+    fi
     if ! cargo about --version > /dev/null 2>&1; then
         echo "error: needs cargo-about: cargo install cargo-about --locked --version 0.9.2 --features cli" >&2
         exit 1
@@ -251,7 +300,7 @@ fi
 rm -f "$OUT/res.zip"
 "$BT/aapt2$EXE" compile --dir packaging/android/res -o "$OUT/res.zip"
 "$BT/aapt2$EXE" link -o "$OUT/unsigned.apk" \
-    --manifest packaging/android/AndroidManifest.xml -R "$OUT/res.zip" \
+    --manifest "$MANIFEST" -R "$OUT/res.zip" \
     -I "$PLATFORM/android.jar" --version-name "$VERSION" --version-code "$VERSION_CODE" \
     ${LINK_FLAGS[@]+"${LINK_FLAGS[@]}"}
 (cd "$OUT/stage" && "$BT/aapt$EXE" add ../unsigned.apk "${LIBS[@]}" > /dev/null)
@@ -261,10 +310,10 @@ rm -f "$OUT/res.zip"
 # stable key is what lets a phone update the app in place; losing it means
 # players must uninstall (and lose their saves) to update.
 if [ "$FLAVOUR" = release ]; then
-    cp "$OUT/aligned.apk" "$OUT/Birdman64-android-arm64-unsigned.apk"
-    echo "$OUT/Birdman64-android-arm64-unsigned.apk"
+    cp "$OUT/aligned.apk" "$OUT/Birdman64-android-arm64$SUFFIX-unsigned.apk"
+    echo "$OUT/Birdman64-android-arm64$SUFFIX-unsigned.apk"
     echo "WARNING: test copy signed with the local DEBUG key; release-sign with --sign-only." >&2
-    sign_apk "$OUT/aligned.apk" "$OUT/Birdman64-android-arm64-debugsigned.apk" debug
+    sign_apk "$OUT/aligned.apk" "$OUT/Birdman64-android-arm64$SUFFIX-debugsigned.apk" debug
 else
-    sign_apk "$OUT/aligned.apk" "$OUT/birdman64.apk" debug
+    sign_apk "$OUT/aligned.apk" "$OUT/birdman64$SUFFIX.apk" debug
 fi

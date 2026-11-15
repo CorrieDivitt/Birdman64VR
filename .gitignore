@@ -26,6 +26,8 @@ crash.log
 # Birdman64VR: the Khronos OpenXR loader for dev runs (openxr_loader.dll,
 # from the official openxr_loader_windows release zip; docs/notes/vr.md)
 /tools/openxr/
+# ... and for the Quest flavour of the APK (build-apk.sh --quest)
+/tools/openxr-android/
 
 # Birdman64VR: the VR session log of a dev run (vr.rs)
 vr.log

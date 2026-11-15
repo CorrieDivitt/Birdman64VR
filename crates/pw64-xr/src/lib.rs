@@ -1,7 +1,7 @@
 //! Birdman64VR: OpenXR on wgpu's Vulkan backend.
 //!
 //! [`XrContext::new`] connects to the OpenXR runtime (Quest Link, SteamVR,
-//! ...), lets it pick the Vulkan device, and wraps that device in the
+//! ..., or the headset's own on a standalone Quest), lets it pick the Vulkan device, and wraps that device in the
 //! ordinary wgpu types the renderer already uses. [`XrContext::frame`] runs
 //! one headset frame: a stereo world layer and, in front of it, one flat
 //! panel (an OpenXR quad layer), both drawn by the caller.
@@ -15,6 +15,27 @@ mod session;
 
 pub use gpu::XrGpu;
 pub use session::{Eye, Frame, FrameOutcome, FrameTime, Layers, Panel, XrContext};
+
+/// Android: the app's Java VM and activity, which the OpenXR loader and
+/// runtime need (`XR_KHR_loader_init_android`,
+/// `XR_KHR_android_create_instance`).
+#[cfg(target_os = "android")]
+pub struct AndroidApp {
+    pub(crate) java_vm: *mut std::ffi::c_void,
+    pub(crate) activity: *mut std::ffi::c_void,
+}
+
+#[cfg(target_os = "android")]
+impl AndroidApp {
+    /// # Safety
+    ///
+    /// `java_vm` is the process's JNI `JavaVM` and `activity` a JNI global
+    /// reference to the `android.app.Activity` that drives the session;
+    /// both stay valid as long as any [`XrContext`] made from them.
+    pub unsafe fn new(java_vm: *mut std::ffi::c_void, activity: *mut std::ffi::c_void) -> Self {
+        Self { java_vm, activity }
+    }
+}
 
 /// Why VR could not start or continue; `Display` is a one-line reason.
 #[derive(Debug)]

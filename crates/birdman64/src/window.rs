@@ -97,7 +97,10 @@ fn present(tex: wgpu::SurfaceTexture) {
 
 /// Birdman64VR: the VR runtime ended the session (quit from the headset's
 /// menu): leave like a normal game stop.
-#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+#[cfg_attr(
+    not(any(windows, target_os = "linux", target_os = "android")),
+    allow(dead_code)
+)]
 pub fn request_quit() {
     if let Some(p) = PROXY.get() {
         let _ = p.send_event(UserEvent::Stopped(0, String::new()));
@@ -414,6 +417,10 @@ impl Gpu {
     /// skipped configure is retried by `surface_ready` before each redraw
     /// (Wayland never reports the old configuration as outdated).
     fn configure_surface(&mut self) {
+        // Birdman64VR on the Quest: the surface is never drawn to.
+        if crate::vr::headless() {
+            return;
+        }
         let Some(surface) = &self.surface else {
             return;
         };
@@ -1005,7 +1012,10 @@ impl App {
         caps.present_modes =
             opts::usable_present_modes(caps.present_modes, wayland, adapter.get_info().vendor);
         let format = opts::surface_format(&caps.formats, device.features());
+        // Birdman64VR on the Quest: the picture is the VR panel's, not the
+        // window's (vr.rs `headless`).
         let size = window.inner_size();
+        let size = crate::vr::panel_size().unwrap_or((size.width, size.height));
         // COPY_SRC for the `PW64_WIN_SHOT` / `PW64_SETTINGS_SHOT` readback,
         // only if requested and the surface supports it (configure panics
         // otherwise).
@@ -1050,14 +1060,16 @@ impl App {
         let config = wgpu::SurfaceConfiguration {
             usage,
             format,
-            width: size.width.max(1),
-            height: size.height.max(1),
+            width: size.0.max(1),
+            height: size.1.max(1),
             present_mode,
             desired_maximum_frame_latency: 2,
             alpha_mode: caps.alpha_modes[0],
             view_formats: vec![],
         };
-        surface.configure(&device, &config);
+        if !crate::vr::headless() {
+            surface.configure(&device, &config);
+        }
         let msaa = opts::resolve_msaa(&adapter, format, opts::msaa());
         let renderer = Renderer::new(
             &device,
@@ -1444,25 +1456,30 @@ impl App {
             settings_shot |= self.settings_shot_frame > 0 && !settings::is_open();
         }
         let Some(g) = &mut self.gpu else { return };
-        if !g.surface_ready() {
+        // Birdman64VR on the Quest: no surface image; the frame is drawn
+        // into the VR panel only (vr.rs `headless`).
+        let headless = self.vr.is_some() && crate::vr::headless();
+        if !headless && !g.surface_ready() {
             if settings::is_open() {
                 g.window.request_redraw();
             }
             return;
         }
         let timing = Instant::now();
-        let acquired = g.acquire();
+        let tex = if headless { None } else { g.acquire() };
         crate::vr::note(crate::vr::Stage::Acquire, timing.elapsed());
         let timing = Instant::now();
-        let Some(tex) = acquired else {
+        if tex.is_none() && !headless {
             // W2: while the overlay is open the game is paused (no Frame
             // events), so only this keeps the overlay alive.
             if settings::is_open() {
                 g.window.request_redraw();
             }
             return;
-        };
-        let surface_view = tex.texture.create_view(&Default::default());
+        }
+        let surface_view = tex
+            .as_ref()
+            .map(|tex| tex.texture.create_view(&Default::default()));
         // Birdman64VR: draw this frame into the VR panel texture (same
         // format and size as the surface); the headset thread shows it and
         // the window gets a copy just before the present below.
@@ -1473,7 +1490,9 @@ impl App {
                 (g.config.width, g.config.height),
             )
         });
-        let view = panel_view.clone().unwrap_or_else(|| surface_view.clone());
+        let Some(view) = panel_view.clone().or_else(|| surface_view.clone()) else {
+            return;
+        };
         // W6: a display switch fell back (unsupported exclusive mode).
         if let Some(msg) = g.notice.take() {
             self.toast.show(&msg, 8);
@@ -1515,7 +1534,9 @@ impl App {
         self.perf.render(g, &view);
         // Once per frame number (redraws without a new frame don't re-shoot;
         // a number skipped by a multi-frame drain shoots at the next one).
-        if let Some(i) = g.shots.iter().position(|&n| n <= self.presented) {
+        if let Some(tex) = &tex
+            && let Some(i) = g.shots.iter().position(|&n| n <= self.presented)
+        {
             let n = g.shots.swap_remove(i);
             let path = format!("tmp/win_{n:05}.png");
             crate::hle::shot_png(&g.device, &g.queue, &tex.texture, &path);
@@ -1531,7 +1552,7 @@ impl App {
             input::set_touch(crate::touch::TouchPad::IDLE);
         }
         #[cfg(any(target_os = "android", target_os = "ios"))]
-        if !settings::is_open() {
+        if !settings::is_open() && !headless {
             // A relayout mid-touch drops the fingers: republish, or what
             // they held would stay held in the game.
             if self.touch.set_layout(touch_layout(g))
@@ -1561,7 +1582,9 @@ impl App {
             // The capture must show the overlay: after the pass above
             // (before present is fine, the texture still holds the frame).
             // Copyable only if the surface allowed COPY_SRC (see `new`).
-            if g.config.usage.contains(wgpu::TextureUsages::COPY_SRC) {
+            if let Some(tex) = &tex
+                && g.config.usage.contains(wgpu::TextureUsages::COPY_SRC)
+            {
                 crate::hle::shot_png(&g.device, &g.queue, &tex.texture, "tmp/win_settings.png");
             } else {
                 eprintln!(
@@ -1576,16 +1599,20 @@ impl App {
             if let Some(vr) = &mut self.vr {
                 vr.probe(&g.device, &g.queue, &view);
             }
-            g.renderer
-                .blit(&view, &surface_view, wgpu::FilterMode::Nearest);
+            if let Some(surface_view) = &surface_view {
+                g.renderer
+                    .blit(&view, surface_view, wgpu::FilterMode::Nearest);
+            }
         }
         crate::vr::note(crate::vr::Stage::Draw, timing.elapsed());
         if panel_view.is_some() {
             crate::vr::panel_updated(self.vr_shown_at.take());
         }
         let timing = Instant::now();
-        g.window.pre_present_notify();
-        present(tex);
+        if let Some(tex) = tex {
+            g.window.pre_present_notify();
+            present(tex);
+        }
         crate::vr::note(crate::vr::Stage::Present, timing.elapsed());
         self.perf.presented();
         // A frame went out: the OS core's Display pacing (V-Sync) ticks on
@@ -1885,7 +1912,8 @@ impl ApplicationHandler<UserEvent> for App {
                 Ok(s) => {
                     g.surface = Some(s);
                     let size = g.window.inner_size();
-                    (g.config.width, g.config.height) = (size.width.max(1), size.height.max(1));
+                    (g.config.width, g.config.height) =
+                        crate::vr::panel_size().unwrap_or((size.width.max(1), size.height.max(1)));
                     g.configure_surface();
                     g.window.request_redraw();
                 }
@@ -1987,7 +2015,7 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::Resized(s) => {
                 if let Some(g) = &mut self.gpu {
-                    let size = (s.width.max(1), s.height.max(1));
+                    let size = crate::vr::panel_size().unwrap_or((s.width.max(1), s.height.max(1)));
                     // Wayland repeats Resized with an unchanged size; each
                     // reconfigure risks the Wayland + NVIDIA freeze.
                     if size == (g.config.width, g.config.height) {
