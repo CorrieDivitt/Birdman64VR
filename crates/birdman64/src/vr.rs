@@ -64,6 +64,19 @@ pub(crate) fn headless() -> bool {
 /// there when the player looks at it (about 70 degrees to each side).
 pub(crate) const CULL_SCALE: f32 = 6.0;
 
+/// A recentre was asked for (`request_recentre`); the headset thread does
+/// it at its next frame.
+static RECENTRE: AtomicBool = AtomicBool::new(false);
+
+/// The player pressed the recentre button (R3, input.rs and
+/// `input/mobile_pad.rs`): forward becomes the way they face now and the
+/// game's camera moves back to their eyes. Nothing without a headset.
+pub(crate) fn request_recentre() {
+    if active() {
+        RECENTRE.store(true, Ordering::Relaxed);
+    }
+}
+
 /// The headset thread wants the game paused whatever the player's
 /// "pause in background" setting says (headset taken off, system menu).
 static PAUSE: AtomicBool = AtomicBool::new(false);
@@ -289,7 +302,7 @@ mod real {
     use super::HEADSET_MHZ;
     use crate::gpu_context::GpuContext;
     use pw64_xr::math::{self, Mat4};
-    use pw64_xr::{EyePose, FrameOutcome, Layers, Panel, XrContext};
+    use pw64_xr::{EyePose, FrameOutcome, Layers, Panel, Seat, XrContext};
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use std::sync::{Arc, Condvar, Mutex, OnceLock};
     use std::time::{Duration, Instant};
@@ -433,6 +446,9 @@ mod real {
     /// window thread, which draws the next game frame's eye pictures for
     /// them).
     static NEXT_EYES: Mutex<Option<[EyePose; 2]>> = Mutex::new(None);
+    /// Where the player sits (headset thread → window thread): the eye
+    /// pictures are drawn for the eyes relative to it (`Seat::seated`).
+    static SEAT: Mutex<Option<Seat>> = Mutex::new(None);
 
     /// The stereo world (`PW64_VR_STEREO=0` keeps everything on the panel).
     fn stereo_on() -> bool {
@@ -505,9 +521,10 @@ mod real {
     }
 
     /// The matrices one eye's picture is drawn with
-    /// (`Renderer::render_stereo`). The game's camera sits at the seated
-    /// origin (where the head was when the session started), looking the
-    /// same way; the head moves around it.
+    /// (`Renderer::render_stereo`) for `pose` in the seated space. The
+    /// game's camera sits at the seated origin (where the head was when the
+    /// session started or the player last recentred), looking the same
+    /// way; the head moves around it.
     pub(super) fn stereo_eye(pose: &EyePose) -> pw64_gfx::StereoEye {
         // pw64-xr's column-vector matrices are stored column-major, which
         // is pw64-gfx's row-vector layout: the same arrays, multiplied in
@@ -762,8 +779,18 @@ mod real {
                     .find(|i| Some(*i) != front && Some(*i) != s.reading)
                     .unwrap_or(0)
             };
+            let seat = SEAT
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_default();
             for (eye, pose) in poses.iter().enumerate() {
-                renderer.render_stereo(frame, &views[back][eye], self.eye_size, &stereo_eye(pose));
+                let seated = seat.seated(pose);
+                renderer.render_stereo(
+                    frame,
+                    &views[back][eye],
+                    self.eye_size,
+                    &stereo_eye(&seated),
+                );
             }
             self.eye_serial += 1;
             self.source.lock().unwrap_or_else(|e| e.into_inner()).world =
@@ -1233,6 +1260,9 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     eyes: world.get().map(|w| w.1),
                 }
             };
+            if super::RECENTRE.swap(false, Ordering::Relaxed) {
+                xr.recentre();
+            }
             let outcome = xr.frame(choose, Some(&pw64_gfx::QUEUE_GATE), |frame| {
                 let world = world.get();
                 let eye_bound = eye_bound.borrow();
@@ -1246,6 +1276,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     last_serial = serial;
                 }
                 *NEXT_EYES.lock().unwrap_or_else(|e| e.into_inner()) = frame.next_eyes;
+                *SEAT.lock().unwrap_or_else(|e| e.into_inner()) = Some(frame.seat);
                 // A headset frame starts. Cue the game `lead()` before the
                 // next one starts (display pacing, window.rs `App::start`):
                 // its newest frame then reaches the panel just in time to

@@ -101,9 +101,83 @@ pub fn projection_reversed(left: f32, right: f32, up: f32, down: f32, near: f32)
     ]
 }
 
+/// The quaternion product `a · b` (x, y, z, w): rotate by `b`, then by `a`.
+pub fn quat_mul(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+    let [ax, ay, az, aw] = a;
+    let [bx, by, bz, bw] = b;
+    [
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    ]
+}
+
+/// The inverse of a unit quaternion.
+pub fn quat_conj(q: [f32; 4]) -> [f32; 4] {
+    [-q[0], -q[1], -q[2], q[3]]
+}
+
+/// `v` rotated by the unit quaternion `q`.
+pub fn rotate(q: [f32; 4], v: [f32; 3]) -> [f32; 3] {
+    let u = [q[0], q[1], q[2]];
+    let cross = |a: [f32; 3], b: [f32; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let t = cross(u, v).map(|c| 2.0 * c);
+    let ut = cross(u, t);
+    [0, 1, 2].map(|i| v[i] + q[3] * t[i] + ut[i])
+}
+
+/// Only the turn about the vertical (y) axis of an orientation: the way
+/// it faces, level, with no tilt or roll.
+pub fn yaw_only(q: [f32; 4]) -> [f32; 4] {
+    let f = rotate(q, [0.0, 0.0, -1.0]);
+    // Looking straight up or down: the face's up vector says which way.
+    let f = if f[0].hypot(f[2]) < 1e-3 {
+        let up = rotate(q, [0.0, 1.0, 0.0]);
+        [-up[0] * f[1].signum(), 0.0, -up[2] * f[1].signum()]
+    } else {
+        f
+    };
+    let yaw = (-f[0]).atan2(-f[2]);
+    let (s, c) = (0.5 * yaw).sin_cos();
+    [0.0, s, 0.0, c]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rotations_compose_and_invert() {
+        let a = 0.6f32;
+        let yaw = [0.0, (a / 2.0).sin(), 0.0, (a / 2.0).cos()];
+        // Turning left by `a` takes "ahead" to the left.
+        let f = rotate(yaw, [0.0, 0.0, -1.0]);
+        assert!(close(f[0], -a.sin()) && close(f[2], -a.cos()));
+        let back = quat_mul(quat_conj(yaw), yaw);
+        assert!(close(back[3], 1.0));
+        let twice = rotate(quat_mul(yaw, yaw), [0.0, 0.0, -1.0]);
+        assert!(close(twice[0], -(2.0 * a).sin()));
+    }
+
+    #[test]
+    fn yaw_only_drops_tilt_and_roll() {
+        let a = 0.6f32;
+        let yaw = [0.0, (a / 2.0).sin(), 0.0, (a / 2.0).cos()];
+        // Then look down 30 degrees and roll 10: still facing `a`.
+        let pitch = [(-0.25f32).sin(), 0.0, 0.0, (-0.25f32).cos()];
+        let roll = [0.0, 0.0, (0.09f32).sin(), (0.09f32).cos()];
+        let q = quat_mul(yaw, quat_mul(pitch, roll));
+        let y = yaw_only(q);
+        assert!(close(y[0], 0.0) && close(y[2], 0.0));
+        assert!(close(y[1], yaw[1]) && close(y[3], yaw[3]));
+    }
 
     fn ndc(m: &Mat4, p: [f32; 3]) -> [f32; 3] {
         let c = transform(m, [p[0], p[1], p[2], 1.0]);

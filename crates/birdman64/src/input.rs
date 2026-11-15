@@ -2168,8 +2168,12 @@ pub fn spawn() {
                         }
                         // Any other press: that pad becomes the active one
                         // (last used wins; `active_pad` names its buttons).
-                        gilrs::EventType::ButtonPressed(_, _) => {
+                        gilrs::EventType::ButtonPressed(b, _) => {
                             active_pad_pressed(&gilrs, ev.id);
+                            // Birdman64VR: R3 recentres the headset view.
+                            if b == Button::RightThumb {
+                                crate::vr::request_recentre();
+                            }
                         }
                         _ => {}
                     }

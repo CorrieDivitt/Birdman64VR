@@ -213,6 +213,10 @@ pub fn android_key(key: PhysicalKey, pressed: bool, repeat: bool) -> AndroidKey 
         PAD_CAPTURE.store(false, Ordering::Relaxed);
         return AndroidKey::Pad;
     }
+    // Birdman64VR: R3 recentres the headset view (unbound in the game).
+    if pressed && button == Button::RightThumb {
+        crate::vr::request_recentre();
+    }
     let mut st = STATE.lock().unwrap();
     st.held.retain(|&b| b != button);
     if pressed {

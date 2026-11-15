@@ -51,8 +51,9 @@ pub struct FrameTime {
     pub ahead_ns: Option<i64>,
 }
 
-/// Where one eye is and what it sees, in the seated space: plain data, so
-/// it can be handed to another thread and back ([`Layers::eyes`]).
+/// Where one eye is and what it sees, in the runtime's `LOCAL` space
+/// ([`Seat::seated`] gives it in the seated space): plain data, so it can
+/// be handed to another thread and back ([`Layers::eyes`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EyePose {
     /// Unit quaternion x, y, z, w.
@@ -101,16 +102,80 @@ impl EyePose {
     }
 }
 
+/// Where the player sits: the seated space's origin and forward (-z) in
+/// the runtime's `LOCAL` space. Everything the app draws is placed in the
+/// seated space; [`XrContext::recentre`] moves it to where the head is.
+/// Level by construction: only a turn about the vertical axis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Seat {
+    /// Unit quaternion x, y, z, w (a turn about y).
+    pub orientation: [f32; 4],
+    /// Metres.
+    pub position: [f32; 3],
+}
+
+impl Default for Seat {
+    /// `LOCAL` itself: the head when the session started, or when the
+    /// system last recentred (long press of the Quest's Meta button).
+    fn default() -> Self {
+        Self {
+            orientation: [0.0, 0.0, 0.0, 1.0],
+            position: [0.0; 3],
+        }
+    }
+}
+
+impl Seat {
+    /// A seat at a head pose: there, facing the way it faces, level.
+    pub fn at_head(orientation: [f32; 4], position: [f32; 3]) -> Self {
+        Self {
+            orientation: math::yaw_only(orientation),
+            position,
+        }
+    }
+
+    /// `pose` (in `LOCAL`) relative to the seat: in the seated space.
+    pub fn seated(&self, pose: &EyePose) -> EyePose {
+        let inv = math::quat_conj(self.orientation);
+        let d = [0, 1, 2].map(|i| pose.position[i] - self.position[i]);
+        EyePose {
+            orientation: math::quat_mul(inv, pose.orientation),
+            position: math::rotate(inv, d),
+            fov: pose.fov,
+        }
+    }
+
+    /// A pose in the seated space, in `LOCAL`.
+    fn place(&self, orientation: [f32; 4], position: [f32; 3]) -> xr::Posef {
+        let o = math::quat_mul(self.orientation, orientation);
+        let r = math::rotate(self.orientation, position);
+        xr::Posef {
+            orientation: xr::Quaternionf {
+                x: o[0],
+                y: o[1],
+                z: o[2],
+                w: o[3],
+            },
+            position: xr::Vector3f {
+                x: self.position[0] + r[0],
+                y: self.position[1] + r[1],
+                z: self.position[2] + r[2],
+            },
+        }
+    }
+}
+
 /// One eye of the stereo world layer for the frame being drawn.
 pub struct Eye<'a> {
     /// Render target (one layer of the eye swapchain).
     pub target: &'a wgpu::TextureView,
-    /// World → eye for the predicted head pose (`math::view`), in the
-    /// seated space.
+    /// Seated space → eye for the predicted head pose (`math::view` of
+    /// [`Seat::seated`]).
     pub view: Mat4,
     /// Eye → clip for this eye's field of view (`math::projection`).
     pub projection: Mat4,
-    /// The pose and field of view both were made from.
+    /// The pose (in `LOCAL`, not seated) and field of view both were made
+    /// from.
     pub pose: EyePose,
 }
 
@@ -125,6 +190,9 @@ pub struct Frame<'a> {
     /// to draw the next picture for when it takes a frame to make
     /// ([`Layers::eyes`]).
     pub next_eyes: Option<[EyePose; 2]>,
+    /// Where the player sits this frame: draw the world for
+    /// `seat.seated(pose)`, submit it for `pose`.
+    pub seat: Seat,
 }
 
 /// Which layers a frame shows: the stereo world (drawn first, behind) and
@@ -175,6 +243,11 @@ pub struct XrContext {
     /// Both eyes: one image with two array layers.
     eyes: Swapchain,
     space: xr::Space,
+    /// The head (`VIEW`), located in `space` for [`Self::recentre`].
+    head: xr::Space,
+    seat: Seat,
+    /// [`Self::recentre`] was asked for: done at the next frame.
+    recentre: bool,
     frame_stream: xr::FrameStream<xr::Vulkan>,
     frame_waiter: xr::FrameWaiter,
     session: xr::Session<xr::Vulkan>,
@@ -330,6 +403,8 @@ impl XrContext {
         };
         let space =
             session.create_reference_space(xr::ReferenceSpaceType::LOCAL, xr::Posef::IDENTITY)?;
+        let head =
+            session.create_reference_space(xr::ReferenceSpaceType::VIEW, xr::Posef::IDENTITY)?;
 
         let formats = session.enumerate_swapchain_formats()?;
         let (vk_format, format) = [
@@ -363,6 +438,9 @@ impl XrContext {
             panel,
             eyes,
             space,
+            head,
+            seat: Seat::default(),
+            recentre: false,
             frame_stream,
             frame_waiter,
             session,
@@ -426,6 +504,18 @@ impl XrContext {
         self.focused && self.present
     }
 
+    /// Moves the seat to where the head is at the next frame: forward
+    /// becomes the way the player faces (level), and the seated origin the
+    /// head's position, so the game's camera is at the player's eyes again.
+    pub fn recentre(&mut self) {
+        self.recentre = true;
+    }
+
+    /// The seat now ([`Seat`]).
+    pub fn seat(&self) -> Seat {
+        self.seat
+    }
+
     /// One line per session state change since the last call, for logs.
     pub fn take_log(&mut self) -> Vec<String> {
         std::mem::take(&mut self.log)
@@ -473,6 +563,15 @@ impl XrContext {
                         if self.present { "put on" } else { "taken off" }
                     ));
                 }
+                // The system recentred (long press of the Meta button):
+                // `LOCAL` itself now starts at the head, so our own offset
+                // from it goes.
+                ReferenceSpaceChangePending(e)
+                    if e.reference_space_type() == xr::ReferenceSpaceType::LOCAL =>
+                {
+                    self.seat = Seat::default();
+                    self.log.push("the system recentred the view".into());
+                }
                 InstanceLossPending(_) => {
                     self.log.push("instance loss pending".into());
                     return Ok(false);
@@ -509,6 +608,18 @@ impl XrContext {
             return Ok(FrameOutcome::Idle);
         }
         let state = self.frame_waiter.wait()?;
+        if std::mem::take(&mut self.recentre) {
+            let flags =
+                xr::SpaceLocationFlags::ORIENTATION_VALID | xr::SpaceLocationFlags::POSITION_VALID;
+            match self.head.locate(&self.space, state.predicted_display_time) {
+                Ok(l) if l.location_flags.contains(flags) => {
+                    let (o, p) = (l.pose.orientation, l.pose.position);
+                    self.seat = Seat::at_head([o.x, o.y, o.z, o.w], [p.x, p.y, p.z]);
+                    self.log.push("recentred".into());
+                }
+                _ => self.log.push("recentre: the head is not tracked".into()),
+            }
+        }
         let layers = layers();
         let waiting = std::time::Instant::now();
         let _queue = queue_lock.map(|m| m.lock().unwrap_or_else(|e| e.into_inner()));
@@ -558,9 +669,10 @@ impl XrContext {
         let eyes = located.as_ref().zip(eye_image).map(|(views, image)| {
             [0, 1].map(|i| {
                 let e = views[i];
+                let s = self.seat.seated(&e);
                 Eye {
                     target: &self.eyes.views[image][i],
-                    view: math::view(e.orientation, e.position),
+                    view: math::view(s.orientation, s.position),
                     projection: math::projection(e.fov[0], e.fov[1], e.fov[2], e.fov[3], NEAR, FAR),
                     pose: e,
                 }
@@ -579,6 +691,7 @@ impl XrContext {
             panel: panel_image.map(|i| &self.panel.views[i][0]),
             eyes,
             next_eyes,
+            seat: self.seat,
         });
         if eye_image.is_some() {
             self.eyes.handle.release_image()?;
@@ -623,14 +736,10 @@ impl XrContext {
                         .image_array_index(0)
                         .image_rect(rect(self.panel.size_px)),
                 )
-                .pose(xr::Posef {
-                    orientation: xr::Quaternionf::IDENTITY,
-                    position: xr::Vector3f {
-                        x: 0.0,
-                        y: panel.height_m,
-                        z: -panel.distance_m,
-                    },
-                })
+                .pose(self.seat.place(
+                    [0.0, 0.0, 0.0, 1.0],
+                    [0.0, panel.height_m, -panel.distance_m],
+                ))
                 .size(xr::Extent2Df {
                     width: panel.width_m,
                     height: panel.width_m * h as f32 / w as f32,
@@ -735,4 +844,37 @@ fn create_swapchain(
         views,
         size_px,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-4
+    }
+
+    #[test]
+    fn a_seat_at_the_head_puts_the_head_at_the_seated_origin_facing_forward() {
+        // Turned 90 degrees left and looking down a little, 0.3 m right
+        // and 0.2 m lower than where the session started.
+        let yaw = std::f32::consts::FRAC_PI_4;
+        let turn = [0.0, yaw.sin(), 0.0, yaw.cos()];
+        let pitch = [(-0.2f32).sin(), 0.0, 0.0, (-0.2f32).cos()];
+        let head = EyePose {
+            orientation: math::quat_mul(turn, pitch),
+            position: [0.3, -0.2, 0.0],
+            fov: [-0.8, 0.8, 0.8, -0.8],
+        };
+        let seat = Seat::at_head(head.orientation, head.position);
+        let s = seat.seated(&head);
+        assert!(s.position.iter().all(|&v| close(v, 0.0)));
+        // Only the look down is left: ahead is -z, tilted down.
+        let ahead = math::rotate(s.orientation, [0.0, 0.0, -1.0]);
+        assert!(close(ahead[0], 0.0) && ahead[1] < -0.3 && ahead[2] < 0.0);
+        assert_eq!(s.fov, head.fov);
+        // Something ahead in the seated space is ahead of the head in LOCAL.
+        let p = seat.place([0.0, 0.0, 0.0, 1.0], [0.0, 0.0, -2.5]).position;
+        assert!(close(p.x, 0.3 - 2.5) && close(p.y, -0.2) && close(p.z, 0.0));
+    }
 }
