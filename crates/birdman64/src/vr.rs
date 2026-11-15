@@ -557,7 +557,64 @@ mod real {
         // Everything on the panel has one depth; a little of each draw's
         // own depth on top keeps 3D HUD parts sorted among themselves.
         hud[2][2] += 0.05;
-        pw64_gfx::StereoEye { world, hud }
+        pw64_gfx::StereoEye {
+            world,
+            hud,
+            clip: None,
+            background: None,
+        }
+    }
+
+    /// The island model (outside flight, [`pw64_gfx::Diorama`]): how wide
+    /// it is, in metres.
+    const MODEL_DIAMETER_M: f32 = 3.0;
+    /// Where its centre (the island's middle at sea level) sits in the
+    /// seated space, in metres: ahead, below eye level, a little behind
+    /// the panel (2.5 m) so the menus float in front of it.
+    const MODEL_CENTRE_M: [f32; 3] = [0.0, -1.1, -4.2];
+    /// Around the model: a dim, slightly blue room.
+    const MODEL_BACKGROUND: [f64; 3] = [0.012, 0.016, 0.026];
+
+    /// [`stereo_eye`] for a world view shown as a small model of the island
+    /// ([`pw64_gfx::Diorama`]): the model stays put in front of the player
+    /// whatever the game's camera does (the title fly-over and menu cameras
+    /// swoop and cut, which was dizzying as the player's own head). The
+    /// island's middle at sea level is the model's centre, the terrain's
+    /// larger side its diameter; game north (+y) is away from the player.
+    /// Cut to that cylinder and a little above the highest terrain, which
+    /// leaves out the far sea and the sky dome.
+    pub(super) fn diorama_eye(pose: &EyePose, d: &pw64_gfx::Diorama) -> pw64_gfx::StereoEye {
+        use pw64_gfx::matrix::mul;
+        let mut eye = stereo_eye(pose);
+        let [x0, y0, _, x1, y1, z1] = d.bounds;
+        let radius = 0.5 * (x1 - x0).max(y1 - y0).max(1.0);
+        let top = z1.max(0.0) + 0.15 * radius;
+        let s = MODEL_DIAMETER_M / (2.0 * radius);
+        // Game world → relative to the island's middle at sea level.
+        let centre: Mat4 = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [-0.5 * (x0 + x1), -0.5 * (y0 + y1), 0.0, 1.0],
+        ];
+        let model = mul(&d.camera_to_world(), &centre);
+        // → the seated space (y up, -z away), scaled down and placed.
+        let c = MODEL_CENTRE_M;
+        let place: Mat4 = [
+            [s, 0.0, 0.0, 0.0],
+            [0.0, 0.0, -s, 0.0],
+            [0.0, s, 0.0, 0.0],
+            [c[0], c[1], c[2], 1.0],
+        ];
+        let [l, r, u, dn] = pose.fov;
+        let view = mul(
+            &math::view(pose.orientation, pose.position),
+            &math::projection_reversed(l, r, u, dn, NEAR_M * 0.5),
+        );
+        eye.world = mul(&mul(&model, &place), &view);
+        eye.clip = Some(pw64_gfx::StereoClip { model, radius, top });
+        eye.background = Some(MODEL_BACKGROUND);
+        eye
     }
 
     pub(crate) struct Vr {
@@ -573,6 +630,8 @@ mod real {
         eyes: Option<(wgpu::TextureFormat, [[wgpu::TextureView; 2]; 3])>,
         /// The headset shows the stereo world (the last game frame had one).
         stereo: bool,
+        /// The last stereo frame was the island model ([`diorama_eye`]).
+        model: bool,
         /// Eye picture sets drawn so far.
         eye_serial: u64,
         /// When the world was last described in the log ([`describe`]).
@@ -641,6 +700,7 @@ mod real {
                     eye_size,
                     eyes: None,
                     stereo: false,
+                    model: false,
                     eye_serial: 0,
                     described: Instant::now(),
                     cue_to_eyes: [0; 256],
@@ -785,12 +845,11 @@ mod real {
                 .unwrap_or_default();
             for (eye, pose) in poses.iter().enumerate() {
                 let seated = seat.seated(pose);
-                renderer.render_stereo(
-                    frame,
-                    &views[back][eye],
-                    self.eye_size,
-                    &stereo_eye(&seated),
-                );
+                let matrices = match &frame.diorama {
+                    Some(d) => diorama_eye(&seated, d),
+                    None => stereo_eye(&seated),
+                };
+                renderer.render_stereo(frame, &views[back][eye], self.eye_size, &matrices);
             }
             self.eye_serial += 1;
             self.source.lock().unwrap_or_else(|e| e.into_inner()).world =
@@ -824,6 +883,14 @@ mod real {
                     ),
                     true,
                 );
+            }
+            if frame.diorama.is_some() != self.model {
+                self.model = frame.diorama.is_some();
+                let what = match &frame.diorama {
+                    Some(d) => format!("island model on: terrain bounds {:?}", d.bounds),
+                    None => "island model off".into(),
+                };
+                log(&what, true);
             }
             // What the world is made of, every 10 s in flight (vr.log and
             // logcat): for tracking down what a strange shape in the
@@ -1556,6 +1623,60 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             let far = apply(&eye.hud, [160.0, 120.0, 0.1, 1.0]);
             let nearer = apply(&eye.hud, [160.0, 120.0, 0.9, 1.0]);
             assert!(nearer[2] / nearer[3] > far[2] / far[3]);
+        }
+
+        /// The island model: what the game camera sees lands on the model
+        /// in front of the player, the island's middle at the model's
+        /// centre, north away from the player, east to the right, up up.
+        #[test]
+        fn diorama_places_the_island_in_front() {
+            let fov = std::f32::consts::FRAC_PI_4;
+            let pose = pw64_xr::EyePose {
+                orientation: [0.0, 0.0, 0.0, 1.0],
+                position: [0.0; 3],
+                fov: [-fov, fov, fov, -fov],
+            };
+            // Island 0..2000 m both ways, up to 300 m; the camera at
+            // (100, 200, 50) looking east (+x), level.
+            let d = pw64_gfx::Diorama {
+                camera: [
+                    [0.0, -1.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                    [100.0, 200.0, 50.0],
+                ],
+                bounds: [0.0, 0.0, -10.0, 2000.0, 2000.0, 300.0],
+            };
+            let eye = super::diorama_eye(&pose, &d);
+            let apply = |m: &super::Mat4, p: [f32; 4]| -> [f32; 4] {
+                [0, 1, 2, 3].map(|j| (0..4).map(|k| p[k] * m[k][j]).sum())
+            };
+            let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+            // World point → camera space (x right = south, y up, -z east).
+            let cam = |w: [f32; 3]| {
+                let r = [w[0] - 100.0, w[1] - 200.0, w[2] - 50.0];
+                [-r[1], r[2], -r[0], 1.0]
+            };
+            // Through the clip matrix: relative to the middle at sea level.
+            let clip = eye.clip.unwrap();
+            let m = apply(&clip.model, cam([1000.0, 1000.0, 0.0]));
+            assert!(
+                near(m[0], 0.0) && near(m[1], 0.0) && near(m[2], 0.0),
+                "{m:?}"
+            );
+            assert!(near(clip.radius, 1000.0) && clip.top > 300.0);
+            // On screen: the middle is straight below ahead (at the model
+            // centre), north of it farther away, east of it to the right.
+            let ndc = |w: [f32; 3]| {
+                let c = apply(&eye.world, cam(w));
+                [c[0] / c[3], c[1] / c[3], c[3]]
+            };
+            let c = super::MODEL_CENTRE_M;
+            let mid = ndc([1000.0, 1000.0, 0.0]);
+            assert!(near(mid[0], 0.0) && near(mid[1], c[1] / -c[2]) && near(mid[2], -c[2]));
+            assert!(ndc([1000.0, 2000.0, 0.0])[2] > mid[2], "north is away");
+            assert!(ndc([2000.0, 1000.0, 0.0])[0] > 0.0, "east is right");
+            assert!(ndc([1000.0, 1000.0, 300.0])[1] > mid[1], "up is up");
         }
 
         /// Every shader parses and validates (no GPU needed).

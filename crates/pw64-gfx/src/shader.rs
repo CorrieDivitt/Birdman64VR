@@ -21,6 +21,7 @@ struct Draw {
     filt: vec4<f32>,
     vr: vec4<f32>,
     eye: mat4x4<f32>,
+    clip: mat4x4<f32>,
 };
 @group(0) @binding(0) var<uniform> u: Draw;
 @group(1) @binding(0) var tex0: texture_2d<f32>;
@@ -39,6 +40,9 @@ struct VOut {
     @location(0) color: vec4<f32>,
     @location(1) st: vec2<f32>,
     @location(2) @interpolate(flat) st_clamp: vec4<f32>,
+    // Birdman64VR island model: the point relative to the model's centre
+    // (game units, z up); only the clipping variant reads it.
+    @location(3) dpos: vec3<f32>,
 };
 
 @vertex
@@ -52,6 +56,8 @@ fn vs_main(v: VIn) -> VOut {
     if (u.vr.x != 0.0) {
         o.pos = u.eye * v.pos;
     }
+    let d = u.clip * v.pos;
+    o.dpos = d.xyz / select(d.w, 1.0, d.w == 0.0);
     o.color = v.color;
     o.st = v.st;
     o.st_clamp = v.st_clamp;
@@ -207,8 +213,11 @@ const FILTER3: &str = "    if (u.lodp.x == 2.0) {
 ";
 
 /// Full WGSL module for `key`; `n64_filter` = `TexFilter::N64` (3-point
-/// for bilinear tiles, selected per texel by `u.filt`).
-pub fn wgsl(key: &ShaderKey, n64_filter: bool) -> String {
+/// for bilinear tiles, selected per texel by `u.filt`); `clip` =
+/// Birdman64VR's island-model variant, which drops fragments outside the
+/// model's cylinder (a separate variant: a `discard` anywhere in a shader
+/// costs early depth testing on tiled GPUs).
+pub fn wgsl(key: &ShaderKey, n64_filter: bool, clip: bool) -> String {
     let mut s = String::from(PRELUDE);
     let sample = if n64_filter {
         s += FILTER3_FNS;
@@ -219,6 +228,9 @@ pub fn wgsl(key: &ShaderKey, n64_filter: bool) -> String {
     s += &key.combiner.wgsl();
     s += &key.blend.wgsl(key.alpha_cvg_sel);
     s += "\n@fragment\nfn fs_main(i: VOut) -> @location(0) vec4<f32> {\n";
+    if clip {
+        s += CLIP;
+    }
     s += &sample;
     match key.mode {
         ShaderMode::Fill => s += "    return dim(u.fill);\n",
@@ -245,12 +257,19 @@ pub fn wgsl(key: &ShaderKey, n64_filter: bool) -> String {
         // Second step: the blender input as a z-buffer word → depth.
         s += crate::rdp::WGSL_Z_WORD;
         s += "\n@fragment\nfn fs_depth(i: VOut) -> @builtin(frag_depth) f32 {\n";
+        if clip {
+            s += CLIP;
+        }
         s += &sample;
         s += &combined(key);
         s += "    return zword_depth(c);\n}\n";
     }
     s
 }
+
+/// The island model's cylinder (`StereoClip`): radius `u.vr.y`, top
+/// `u.vr.z`, around the model's centre.
+const CLIP: &str = "    if (length(i.dpos.xy) > u.vr.y || i.dpos.z > u.vr.z) { discard; }\n";
 
 /// Fragment-body lines computing the combiner output `c` (+ alpha test).
 fn combined(key: &ShaderKey) -> String {
@@ -303,8 +322,8 @@ mod tests {
                             blend: BlendState::new(cycle, l),
                             alpha_cvg_sel: l & 0x2000 != 0,
                         };
-                        for n64 in [false, true] {
-                            let src = wgsl(&key, n64);
+                        for (n64, clip) in [(false, false), (true, false), (false, true)] {
+                            let src = wgsl(&key, n64, clip);
                             let module = naga::front::wgsl::parse_str(&src)
                                 .unwrap_or_else(|e| panic!("{}\n{src}", e.emit_to_string(&src)));
                             naga::valid::Validator::new(

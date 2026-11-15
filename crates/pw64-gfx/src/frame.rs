@@ -72,6 +72,11 @@ pub struct DrawUniforms {
     pub vr: [f32; 4],
     /// The eye pass's matrix (row-vector convention, like `matrix::Mat4`).
     pub eye: [[f32; 4]; 4],
+    /// Birdman64VR, island model (`StereoClip`): `pos * clip` = the point
+    /// relative to the model's centre in game units, z up. Fragments
+    /// farther out than `vr.y` or higher than `vr.z` are dropped. Only read
+    /// by the clipping shader variant.
+    pub clip: [[f32; 4]; 4],
 }
 
 /// How a draw gets its LOD fraction / mip tiles (`DrawUniforms::lodp.x`).
@@ -265,6 +270,44 @@ pub struct Frame {
     /// camera space: `pos * views[i]` = the point as the game's camera
     /// sees it, x right, y up, looking down -z, in game units (metres).
     pub views: Vec<[[f32; 4]; 4]>,
+    /// Birdman64VR: the world view is to be shown as a small model of the
+    /// island (outside flight; `pw64_vr_diorama` on the C side).
+    pub diorama: Option<Diorama>,
+}
+
+/// Birdman64VR: what the game told the renderer about a world view shown
+/// as a model of the island (`pw64_diorama_tag`), in game units (metres,
+/// z up).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Diorama {
+    /// The game camera's world matrix: rows right, forward, up, position.
+    pub camera: [[f32; 3]; 4],
+    /// The terrain's bounds: min x, y, z, max x, y, z.
+    pub bounds: [f32; 6],
+}
+
+impl Diorama {
+    /// From the 18 values in tag order.
+    pub fn from_values(v: &[f32; 18]) -> Self {
+        let r = |i: usize| [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
+        Self {
+            camera: [r(0), r(1), r(2), r(3)],
+            bounds: [v[12], v[13], v[14], v[15], v[16], v[17]],
+        }
+    }
+
+    /// Camera space ([`Frame::views`]: x right, y up, -z forward) → game
+    /// world (z up), row-vector convention.
+    pub fn camera_to_world(&self) -> [[f32; 4]; 4] {
+        let [right, forward, up, pos] = self.camera;
+        let row = |v: [f32; 3], w: f32| [v[0], v[1], v[2], w];
+        [
+            row(right, 0.0),
+            row(up, 0.0),
+            row(forward.map(|c| -c), 0.0),
+            row(pos, 1.0),
+        ]
+    }
 }
 
 impl Frame {

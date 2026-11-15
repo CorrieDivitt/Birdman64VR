@@ -8,8 +8,8 @@
 
 use crate::combiner::CombinerKey;
 use crate::frame::{
-    Anchor, DrawCall, DrawUniforms, Frame, LodMode, N64_HEIGHT, N64_WIDTH, PipelineKey, ShaderKey,
-    ShaderMode, VAnchor, Vertex, Wide,
+    Anchor, Diorama, DrawCall, DrawUniforms, Frame, LodMode, N64_HEIGHT, N64_WIDTH, PipelineKey,
+    ShaderKey, ShaderMode, VAnchor, Vertex, Wide,
 };
 use crate::matrix::{self, MatrixStack};
 use crate::memory::Memory;
@@ -163,6 +163,8 @@ pub struct Interpreter {
     /// Split-screen HUD view (`SPLIT_TAG` markers): the pending x range of
     /// an 'X' marker and the active rect; reset per run.
     split_x: [f32; 2],
+    /// Birdman64VR: the island model's values as their tags arrive.
+    diorama_in: [f32; 18],
     split: Option<[f32; 4]>,
     /// Current movable HUD element (`HUD_ELEM_TAG` markers, 0 = none);
     /// reset per run.
@@ -194,6 +196,10 @@ type ViewMemo = (matrix::Mat4, ([f32; 3], [f32; 3]), u16);
 /// widescreen; `crates/pw64-game/native/src/pw64_widescreen.c`).
 pub const WIDE_TAG_ON: u32 = 0x5057_5731;
 pub const WIDE_TAG_OFF: u32 = 0x5057_5730;
+/// Birdman64VR: `G_NOOP` w0 marker (low 24 bits, + an index in the low
+/// byte) of the island model's values, one f32 in w1 each
+/// (`pw64_diorama_tag`, [`Diorama`]).
+pub const DIORAMA_TAG: u32 = 0x44_5200;
 /// `G_NOOP` w1 HUD anchor marker: "PWA" + `L`/`C`/`R` in the low byte;
 /// applies to the following draws (see [`Anchor`]).
 pub const ANCHOR_TAG: u32 = 0x5057_4100;
@@ -323,6 +329,7 @@ impl Interpreter {
             vanchor: VAnchor::Middle,
             hud: false,
             split_x: [0.0; 2],
+            diorama_in: [0.0; 18],
             split: None,
             elem: 0,
             commands: 0,
@@ -356,6 +363,7 @@ impl Interpreter {
             textures: std::collections::HashMap::with_capacity(t),
             chains: Default::default(),
             views: Vec::new(),
+            diorama: None,
         };
         self.run_into(mem, dl, &mut frame);
         frame
@@ -385,6 +393,7 @@ impl Interpreter {
         frame.textures.clear();
         frame.chains.clear();
         frame.views.clear();
+        frame.diorama = None;
         std::mem::swap(&mut self.frame, frame);
         self.execute(mem, dl);
         std::mem::swap(&mut self.frame, frame);
@@ -466,6 +475,17 @@ impl Interpreter {
     fn command(&mut self, mem: &dyn Memory, w0: u32, w1: u32) {
         let opc = (w0 >> 24) as u8;
         match opc {
+            // Birdman64VR island model data (pw64_diorama_tag): first, as
+            // w1 is a float's bits here and could look like another tag.
+            op::G_NOOP if w0 & 0xFF_FF00 == DIORAMA_TAG => {
+                let i = (w0 & 0xFF) as usize;
+                if i < self.diorama_in.len() {
+                    self.diorama_in[i] = f32::from_bits(w1);
+                    if i == self.diorama_in.len() - 1 {
+                        self.frame.diorama = Some(Diorama::from_values(&self.diorama_in));
+                    }
+                }
+            }
             // Widescreen world-view markers (native game, pw64_widescreen.c).
             op::G_NOOP if w1 == WIDE_TAG_ON || w1 == WIDE_TAG_OFF => {
                 self.wide_view = w1 == WIDE_TAG_ON;
@@ -973,6 +993,7 @@ impl Interpreter {
                 screen: [0.0; 4],
                 vr: [0.0; 4],
                 eye: [[0.0; 4]; 4],
+                clip: [[0.0; 4]; 4],
                 prim: self.prim,
                 env: self.env,
                 fog: self.fog,

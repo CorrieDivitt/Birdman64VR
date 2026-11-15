@@ -21,12 +21,12 @@
 +    // that's the channel's extended one this frame draws with (chan.c.patch).
 +    clipFar = pw64_infinite_view_distance ? D_80261730[camera->unk22C].unk1FC : camera->clipFar;
      uvMat4Copy(&sp68, &camera->unk108);
-+    // PW64 VR: no band in flight. It is a card across the view at the far
++    // PW64 VR: no band in stereo (flight, island model). It is a card at the far
 +    // plane, meant to blend the far plane's cut through the sea into the
 +    // sky; in the headset there is no such cut, and the card showed as a
 +    // white line fixed in the player's view. (A haze ring around the camera
 +    // was tried instead and set aside: docs/notes/vr.md.)
-+    if (pw64_vr_flight()) {
++    if (pw64_vr_stereo_view) {
 +        uvEnvProps(D_80362690->envId, ENV_PROP_FOG_FACTOR(0.996f), ENV_PROP_END);
 +        return 0;
 +    }

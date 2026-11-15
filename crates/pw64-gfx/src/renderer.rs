@@ -160,6 +160,23 @@ pub struct StereoEye {
     /// N64 screen clip space (`Vertex::pos`) → eye clip: the flat panel
     /// the HUD is drawn on.
     pub hud: Mat4,
+    /// Birdman64VR island model: drop the world outside this cylinder.
+    pub clip: Option<StereoClip>,
+    /// The picture's background (linear RGB); `None` = the colour the game
+    /// cleared the screen with.
+    pub background: Option<[f64; 3]>,
+}
+
+/// The cylinder an island model is cut to ([`StereoEye::clip`]): the sea
+/// and the sky dome reach far past the island.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StereoClip {
+    /// Camera space → relative to the model's centre, game units, z up.
+    pub model: Mat4,
+    /// Radius around the centre, game units.
+    pub radius: f32,
+    /// Height above the centre, game units.
+    pub top: f32,
 }
 
 pub struct Renderer {
@@ -170,8 +187,9 @@ pub struct Renderer {
     uniform_bgl: wgpu::BindGroupLayout,
     texture_bgl: wgpu::BindGroupLayout,
     layout: wgpu::PipelineLayout,
-    shaders: HashMap<(ShaderKey, TexFilter), wgpu::ShaderModule>,
-    pipelines: HashMap<(PipelineKey, Step, TexFilter), wgpu::RenderPipeline>,
+    /// Per key, filter and island-model clipping (Birdman64VR).
+    shaders: HashMap<(ShaderKey, TexFilter, bool), wgpu::ShaderModule>,
+    pipelines: HashMap<(PipelineKey, Step, TexFilter, bool), wgpu::RenderPipeline>,
     depth_format: wgpu::TextureFormat,
     textures: HashMap<u64, wgpu::TextureView>,
     samplers: HashMap<SamplerKey, wgpu::Sampler>,
@@ -411,17 +429,21 @@ impl Renderer {
         }
     }
 
-    fn pipeline(&mut self, key: &PipelineKey, step: Step) {
+    /// `clip`: Birdman64VR's island-model variant ([`StereoClip`]).
+    fn pipeline(&mut self, key: &PipelineKey, step: Step, clip: bool) {
         let filter = self.options.filter;
-        if !self.pipelines.contains_key(&(*key, step, filter)) {
-            let module = self.shaders.entry((key.shader, filter)).or_insert_with(|| {
-                let src = shader::wgsl(&key.shader, filter == TexFilter::N64);
-                self.device
-                    .create_shader_module(wgpu::ShaderModuleDescriptor {
-                        label: Some("pw64 combiner"),
-                        source: wgpu::ShaderSource::Wgsl(src.into()),
-                    })
-            });
+        if !self.pipelines.contains_key(&(*key, step, filter, clip)) {
+            let module = self
+                .shaders
+                .entry((key.shader, filter, clip))
+                .or_insert_with(|| {
+                    let src = shader::wgsl(&key.shader, filter == TexFilter::N64, clip);
+                    self.device
+                        .create_shader_module(wgpu::ShaderModuleDescriptor {
+                            label: Some("pw64 combiner"),
+                            source: wgpu::ShaderSource::Wgsl(src.into()),
+                        })
+                });
             let s = &key.shader;
             let no_color = matches!(s.mode, ShaderMode::DepthClear | ShaderMode::DepthImage)
                 || s.blend.kind == FinalBlend::KeepDst;
@@ -538,7 +560,7 @@ impl Renderer {
                     multiview: None,
                     cache: None,
                 });
-            self.pipelines.insert((*key, step, filter), pipeline);
+            self.pipelines.insert((*key, step, filter, clip), pipeline);
         }
     }
 
@@ -1330,7 +1352,7 @@ impl Renderer {
             scissors.push(sc);
             self.bind_group(&d.textures);
             for &step in Self::steps(&d.pipeline) {
-                self.pipeline(&d.pipeline, step);
+                self.pipeline(&d.pipeline, step, false);
             }
         }
         self.upload_buffers(&ubytes, frame);
@@ -1392,7 +1414,9 @@ impl Renderer {
                 pass.set_bind_group(1, &self.bind_groups[&bkey], &[]);
                 pass.set_scissor_rect(x, y, w, h);
                 for &step in Self::steps(&d.pipeline) {
-                    pass.set_pipeline(&self.pipelines[&(d.pipeline, step, self.options.filter)]);
+                    pass.set_pipeline(
+                        &self.pipelines[&(d.pipeline, step, self.options.filter, false)],
+                    );
                     pass.draw(d.first_vertex..d.first_vertex + d.vertex_count, 0..1);
                 }
             }
@@ -1431,6 +1455,14 @@ impl Renderer {
             .iter()
             .map(|v| crate::matrix::mul(v, &eye.world))
             .collect();
+        let clip_views: Vec<Mat4> = match &eye.clip {
+            Some(c) => frame
+                .views
+                .iter()
+                .map(|v| crate::matrix::mul(v, &c.model))
+                .collect(),
+            None => Vec::new(),
+        };
         let n64 = self.options.filter == TexFilter::N64;
         let mut ubytes = vec![0u8; frame.draws.len().max(1) * UNIFORM_STRIDE as usize];
         let last_world = frame.draws.iter().rposition(|d| d.view != 0).unwrap();
@@ -1470,6 +1502,11 @@ impl Renderer {
             let mut u = d.uniforms;
             u.vr = [1.0, 0.0, 0.0, 0.0];
             u.eye = *m;
+            let clip = eye.clip.as_ref().filter(|_| d.view != 0);
+            if let Some(c) = clip {
+                u.vr = [1.0, c.radius, c.top, 0.0];
+                u.clip = clip_views[d.view as usize - 1];
+            }
             u.lod[1] = 0.0;
             if n64 {
                 u.filt = filter_uniform(&d.textures);
@@ -1478,26 +1515,31 @@ impl Renderer {
             ubytes[o..o + size_of::<DrawUniforms>()].copy_from_slice(bytemuck::bytes_of(&u));
             self.bind_group(&d.textures);
             for &step in Self::steps(&d.pipeline) {
-                self.pipeline(&d.pipeline, step);
+                self.pipeline(&d.pipeline, step, clip.is_some());
             }
         }
         self.upload_buffers(&ubytes, frame);
         // The game's own screen clear, if it made one before the world.
-        let clear = frame.draws[..first_world]
-            .iter()
-            .rev()
-            .find(|d| {
-                matches!(d.wide, Wide::Stretch(_)) && d.pipeline.shader.mode == ShaderMode::Fill
-            })
-            .map_or(wgpu::Color::BLACK, |d| {
-                let c = d.uniforms.fill;
-                wgpu::Color {
-                    r: c[0] as f64,
-                    g: c[1] as f64,
-                    b: c[2] as f64,
-                    a: 1.0,
-                }
-            });
+        let clear = eye
+            .background
+            .map(|[r, g, b]| wgpu::Color { r, g, b, a: 1.0 });
+        let clear = clear.unwrap_or_else(|| {
+            frame.draws[..first_world]
+                .iter()
+                .rev()
+                .find(|d| {
+                    matches!(d.wide, Wide::Stretch(_)) && d.pipeline.shader.mode == ShaderMode::Fill
+                })
+                .map_or(wgpu::Color::BLACK, |d| {
+                    let c = d.uniforms.fill;
+                    wgpu::Color {
+                        r: c[0] as f64,
+                        g: c[1] as f64,
+                        b: c[2] as f64,
+                        a: 1.0,
+                    }
+                })
+        });
         let mut enc = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1554,7 +1596,9 @@ impl Renderer {
                 pass.set_bind_group(0, &ub.2, &[(i as u64 * UNIFORM_STRIDE) as u32]);
                 pass.set_bind_group(1, &self.bind_groups[&bkey], &[]);
                 for &step in Self::steps(&d.pipeline) {
-                    pass.set_pipeline(&self.pipelines[&(d.pipeline, step, self.options.filter)]);
+                    let clip = eye.clip.is_some() && d.view != 0;
+                    let key = (d.pipeline, step, self.options.filter, clip);
+                    pass.set_pipeline(&self.pipelines[&key]);
                     pass.draw(d.first_vertex..d.first_vertex + d.vertex_count, 0..1);
                 }
             }
@@ -2056,6 +2100,8 @@ mod tests {
         let mut eye = StereoEye {
             world: same,
             hud: matrix::IDENTITY,
+            clip: None,
+            background: None,
         };
         r.render_stereo(&frame, &view, (w, h), &eye);
         let stereo = read_rgba(&device, &queue, &tex);
@@ -2147,6 +2193,7 @@ mod tests {
             textures: HashMap::new(),
             chains: HashMap::new(),
             views: Vec::new(),
+            diorama: None,
         }
     }
 

@@ -36,6 +36,57 @@ int pw64_vr_flight(void) {
            D_80362690->state == GAME_STATE_TEST_UPDATE;
 }
 
+/* VR outside a test's flight: a full-width world view with terrain is
+ * shown as a small model of the island in front of the player (pw64-gfx
+ * `Diorama`, birdman64 vr.rs): the game's camera can swoop and cut as it
+ * likes, the model stays put. Culled by distance only like flight, with
+ * the far plane reaching the whole terrain (pw64_visibility_far), so the
+ * whole island is there whatever the camera looks at. */
+int pw64_vr_diorama(const void* chan) {
+    const UnkStruct_80204D94* c = chan;
+    return pw64_widescreen_aspect < 0.0f &&
+           (D_80362690 == NULL || D_80362690->state != GAME_STATE_TEST_UPDATE) &&
+           (c->unk0 & 2) && c->unk4 < LEVEL_TERRA_COUNT && gGfxUnkPtrs != NULL &&
+           gGfxUnkPtrs->terras[c->unk4] != NULL && c->viewX0 <= 16 &&
+           c->viewX1 >= SCREEN_WIDTH - 16;
+}
+
+int pw64_vr_stereo_view = 0;
+
+/* Must match pw64-gfx `interp::DIORAMA_TAG`: G_NOOP with this in w0's low
+ * 24 bits (+ the value's index in the low byte) and an f32's bits in w1. */
+#define PW64_DIORAMA_TAG 0x445200u /* "DR" */
+
+/* The diorama's data for the renderer, right after the world tag: the
+ * game camera's world matrix (rows right, forward, up, position; xyz) and
+ * the terrain's bounds (min xyz, max xyz). 18 values. */
+static void pw64_diorama_tag(const UnkStruct_80204D94* c) {
+    const ParsedUVTR* t = gGfxUnkPtrs->terras[c->unk4];
+    float v[18];
+    int i, k;
+    for (i = 0; i < 4; i++) {
+        for (k = 0; k < 3; k++) {
+            v[i * 3 + k] = c->unk110.m[i][k];
+        }
+    }
+    v[12] = t->unk0.unk0;
+    v[13] = t->unk0.unk4;
+    v[14] = t->unk0.unk8;
+    v[15] = t->unk0.unkC;
+    v[16] = t->unk0.unk10;
+    v[17] = t->unk0.unk14;
+    for (i = 0; i < 18; i++) {
+        union {
+            float f;
+            u32 u;
+        } bits;
+        bits.f = v[i];
+        gGfxDisplayListHead->words.w0 = ((u32)G_NOOP << 24) | PW64_DIORAMA_TAG | (u32)i;
+        gGfxDisplayListHead->words.w1 = bits.u;
+        gGfxDisplayListHead++;
+    }
+}
+
 /* Fill screen, 0 = off. Set by Rust before boot
  * (pw64_game::set_fill_screen). */
 int pw64_fill_screen = 0;
@@ -77,7 +128,8 @@ float pw64_widescreen_xscale(const void* chan) {
     float k;
     if (aspect < 0.0f) {
         /* VR: the main world view (the same test as below), in flight. */
-        if (!pw64_vr_flight() || c->viewX0 > 16 || c->viewX1 < SCREEN_WIDTH - 16 ||
+        if (!(pw64_vr_flight() || pw64_vr_diorama(c)) || c->viewX0 > 16 ||
+            c->viewX1 < SCREEN_WIDTH - 16 ||
             c->viewX1 <= c->viewX0 || (!(c->unk0 & 2) && c->unk2 == 0xFFFF)) {
             return 1.0f;
         }
@@ -201,6 +253,12 @@ void pw64_widescreen_tag(const void* chan, int on) {
     gGfxDisplayListHead->words.w0 = (u32)G_NOOP << 24;
     gGfxDisplayListHead->words.w1 = on ? PW64_WIDE_TAG_ON : PW64_WIDE_TAG_OFF;
     gGfxDisplayListHead++;
+    if (pw64_widescreen_aspect < 0.0f) {
+        pw64_vr_stereo_view = on;
+        if (on && pw64_vr_diorama(chan)) {
+            pw64_diorama_tag(chan);
+        }
+    }
 }
 
 /*

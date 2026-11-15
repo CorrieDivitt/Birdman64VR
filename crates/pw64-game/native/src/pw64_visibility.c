@@ -18,7 +18,9 @@ float pw64_visibility_far(const void* chan, float far) {
     const ParsedUVTR* t;
     float dx, dy, dz;
 
-    if (!pw64_infinite_view_distance || !(c->unk0 & 2) || c->unk4 >= LEVEL_TERRA_COUNT) {
+    /* Birdman64VR: the island model (pw64_vr_diorama) shows all of it. */
+    if (!(pw64_infinite_view_distance || pw64_vr_diorama(chan)) || !(c->unk0 & 2) ||
+        c->unk4 >= LEVEL_TERRA_COUNT) {
         return far;
     }
     t = gGfxUnkPtrs->terras[c->unk4];
