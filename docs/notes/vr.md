@@ -187,9 +187,17 @@ menus and everything else stay on the panel.
   no far plane: the sea model (`[vr] world:` shows the environment draws
   out to 17.7 km) went on behind the card, so from altitude the player saw
   past it, and the sea's far edge read as water rising. In VR flight the
-  band is now a ring around the camera on the sea (`pw64_vr_haze_ring`,
-  environment.c.patch): clear at 0.875 far, fog-coloured from far out to
-  30 km (s16 vertices), past the sea model's edge.
+  band was replaced by a ring around the camera on the sea: first solid
+  from far out to 30 km (looked like a wall from altitude), then thickening
+  with distance to full at 17 km ("a little more natural"); the water still
+  seemed to rise in both. **Set aside (2026-11-15, the user's call):** in
+  VR flight the band is simply not drawn (environment.c.patch), which keeps
+  the white line gone. Open: the rising water. The `[vr] world:` log puts
+  the sea at true sea level out to about 17.7 km, so it is most likely the
+  flat sea's perspective running up towards eye level with no far-plane
+  cut or haze to hide the distance. Options for later: clip the sea at the
+  game's far distance in the eye pass, radial haze on sea and terrain
+  alike, or the dome/sea handling of other N64 VR ports.
 - No border bars in VR (`pw64_fill_frame` set with the world tag): they
   floated in the world as black bars.
 - **Rocket belt first person:** in VR the R button switches between the chase
