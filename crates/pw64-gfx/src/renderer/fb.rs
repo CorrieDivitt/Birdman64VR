@@ -223,6 +223,12 @@ impl Renderer {
         true
     }
 
+    /// Birdman64VR: `fb`'s last non-empty task ([`FbOp::Draw`] via
+    /// [`Self::fb_apply`]): the frame behind the picture the game shows.
+    pub fn fb_last_frame(&self, fb: u32) -> Option<&Arc<Frame>> {
+        self.fbs.targets.get(&fb).and_then(|t| t.last.as_ref())
+    }
+
     /// Movable HUD element bounds of `fb`'s last non-empty task (target px
     /// of [`Self::fb_size`], drawn without offsets; `crate::hud`).
     pub fn fb_hud_bounds(&self, fb: u32) -> Option<&HudBounds> {
@@ -472,7 +478,7 @@ impl Renderer {
                     },
                 ],
             });
-            let msaa = self.targets.as_ref().and_then(|t| t.msaa.as_ref());
+            let msaa = self.targets.get(&size).and_then(|t| t.msaa.as_ref());
             let msaa = msaa.expect("MSAA attachment (ensure_targets)");
             let mut pass = color_pass(enc, msaa, wgpu::LoadOp::Clear(wgpu::Color::BLACK));
             if keep[2] > 0 {

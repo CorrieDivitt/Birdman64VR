@@ -57,6 +57,13 @@ pub(crate) fn headless() -> bool {
     cfg!(target_os = "android") && active()
 }
 
+/// What the game's C side culls with in VR (`pw64_game::set_widescreen_aspect`
+/// with the negated value, lib.rs `run_game`): the world view's culling
+/// frustum is this many times the game camera's in both directions, so
+/// what the headset shows beside, above and below the monitor picture is
+/// there when the player looks at it (about 70 degrees to each side).
+pub(crate) const CULL_SCALE: f32 = 6.0;
+
 /// The headset thread wants the game paused whatever the player's
 /// "pause in background" setting says (headset taken off, system menu).
 static PAUSE: AtomicBool = AtomicBool::new(false);
@@ -255,6 +262,22 @@ mod stub {
         pub(crate) fn probe(&mut self, _: &wgpu::Device, _: &wgpu::Queue, _: &wgpu::TextureView) {}
 
         pub(crate) fn publish(&mut self) {}
+
+        pub(crate) fn world(
+            &mut self,
+            _: &mut pw64_gfx::Renderer,
+            _: &wgpu::Device,
+            _: wgpu::TextureFormat,
+            _: Option<&pw64_gfx::Frame>,
+        ) {
+        }
+
+        pub(crate) fn stereo(&self) -> bool {
+            false
+        }
+
+        pub(crate) fn clear_panel(&self, _: &wgpu::Device, _: &wgpu::Queue, _: &wgpu::TextureView) {
+        }
     }
 }
 
@@ -263,7 +286,7 @@ mod real {
     use super::HEADSET_MHZ;
     use crate::gpu_context::GpuContext;
     use pw64_xr::math::{self, Mat4};
-    use pw64_xr::{FrameOutcome, Layers, Panel, XrContext};
+    use pw64_xr::{EyePose, FrameOutcome, Layers, Panel, XrContext};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Condvar, Mutex, OnceLock};
     use std::time::{Duration, Instant};
@@ -367,11 +390,88 @@ mod real {
     /// The headset thread keeps this locked from choosing `front` until it
     /// has submitted the commands that read it, so a publish (and with it
     /// the window's next draw into that texture) cannot get in between.
+    ///
+    /// The stereo world's eye pictures work the same way with three sets
+    /// (`eye_views[set][eye]`), so nothing waits: the headset thread marks
+    /// the set it shows as `reading` when its frame starts, and the window
+    /// draws into the set that is neither that one nor the published one.
     #[derive(Default)]
     struct Source {
         generation: u64,
         views: Option<[wgpu::TextureView; 2]>,
         front: usize,
+        eye_generation: u64,
+        eye_views: Option<[[wgpu::TextureView; 2]; 3]>,
+        /// The published eye set and the eye poses it was drawn for;
+        /// `None`: no stereo world (menus), the panel is the picture.
+        world: Option<(usize, [EyePose; 2])>,
+        reading: Option<usize>,
+    }
+
+    /// Where the eyes will be for the next headset frame (headset thread →
+    /// window thread, which draws the next game frame's eye pictures for
+    /// them).
+    static NEXT_EYES: Mutex<Option<[EyePose; 2]>> = Mutex::new(None);
+
+    /// The stereo world (`PW64_VR_STEREO=0` keeps everything on the panel).
+    fn stereo_on() -> bool {
+        static ON: OnceLock<bool> = OnceLock::new();
+        *ON.get_or_init(|| std::env::var_os("PW64_VR_STEREO").is_none_or(|v| v != "0"))
+    }
+
+    /// Game units per metre: 1 (the game's physics is in metres and m/s).
+    /// Larger makes the world smaller around the player.
+    fn world_scale() -> f32 {
+        static SCALE: OnceLock<f32> = OnceLock::new();
+        *SCALE.get_or_init(|| {
+            std::env::var("PW64_VR_WORLD_SCALE")
+                .ok()
+                .and_then(|v| v.parse::<f32>().ok())
+                .filter(|v| (0.01..=100.0).contains(v))
+                .unwrap_or(1.0)
+        })
+    }
+
+    /// Nearest distance drawn, in metres (the game's own near plane is 1).
+    const NEAR_M: f32 = 0.1;
+
+    /// The matrices one eye's picture is drawn with
+    /// (`Renderer::render_stereo`). The game's camera sits at the seated
+    /// origin (where the head was when the session started), looking the
+    /// same way; the head moves around it.
+    pub(super) fn stereo_eye(pose: &EyePose) -> pw64_gfx::StereoEye {
+        // pw64-xr's column-vector matrices are stored column-major, which
+        // is pw64-gfx's row-vector layout: the same arrays, multiplied in
+        // the opposite order.
+        use pw64_gfx::matrix::mul;
+        let [l, r, u, d] = pose.fov;
+        let scale = world_scale();
+        let projection = |near| math::projection_reversed(l, r, u, d, near);
+        let world = mul(
+            &math::view(pose.orientation, pose.position.map(|v| v * scale)),
+            &projection(NEAR_M * scale),
+        );
+        // The N64 screen (320x240, y down) on the panel's plane, in metres.
+        let s = PANEL_HEIGHT_M / pw64_gfx::N64_HEIGHT;
+        let on_panel: Mat4 = [
+            [s, 0.0, 0.0, 0.0],
+            [0.0, -s, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+            [
+                -0.5 * pw64_gfx::N64_WIDTH * s,
+                0.5 * pw64_gfx::N64_HEIGHT * s,
+                -PANEL_DISTANCE_M,
+                1.0,
+            ],
+        ];
+        let mut hud = mul(
+            &mul(&on_panel, &math::view(pose.orientation, pose.position)),
+            &projection(NEAR_M),
+        );
+        // Everything on the panel has one depth; a little of each draw's
+        // own depth on top keeps 3D HUD parts sorted among themselves.
+        hud[2][2] += 0.05;
+        pw64_gfx::StereoEye { world, hud }
     }
 
     pub(crate) struct Vr {
@@ -381,6 +481,12 @@ mod real {
         panel: Option<[(wgpu::Texture, wgpu::TextureView); 2]>,
         /// The texture of `panel` the window draws the next frame into.
         back: usize,
+        /// One eye's picture size (the runtime's recommendation).
+        eye_size: (u32, u32),
+        /// The stereo world's eye pictures: `[set][eye]`, with their format.
+        eyes: Option<(wgpu::TextureFormat, [[wgpu::TextureView; 2]; 3])>,
+        /// The headset shows the stereo world (the last game frame had one).
+        stereo: bool,
         /// The window thread's probe bar (`probe_on`).
         probe: Option<Bar>,
     }
@@ -424,6 +530,7 @@ mod real {
                 true,
             );
             super::ACTIVE.store(true, Ordering::Relaxed);
+            let eye_size = xr.eye_size();
             let context = GpuContext {
                 instance: gpu.instance.clone(),
                 surface,
@@ -438,6 +545,9 @@ mod real {
                     source: Arc::default(),
                     panel: None,
                     back: 1,
+                    eye_size,
+                    eyes: None,
+                    stereo: false,
                     probe: None,
                 },
             ))
@@ -508,6 +618,118 @@ mod real {
             }
             self.source.lock().unwrap_or_else(|e| e.into_inner()).front = self.back;
             self.back ^= 1;
+        }
+
+        /// A new game frame is shown (window.rs `drain`): `frame` is the
+        /// display list behind it. With a 3D world view in it, draws both
+        /// eyes' pictures of that world for where the head will be next
+        /// frame and hands them to the headset thread; without, the
+        /// headset goes back to the panel.
+        pub(crate) fn world(
+            &mut self,
+            renderer: &mut pw64_gfx::Renderer,
+            device: &wgpu::Device,
+            format: wgpu::TextureFormat,
+            frame: Option<&pw64_gfx::Frame>,
+        ) {
+            let poses = *NEXT_EYES.lock().unwrap_or_else(|e| e.into_inner());
+            let (Some(frame), Some(poses)) =
+                (frame.filter(|f| stereo_on() && f.has_world()), poses)
+            else {
+                if self.stereo {
+                    self.stereo = false;
+                    self.source.lock().unwrap_or_else(|e| e.into_inner()).world = None;
+                    log("stereo world off", true);
+                }
+                return;
+            };
+            if self.eyes.as_ref().is_none_or(|(f, _)| *f != format) {
+                let views = [0, 1, 2].map(|_| {
+                    [0, 1].map(|_| {
+                        device
+                            .create_texture(&wgpu::TextureDescriptor {
+                                label: Some("vr eye picture"),
+                                size: wgpu::Extent3d {
+                                    width: self.eye_size.0.max(1),
+                                    height: self.eye_size.1.max(1),
+                                    depth_or_array_layers: 1,
+                                },
+                                mip_level_count: 1,
+                                sample_count: 1,
+                                dimension: wgpu::TextureDimension::D2,
+                                format,
+                                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                                view_formats: &[],
+                            })
+                            .create_view(&Default::default())
+                    })
+                });
+                let mut s = self.source.lock().unwrap_or_else(|e| e.into_inner());
+                s.eye_generation += 1;
+                s.eye_views = Some(views.clone());
+                s.world = None;
+                s.reading = None;
+                drop(s);
+                self.eyes = Some((format, views));
+            }
+            let Some((_, views)) = &self.eyes else { return };
+            let back = {
+                let s = self.source.lock().unwrap_or_else(|e| e.into_inner());
+                let front = s.world.map(|w| w.0);
+                (0..3)
+                    .find(|i| Some(*i) != front && Some(*i) != s.reading)
+                    .unwrap_or(0)
+            };
+            for (eye, pose) in poses.iter().enumerate() {
+                renderer.render_stereo(frame, &views[back][eye], self.eye_size, &stereo_eye(pose));
+            }
+            self.source.lock().unwrap_or_else(|e| e.into_inner()).world = Some((back, poses));
+            if !self.stereo {
+                self.stereo = true;
+                log(
+                    &format!(
+                        "stereo world on: {} draws, {} world views, eye {:?}",
+                        frame.draws.len(),
+                        frame.views.len(),
+                        self.eye_size
+                    ),
+                    true,
+                );
+            }
+        }
+
+        /// The headset shows the stereo world: the panel then only carries
+        /// what the window draws over the game (toasts, the settings menu).
+        pub(crate) fn stereo(&self) -> bool {
+            self.stereo
+        }
+
+        /// Clears the panel to fully transparent (the stereo world shows
+        /// through it).
+        pub(crate) fn clear_panel(
+            &self,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            panel: &wgpu::TextureView,
+        ) {
+            let mut encoder = device.create_command_encoder(&Default::default());
+            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("vr panel clear"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: panel,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pw64_gfx::submit(queue, [encoder.finish()]);
         }
 
         /// Latency probe ([`probe_on`]): the window thread's bar, drawn
@@ -675,7 +897,8 @@ fn fs() -> @location(0) vec4<f32> {
 
     /// The rectangle shader: `SRGB_DECODE` is replaced by a decode when the
     /// eye target is sRGB but the panel holds display-encoded values in a
-    /// plain format (the window's surface format).
+    /// plain format (the window's surface format); `ALPHA` by 1, or by the
+    /// texture's alpha for the panel over the stereo world.
     const SHADER: &str = r"
 struct U { mvp: mat4x4<f32> }
 @group(0) @binding(0) var<uniform> u: U;
@@ -704,13 +927,16 @@ fn decode(c: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs(v: V) -> @location(0) vec4<f32> {
-    let c = textureSample(t, s, v.uv).rgb;
-    return vec4<f32>(SRGB_DECODE, 1.0);
+    let p = textureSample(t, s, v.uv);
+    let c = p.rgb;
+    return vec4<f32>(SRGB_DECODE, ALPHA);
 }
 ";
 
-    pub(super) fn shader(decode: bool) -> String {
-        SHADER.replace("SRGB_DECODE", if decode { "decode(c)" } else { "c" })
+    pub(super) fn shader(decode: bool, alpha: bool) -> String {
+        SHADER
+            .replace("SRGB_DECODE", if decode { "decode(c)" } else { "c" })
+            .replace("ALPHA", if alpha { "p.a" } else { "1.0" })
     }
 
     fn mat_bytes(m: &Mat4) -> [u8; 64] {
@@ -728,31 +954,79 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             .spawn(cue_thread);
         let device = xr.gpu().device.clone();
         let queue = xr.gpu().queue.clone();
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        // One bind group layout for both pipelines, so the panel's bind
+        // groups work with either.
+        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vr panel"),
-            source: wgpu::ShaderSource::Wgsl(shader(xr.format().is_srgb()).into()),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("vr panel"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(xr.format().into())],
-            }),
-            primitive: Default::default(),
-            depth_stencil: None,
-            multisample: Default::default(),
-            multiview: None,
-            cache: None,
+            bind_group_layouts: &[&bgl],
+            push_constant_ranges: &[],
         });
+        // `pipeline`: opaque (the panel as the whole picture, and the eye
+        // pictures of the stereo world). `over`: the panel over the stereo
+        // world, by its alpha (premultiplied, as the UI layers leave it).
+        let make = |alpha: bool| {
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("vr panel"),
+                source: wgpu::ShaderSource::Wgsl(shader(xr.format().is_srgb(), alpha).into()),
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("vr panel"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: xr.format(),
+                        blend: alpha.then_some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview: None,
+                cache: None,
+            })
+        };
+        let (pipeline, over) = (make(false), make(true));
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("vr panel"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -767,6 +1041,22 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 mapped_at_creation: false,
             })
         });
+        // The eye pictures fill the eye: the unit rectangle over all of clip
+        // space.
+        let full = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vr eye picture"),
+            size: 64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(
+            &full,
+            0,
+            &mat_bytes(&math::translate_scale([0.0; 3], [2.0, 2.0, 1.0])),
+        );
+        // For the current eye pictures: (generation, bind groups per set
+        // and eye).
+        let mut eye_bound: Option<(u64, [[wgpu::BindGroup; 2]; 3])> = None;
         let probe = probe_on().then(|| Bar::new(&device, xr.format(), 2));
         // For the current panel textures: (generation, aspect, bind groups
         // per texture and eye).
@@ -774,10 +1064,6 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         // Session state, to pause the game when the player is away.
         let mut was_focused = false;
         let mut last_outcome = None;
-        let layers = Layers {
-            world: true,
-            panel: None,
-        };
         let mut announced = false;
         // Hitch report: the longest gap between shown headset frames and
         // the longest waits for the queue lock, per five seconds.
@@ -787,7 +1073,52 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         // Headset frames the runtime did not want drawn (headset off the head).
         let mut not_shown = 0u32;
         while !STOP.load(Ordering::Relaxed) {
+            // The stereo world's eye pictures for this frame, if the game
+            // is showing one: marked as being read, so the window thread
+            // leaves that set alone.
+            let world = {
+                let mut s = source.lock().unwrap_or_else(|e| e.into_inner());
+                s.reading = s.world.map(|w| w.0);
+                if eye_bound.as_ref().map(|b| b.0) != Some(s.eye_generation) {
+                    eye_bound = s.eye_views.as_ref().map(|views| {
+                        let groups = [0, 1, 2].map(|set| {
+                            [0, 1].map(|eye| {
+                                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                    label: Some("vr eye picture"),
+                                    layout: &bgl,
+                                    entries: &[
+                                        wgpu::BindGroupEntry {
+                                            binding: 0,
+                                            resource: full.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 1,
+                                            resource: wgpu::BindingResource::TextureView(
+                                                &views[set][eye],
+                                            ),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 2,
+                                            resource: wgpu::BindingResource::Sampler(&sampler),
+                                        },
+                                    ],
+                                })
+                            })
+                        });
+                        (s.eye_generation, groups)
+                    });
+                }
+                s.world.filter(|_| eye_bound.is_some())
+            };
+            let layers = Layers {
+                world: true,
+                panel: None,
+                // The pictures were drawn for these poses, one frame ago or
+                // (game paused, loading) longer: the runtime reprojects.
+                eyes: world.map(|w| w.1),
+            };
             let outcome = xr.frame(&layers, Some(&pw64_gfx::QUEUE_GATE), |frame| {
+                *NEXT_EYES.lock().unwrap_or_else(|e| e.into_inner()) = frame.next_eyes;
                 // A headset frame starts. Cue the game `lead()` before the
                 // next one starts (display pacing, window.rs `App::start`):
                 // its newest frame then reaches the panel just in time to
@@ -817,7 +1148,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                             [0, 1].map(|eye| {
                                 device.create_bind_group(&wgpu::BindGroupDescriptor {
                                     label: Some("vr panel"),
-                                    layout: &pipeline.get_bind_group_layout(0),
+                                    layout: &bgl,
                                     entries: &[
                                         wgpu::BindGroupEntry {
                                             binding: 0,
@@ -872,8 +1203,15 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                         timestamp_writes: None,
                         occlusion_query_set: None,
                     });
-                    if let Some((_, aspect, groups)) = &bound {
+                    // The stereo world: this eye's picture, then the panel
+                    // over it where the window drew something.
+                    if let (Some((set, _)), Some((_, groups))) = (world, &eye_bound) {
                         pass.set_pipeline(&pipeline);
+                        pass.set_bind_group(0, &groups[set][i], &[]);
+                        pass.draw(0..6, 0..1);
+                    }
+                    if let Some((_, aspect, groups)) = &bound {
+                        pass.set_pipeline(if world.is_some() { &over } else { &pipeline });
                         pass.set_bind_group(0, &groups[front][i], &[]);
                         pass.draw(0..6, 0..1);
                         // Latency probe: this thread's bar, on the panel's
@@ -1022,13 +1360,50 @@ fn fs(v: V) -> @location(0) vec4<f32> {
 
     #[cfg(test)]
     mod tests {
+        /// The eye matrices: the world straight ahead lands in the middle
+        /// of a symmetric eye with reversed depth; the N64 screen lands on
+        /// the panel, its top-left corner up and to the left.
+        #[test]
+        fn stereo_eye_matrices() {
+            let fov = std::f32::consts::FRAC_PI_4;
+            let eye = super::stereo_eye(&pw64_xr::EyePose {
+                orientation: [0.0, 0.0, 0.0, 1.0],
+                position: [0.0; 3],
+                fov: [-fov, fov, fov, -fov],
+            });
+            let apply = |m: &super::Mat4, p: [f32; 4]| -> [f32; 4] {
+                [0, 1, 2, 3].map(|j| (0..4).map(|k| p[k] * m[k][j]).sum())
+            };
+            let near = |a: f32, b: f32| (a - b).abs() < 1e-4;
+            // 10 m ahead, 1 m to the right and up.
+            let c = apply(&eye.world, [1.0, 1.0, -10.0, 1.0]);
+            assert!(near(c[3], 10.0) && near(c[0] / c[3], 0.1) && near(c[1] / c[3], 0.1));
+            assert!(near(c[2] / c[3], super::NEAR_M / 10.0), "reversed depth");
+            // The middle of the N64 screen: the panel's centre.
+            let c = apply(&eye.hud, [160.0, 120.0, 0.5, 1.0]);
+            assert!(near(c[0], 0.0) && near(c[1], 0.0) && near(c[3], super::PANEL_DISTANCE_M));
+            // Its top-left corner.
+            let c = apply(&eye.hud, [0.0, 0.0, 0.5, 1.0]);
+            let (x, y) = (c[0] / c[3], c[1] / c[3]);
+            assert!(near(
+                y,
+                0.5 * super::PANEL_HEIGHT_M / super::PANEL_DISTANCE_M
+            ));
+            assert!(near(x, -y * 4.0 / 3.0));
+            // A nearer HUD draw (larger N64 depth) wins the depth test.
+            let far = apply(&eye.hud, [160.0, 120.0, 0.1, 1.0]);
+            let nearer = apply(&eye.hud, [160.0, 120.0, 0.9, 1.0]);
+            assert!(nearer[2] / nearer[3] > far[2] / far[3]);
+        }
+
         /// Every shader parses and validates (no GPU needed).
         #[test]
         fn shaders_are_valid_wgsl() {
             use wgpu::naga;
             let sources = [
-                super::shader(false),
-                super::shader(true),
+                super::shader(false, false),
+                super::shader(true, false),
+                super::shader(true, true),
                 super::BAR_SHADER.to_string(),
             ];
             for source in sources {

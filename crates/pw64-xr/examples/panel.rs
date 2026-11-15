@@ -81,14 +81,17 @@ fn main() {
         "quad" => Layers {
             world: false,
             panel: Some(panel),
+            eyes: None,
         },
         "both" => Layers {
             world: true,
             panel: Some(panel),
+            eyes: None,
         },
         "world" => Layers {
             world: true,
             panel: None,
+            eyes: None,
         },
         other => {
             eprintln!("unknown mode {other:?}: use quad, both or world");

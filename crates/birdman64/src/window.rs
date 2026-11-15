@@ -1092,9 +1092,13 @@ impl App {
             format,
             RenderOptions {
                 msaa,
-                widescreen: widescreen.map_or(Widescreen::Off, Widescreen::Aspect),
+                // Birdman64VR: the panel is 4:3 with the game's own bars;
+                // the wide view is the headset's (vr.rs).
+                widescreen: widescreen
+                    .filter(|_| self.vr.is_none())
+                    .map_or(Widescreen::Off, Widescreen::Aspect),
                 filter: opts::tex_filter(),
-                fill_view: opts::fill_screen(),
+                fill_view: opts::fill_screen() && self.vr.is_none(),
                 oled: Default::default(),
                 hud_offsets: opts::hud_offsets(),
             },
@@ -1407,6 +1411,20 @@ impl App {
             self.vr_shown_at = q.shown_at;
         }
         if q.frames > 0 {
+            // Birdman64VR: a new game frame is shown: its world view, if
+            // it has one, goes to the headset in stereo.
+            if let Some(vr) = &mut self.vr {
+                let frame = self
+                    .shown
+                    .and_then(|fb| g.renderer.fb_last_frame(fb))
+                    .cloned();
+                vr.world(
+                    &mut g.renderer,
+                    &g.device,
+                    g.config.format,
+                    frame.as_deref(),
+                );
+            }
             crate::vr::count_frames(q.frames);
             self.frames += q.frames;
             self.perf.frames(q.frames as u32);
@@ -1544,7 +1562,14 @@ impl App {
         }
         // The shown framebuffer target, letterboxed (downsampled with the
         // `PW64_SCALE` filter when supersampled; 1:1 otherwise).
-        g.renderer.fb_present(self.shown, &view, g.filter);
+        // Birdman64VR, stereo world: the headset shows the game's world
+        // itself; the panel starts out empty and only carries what is
+        // drawn over the game below.
+        let stereo = panel_view.is_some() && self.vr.as_ref().is_some_and(|vr| vr.stereo());
+        match &self.vr {
+            Some(vr) if stereo => vr.clear_panel(&g.device, &g.queue, &view),
+            _ => g.renderer.fb_present(self.shown, &view, g.filter),
+        }
         // A Save with restart-only options changed queued a toast naming
         // them (S5): take it BEFORE the toast pass below, so it shows on
         // the very frame the Save closed the overlay (and in the
@@ -1624,9 +1649,17 @@ impl App {
             if let Some(vr) = &mut self.vr {
                 vr.probe(&g.device, &g.queue, &view);
             }
-            if let Some(surface_view) = &surface_view {
-                g.renderer
-                    .blit(&view, surface_view, wgpu::FilterMode::Nearest);
+            match &surface_view {
+                // The monitor shows the flat game while the headset shows
+                // the stereo world.
+                Some(surface_view) if stereo => {
+                    g.renderer.fb_present(self.shown, surface_view, g.filter)
+                }
+                Some(surface_view) => {
+                    g.renderer
+                        .blit(&view, surface_view, wgpu::FilterMode::Nearest)
+                }
+                None => {}
             }
         }
         crate::vr::note(crate::vr::Stage::Draw, timing.elapsed());

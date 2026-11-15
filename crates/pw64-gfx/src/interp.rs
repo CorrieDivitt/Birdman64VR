@@ -144,6 +144,10 @@ pub struct Interpreter {
     pub wide_tags: bool,
     /// Inside a world-view bracket.
     wide_view: bool,
+    /// Birdman64VR: the projection and viewport of the last
+    /// [`Frame::views`] entry (its index + 1 is the last tuple field), so
+    /// consecutive world draws share it. Reset per run.
+    view_memo: Option<ViewMemo>,
     /// Current HUD edge anchor (`ANCHOR_TAG` markers); reset per run.
     anchor: Anchor,
     /// Current HUD vertical anchor (`VANCHOR_TAG` markers); reset per run.
@@ -175,6 +179,10 @@ pub struct Interpreter {
     /// frame's initial capacity. Kept across runs.
     cap_hint: [usize; 3],
 }
+
+/// Projection, viewport (scale, translate) and [`DrawCall::view`] of the
+/// last [`Frame::views`] entry.
+type ViewMemo = (matrix::Mat4, ([f32; 3], [f32; 3]), u16);
 
 /// `G_NOOP` w1 markers around the native game's world view (Hor+
 /// widescreen; `crates/pw64-game/native/src/pw64_widescreen.c`).
@@ -303,6 +311,7 @@ impl Interpreter {
             frame: Frame::default(),
             wide_tags: false,
             wide_view: false,
+            view_memo: None,
             anchor: Anchor::Centre,
             vanchor: VAnchor::Middle,
             hud: false,
@@ -339,6 +348,7 @@ impl Interpreter {
             draws: Vec::with_capacity(d),
             textures: std::collections::HashMap::with_capacity(t),
             chains: Default::default(),
+            views: Vec::new(),
         };
         self.run_into(mem, dl, &mut frame);
         frame
@@ -365,6 +375,7 @@ impl Interpreter {
         frame.draws.clear();
         frame.textures.clear();
         frame.chains.clear();
+        frame.views.clear();
         std::mem::swap(&mut self.frame, frame);
         self.execute(mem, dl);
         std::mem::swap(&mut self.frame, frame);
@@ -929,6 +940,8 @@ impl Interpreter {
             },
             uniforms: DrawUniforms {
                 screen: [0.0; 4],
+                vr: [0.0; 4],
+                eye: [[0.0; 4]; 4],
                 prim: self.prim,
                 env: self.env,
                 fog: self.fog,
@@ -1041,6 +1054,11 @@ impl Interpreter {
         let first = first as u32;
         let scissor = if is_3d { self.clip_box() } else { self.scissor };
         let (wide, stretch_y) = self.wide_class(verts, is_3d, t);
+        let view = if is_3d && wide == Wide::Extend && self.wide_tags && self.wide_view {
+            self.world_view()
+        } else {
+            0
+        };
         let same_template = self.last_serial == t.serial;
         self.last_serial = t.serial;
         if let Some(last) = self.frame.draws.last_mut()
@@ -1061,6 +1079,7 @@ impl Interpreter {
             && last.hud == self.hud
             && last.split == self.split
             && last.elem == self.elem
+            && last.view == view
         {
             last.vertex_count += count;
             if let (Wide::Stretch(a), Wide::Stretch(b)) = (&mut last.wide, wide) {
@@ -1083,7 +1102,53 @@ impl Interpreter {
             hud: self.hud,
             split: self.split,
             elem: self.elem,
+            view,
         });
+    }
+
+    /// Birdman64VR: [`DrawCall::view`] for a world draw under the current
+    /// projection and viewport: the entry of [`Frame::views`] that takes a
+    /// vertex's `pos` back to camera space (0 if the projection cannot be
+    /// inverted).
+    ///
+    /// `load_vertices` computes `pos = v * modelview * P * S` with `S` the
+    /// viewport mapping below, so `pos * (P * S)⁻¹` is the camera-space
+    /// point. The game's frustum (`uvMat4SetFrustrum`) is the usual one
+    /// (camera looks down -z, w = -z); the signs are checked instead of
+    /// assumed, so the result is always x right, y up, -z forward as shown
+    /// on screen.
+    fn world_view(&mut self) -> u16 {
+        let p = self.mtx.projection;
+        let vp = self.viewport;
+        if let Some((mp, mvp, idx)) = &self.view_memo
+            && *mp == p
+            && *mvp == vp
+        {
+            return *idx;
+        }
+        let (vs, vt) = vp;
+        let s: matrix::Mat4 = [
+            [vs[0], 0.0, 0.0, 0.0],
+            [0.0, -vs[1], 0.0, 0.0],
+            [0.0, 0.0, -0.5, 0.0],
+            [vt[0], vt[1], 0.5, 1.0],
+        ];
+        let idx = match matrix::inverse(&matrix::mul(&p, &s)) {
+            Some(inv) if self.frame.views.len() < u16::MAX as usize - 1 => {
+                let sign = |v: f32| if v < 0.0 { -1.0 } else { 1.0 };
+                let d: matrix::Mat4 = [
+                    [sign(p[0][0] * vs[0]), 0.0, 0.0, 0.0],
+                    [0.0, sign(p[1][1] * vs[1]), 0.0, 0.0],
+                    [0.0, 0.0, -sign(p[2][3]), 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ];
+                self.frame.views.push(matrix::mul(&inv, &d));
+                self.frame.views.len() as u16
+            }
+            _ => 0,
+        };
+        self.view_memo = Some((p, vp, idx));
+        idx
     }
 
     /// Widescreen class of a triangle/rect (see [`Wide`]): perspective

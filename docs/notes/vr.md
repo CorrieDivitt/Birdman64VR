@@ -109,6 +109,44 @@ quad-layer panel.
 - The predicted display time re-syncs now and then (steps of 0 or hundreds
   of ms, e.g. around putting the headset on): clamp dt when the game uses it.
 
+## Stereo world (`PW64_VR_STEREO=0` turns it off)
+The game's 3D world view drawn once per eye from the same display list;
+menus and everything else stay on the panel.
+- **Which draws:** in VR the C side gets `pw64_widescreen_aspect < 0`
+  (`pw64_widescreen.c`): no widescreen, but the main world view is tagged
+  (`WIDE_TAG_ON/OFF`) and culled with a frustum `vr::CULL_SCALE` (6) times the
+  camera's both ways. Tagged perspective draws get `DrawCall::view`.
+- **Camera space back from the vertices:** the interpreter keeps emitting
+  `pos = v * modelview * P * S` (S = viewport mapping). Per projection +
+  viewport it stores `(P*S)⁻¹` in `Frame::views` (`Interpreter::world_view`,
+  signs normalised to x right, y up, -z forward), so `pos * views[i]` is the
+  point in the game camera's space. No second interpreter pass, no new
+  vertex data. Fog and lighting stay as the game computed them.
+- **Eye pass** (`Renderer::render_stereo`): `u.eye = views[i] * view(eye) *
+  projection_reversed(fov)`; the shader uses `u.eye * pos` when `u.vr.x != 0`
+  (flat draws untouched; `DrawUniforms` grew, stride 512). The game camera is
+  the seated origin: the head moves around it. A new render pass wherever the
+  game cleared depth between world draws. Background = the game's last
+  full-screen fill before the world.
+- **HUD:** draws after the first world draw that are not world draws or
+  full-screen fills, in a last pass over cleared depth, through a matrix
+  that puts the N64 screen on the panel's plane (2.5 m). Scissors ignored.
+  Not shown yet: fades and wipes (`Wide::Stretch`), 2D drawn before the world.
+- **Threads:** the window thread draws both eyes when a new game frame is
+  shown (`Vr::world`, window.rs `drain`), for the poses the headset thread
+  predicted for its next frame (`Frame::next_eyes`), into one of three
+  texture sets; the headset thread copies the published set into the
+  swapchain and submits the projection layer with *those* poses
+  (`Layers::eyes`), so the runtime reprojects when the game is late or
+  paused. The panel (toasts, settings) is drawn over it by alpha.
+- Units: metres (physics notes use m and m/s); `PW64_VR_WORLD_SCALE` to try
+  others. Near plane 0.1 m, no far plane (reversed depth).
+- Test without a headset: `stereo_eye_matches_the_flat_picture` (pw64-gfx),
+  `stereo_eye_matrices` (vr.rs).
+- Open: fades, transitions between panel and stereo (one frame of the other
+  picture), effects that assume the game camera (w9), cost of the extra
+  passes on the Quest, chase-camera tuning.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`

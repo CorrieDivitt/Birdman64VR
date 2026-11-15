@@ -460,7 +460,8 @@ pub fn frame_hash_pre_lod(f: &Frame) -> u64 {
 /// Strips the fill view's placement fields (`stretch_y`, default `vanchor`)
 /// the OLED-care flag (default `hud`) and the split-screen view (`None`) from a draw's `Debug` text: like
 /// `lodp`/`filt` they are renderer-side placement inputs, not interpreter
-/// output, so the identity constants stay.
+/// output, so the identity constants stay. The same for Birdman64VR's stereo
+/// fields.
 fn strip_placement(mut s: String) -> String {
     if let Some(a) = s.find(", stretch_y: [") {
         let b = a + s[a..].find(']').unwrap() + 1;
@@ -477,6 +478,21 @@ fn strip_placement(mut s: String) -> String {
     }
     if let Some(a) = s.find(", elem: 0") {
         s.replace_range(a..a + ", elem: 0".len(), "");
+    }
+    // Birdman64VR: the stereo eye uniforms (renderer-side, zero here) and
+    // the world-view index (which draws are world draws was already in the
+    // text as `wide: Extend`).
+    if let Some(a) = s.find(", vr: [") {
+        let b = a + s[a..].find(']').unwrap() + 1;
+        s.replace_range(a..b, "");
+    }
+    if let Some(a) = s.find(", eye: [[") {
+        let b = a + s[a..].find("]]").unwrap() + 2;
+        s.replace_range(a..b, "");
+    }
+    if let Some(a) = s.find(", view: ") {
+        let digits = s[a + 8..].chars().take_while(char::is_ascii_digit).count();
+        s.replace_range(a..a + 8 + digits, "");
     }
     s
 }

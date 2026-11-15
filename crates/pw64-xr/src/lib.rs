@@ -14,7 +14,7 @@ pub mod math;
 mod session;
 
 pub use gpu::XrGpu;
-pub use session::{Eye, Frame, FrameOutcome, FrameTime, Layers, Panel, XrContext};
+pub use session::{Eye, EyePose, Frame, FrameOutcome, FrameTime, Layers, Panel, XrContext};
 
 /// Android: the app's Java VM and activity, which the OpenXR loader and
 /// runtime need (`XR_KHR_loader_init_android`,

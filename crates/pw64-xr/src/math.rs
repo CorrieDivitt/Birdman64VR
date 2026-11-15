@@ -87,6 +87,20 @@ pub fn projection(left: f32, right: f32, up: f32, down: f32, near: f32, far: f32
     ]
 }
 
+/// Like [`projection`] with reversed depth and no far plane: depth 1 at
+/// `near`, falling towards 0 with distance (what a renderer with a
+/// "greater is nearer" depth test wants, and the most even use of a float
+/// depth buffer).
+pub fn projection_reversed(left: f32, right: f32, up: f32, down: f32, near: f32) -> Mat4 {
+    let (l, r, u, d) = (left.tan(), right.tan(), up.tan(), down.tan());
+    [
+        [2.0 / (r - l), 0.0, 0.0, 0.0],
+        [0.0, 2.0 / (u - d), 0.0, 0.0],
+        [(r + l) / (r - l), (u + d) / (u - d), 0.0, -1.0],
+        [0.0, 0.0, near, 0.0],
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,5 +163,18 @@ mod tests {
         let p = transform(&mul(&t, &s), [1.0, 0.0, 0.0, 1.0]);
         assert!(close(p[0], 3.0));
         assert_eq!(mul(&IDENTITY, &t), t);
+    }
+
+    #[test]
+    fn reversed_projection_depth() {
+        let m = projection_reversed(-0.8, 0.8, 0.7, -0.7, 0.1);
+        // Same x and y as the ordinary projection.
+        let o = projection(-0.8, 0.8, 0.7, -0.7, 0.1, 1000.0);
+        let (a, b) = (ndc(&m, [0.3, -0.2, -5.0]), ndc(&o, [0.3, -0.2, -5.0]));
+        assert!((a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6);
+        // Depth: 1 at the near plane, smaller farther away, never negative.
+        assert!((ndc(&m, [0.0, 0.0, -0.1])[2] - 1.0).abs() < 1e-6);
+        assert!((ndc(&m, [0.0, 0.0, -10.0])[2] - 0.01).abs() < 1e-6);
+        assert!(ndc(&m, [0.0, 0.0, -30000.0])[2] > 0.0);
     }
 }

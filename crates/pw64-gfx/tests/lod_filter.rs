@@ -116,6 +116,8 @@ fn frame(
             size1,
             lodp,
             filt: [0.0; 4],
+            vr: [0.0; 4],
+            eye: [[0.0; 4]; 4],
         },
         textures: [Some(tex[0]), Some(tex[1])],
         scissor: [0.0, 0.0, W as f32, H as f32],
@@ -127,12 +129,14 @@ fn frame(
         hud: false,
         split: None,
         elem: 0,
+        view: 0,
     };
     Frame {
         vertices: verts,
         draws: vec![draw],
         textures: images.into_iter().collect(),
         chains: HashMap::new(),
+        views: Vec::new(),
     }
 }
 

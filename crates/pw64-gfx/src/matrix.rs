@@ -37,6 +37,48 @@ pub fn transform_dir(n: [f32; 3], m: &Mat4) -> [f32; 3] {
     [0, 1, 2].map(|j| (0..3).map(|k| n[k] * m[k][j]).sum())
 }
 
+/// The inverse of `m`, or `None` when it has none. Computed in f64 (the
+/// projection's far-plane terms span many orders of magnitude).
+pub fn inverse(m: &Mat4) -> Option<Mat4> {
+    let mut a = [[0.0f64; 8]; 4];
+    for (i, row) in a.iter_mut().enumerate() {
+        for j in 0..4 {
+            row[j] = m[i][j] as f64;
+        }
+        row[4 + i] = 1.0;
+    }
+    for col in 0..4 {
+        // Partial pivoting.
+        let pivot = (col..4).max_by(|&x, &y| a[x][col].abs().total_cmp(&a[y][col].abs()))?;
+        if a[pivot][col].abs() < 1e-30 {
+            return None;
+        }
+        a.swap(col, pivot);
+        let d = a[col][col];
+        for v in &mut a[col] {
+            *v /= d;
+        }
+        for r in 0..4 {
+            if r != col {
+                let f = a[r][col];
+                if f != 0.0 {
+                    let src = a[col];
+                    for (v, s) in a[r].iter_mut().zip(src) {
+                        *v -= f * s;
+                    }
+                }
+            }
+        }
+    }
+    let mut out = [[0.0f32; 4]; 4];
+    for (i, row) in out.iter_mut().enumerate() {
+        for (j, v) in row.iter_mut().enumerate() {
+            *v = a[i][4 + j] as f32;
+        }
+    }
+    Some(out)
+}
+
 /// Encodes a float matrix as a libultra fixed-point `Mtx` (s15.16; 16
 /// integer halves, then 16 fraction halves; big-endian). Mirrors
 /// `uvMat4CopyF2L` / `guMtxF2L`.

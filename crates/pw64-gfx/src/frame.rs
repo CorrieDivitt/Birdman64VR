@@ -66,6 +66,12 @@ pub struct DrawUniforms {
     /// texel (x = TEXEL0, y = TEXEL1: 1 = on) and their wrap codes
     /// (z, w: S mode + 3 × T mode; 0 clamp, 1 repeat, 2 mirror).
     pub filt: [f32; 4],
+    /// Birdman64VR, filled in by the renderer for a stereo eye pass
+    /// (`Renderer::render_stereo`): x = 1 = the vertex position is
+    /// `pos * eye` instead of the screen transform. 0 everywhere else.
+    pub vr: [f32; 4],
+    /// The eye pass's matrix (row-vector convention, like `matrix::Mat4`).
+    pub eye: [[f32; 4]; 4],
 }
 
 /// How a draw gets its LOD fraction / mip tiles (`DrawUniforms::lodp.x`).
@@ -158,6 +164,11 @@ pub struct DrawCall {
     /// `Wide::Fixed` draw outside split-screen moves by
     /// `RenderOptions::hud_offsets[elem]` (`crate::hud`).
     pub elem: u8,
+    /// Birdman64VR: a draw of the 3D world view (perspective, inside the
+    /// world-view tags): 1 + its index in [`Frame::views`]; 0 for
+    /// everything else. A stereo eye pass draws these through the eye's
+    /// own camera (`Renderer::render_stereo`).
+    pub view: u16,
 }
 
 /// Horizontal HUD anchor in widescreen: a `Wide::Fixed` draw is shifted by
@@ -249,10 +260,23 @@ pub struct Frame {
     /// `LodMode::Chain` textures: chain key → the level textures' content
     /// keys (level 0 first; each in `textures`, each half the previous).
     pub chains: HashMap<u64, Arc<[u64]>>,
+    /// Birdman64VR: per projection + viewport the world view was drawn
+    /// with ([`DrawCall::view`]), the matrix from a vertex's `pos` back to
+    /// camera space: `pos * views[i]` = the point as the game's camera
+    /// sees it, x right, y up, looking down -z, in game units (metres).
+    pub views: Vec<[[f32; 4]; 4]>,
 }
 
 impl Frame {
     pub fn triangle_count(&self) -> usize {
         self.vertices.len() / 3
+    }
+
+    /// Birdman64VR: the frame has a single full-screen 3D world view (no
+    /// split-screen), so it can be shown in stereo.
+    pub fn has_world(&self) -> bool {
+        !self.views.is_empty()
+            && self.draws.iter().any(|d| d.view != 0)
+            && self.draws.iter().all(|d| d.split.is_none())
     }
 }

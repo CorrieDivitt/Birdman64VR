@@ -51,6 +51,56 @@ pub struct FrameTime {
     pub ahead_ns: Option<i64>,
 }
 
+/// Where one eye is and what it sees, in the seated space: plain data, so
+/// it can be handed to another thread and back ([`Layers::eyes`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EyePose {
+    /// Unit quaternion x, y, z, w.
+    pub orientation: [f32; 4],
+    /// Metres.
+    pub position: [f32; 3],
+    /// Field of view angles in radians: left, right, up, down (left and
+    /// down are negative).
+    pub fov: [f32; 4],
+}
+
+impl EyePose {
+    fn from_view(v: &xr::View) -> Self {
+        let (o, p, f) = (v.pose.orientation, v.pose.position, v.fov);
+        Self {
+            orientation: [o.x, o.y, o.z, o.w],
+            position: [p.x, p.y, p.z],
+            fov: [f.angle_left, f.angle_right, f.angle_up, f.angle_down],
+        }
+    }
+
+    fn pose(&self) -> xr::Posef {
+        let (o, p) = (self.orientation, self.position);
+        xr::Posef {
+            orientation: xr::Quaternionf {
+                x: o[0],
+                y: o[1],
+                z: o[2],
+                w: o[3],
+            },
+            position: xr::Vector3f {
+                x: p[0],
+                y: p[1],
+                z: p[2],
+            },
+        }
+    }
+
+    fn fov(&self) -> xr::Fovf {
+        xr::Fovf {
+            angle_left: self.fov[0],
+            angle_right: self.fov[1],
+            angle_up: self.fov[2],
+            angle_down: self.fov[3],
+        }
+    }
+}
+
 /// One eye of the stereo world layer for the frame being drawn.
 pub struct Eye<'a> {
     /// Render target (one layer of the eye swapchain).
@@ -60,6 +110,8 @@ pub struct Eye<'a> {
     pub view: Mat4,
     /// Eye → clip for this eye's field of view (`math::projection`).
     pub projection: Mat4,
+    /// The pose and field of view both were made from.
+    pub pose: EyePose,
 }
 
 /// What to draw into this frame; handed to the `draw` callback.
@@ -69,6 +121,10 @@ pub struct Frame<'a> {
     pub panel: Option<&'a wgpu::TextureView>,
     /// Left and right eye, when [`Layers::world`] is set.
     pub eyes: Option<[Eye<'a>; 2]>,
+    /// Where the eyes are predicted to be one frame after this one: what
+    /// to draw the next picture for when it takes a frame to make
+    /// ([`Layers::eyes`]).
+    pub next_eyes: Option<[EyePose; 2]>,
 }
 
 /// Which layers a frame shows: the stereo world (drawn first, behind) and
@@ -77,6 +133,12 @@ pub struct Frame<'a> {
 pub struct Layers {
     pub world: bool,
     pub panel: Option<Panel>,
+    /// The eye poses the world layer's pictures were drawn for, when they
+    /// were not drawn for this frame's own prediction (pictures made ahead
+    /// of time, [`Frame::next_eyes`], or reused while their source
+    /// stalls). The runtime shifts the picture to where the head really is
+    /// (reprojection). `None`: this frame's prediction.
+    pub eyes: Option<[EyePose; 2]>,
 }
 
 /// Near and far planes of the eye projections, in metres.
@@ -456,13 +518,24 @@ impl XrContext {
             return Ok(FrameOutcome::Hidden);
         }
         // Where the eyes will be when this frame is shown.
-        let located = if layers.world {
-            let (_, views) =
+        let (located, next_eyes) = if layers.world {
+            let locate = |time| {
                 self.session
-                    .locate_views(VIEW_TYPE, state.predicted_display_time, &self.space)?;
-            (views.len() == 2).then_some(views)
+                    .locate_views(VIEW_TYPE, time, &self.space)
+                    .ok()
+                    .filter(|(_, views)| views.len() == 2)
+                    .map(|(_, views)| [0, 1].map(|i| EyePose::from_view(&views[i])))
+            };
+            let now = match layers.eyes {
+                Some(eyes) => Some(eyes),
+                None => locate(state.predicted_display_time),
+            };
+            let next = xr::Time::from_nanos(
+                state.predicted_display_time.as_nanos() + state.predicted_display_period.as_nanos(),
+            );
+            (now, locate(next))
         } else {
-            None
+            (None, None)
         };
         let eye_image = match &located {
             Some(_) => {
@@ -482,22 +555,12 @@ impl XrContext {
         };
         let eyes = located.as_ref().zip(eye_image).map(|(views, image)| {
             [0, 1].map(|i| {
-                let (p, o, f) = (
-                    views[i].pose.position,
-                    views[i].pose.orientation,
-                    views[i].fov,
-                );
+                let e = views[i];
                 Eye {
                     target: &self.eyes.views[image][i],
-                    view: math::view([o.x, o.y, o.z, o.w], [p.x, p.y, p.z]),
-                    projection: math::projection(
-                        f.angle_left,
-                        f.angle_right,
-                        f.angle_up,
-                        f.angle_down,
-                        NEAR,
-                        FAR,
-                    ),
+                    view: math::view(e.orientation, e.position),
+                    projection: math::projection(e.fov[0], e.fov[1], e.fov[2], e.fov[3], NEAR, FAR),
+                    pose: e,
                 }
             })
         });
@@ -513,6 +576,7 @@ impl XrContext {
             },
             panel: panel_image.map(|i| &self.panel.views[i][0]),
             eyes,
+            next_eyes,
         });
         if eye_image.is_some() {
             self.eyes.handle.release_image()?;
@@ -531,8 +595,8 @@ impl XrContext {
         let projection_views = located.as_ref().map(|views| {
             [0usize, 1].map(|i| {
                 xr::CompositionLayerProjectionView::new()
-                    .pose(views[i].pose)
-                    .fov(views[i].fov)
+                    .pose(views[i].pose())
+                    .fov(views[i].fov())
                     .sub_image(
                         xr::SwapchainSubImage::new()
                             .swapchain(&self.eyes.handle)

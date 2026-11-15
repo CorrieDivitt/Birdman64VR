@@ -19,6 +19,8 @@ struct Draw {
     size1: vec4<f32>,
     lodp: vec4<f32>,
     filt: vec4<f32>,
+    vr: vec4<f32>,
+    eye: mat4x4<f32>,
 };
 @group(0) @binding(0) var<uniform> u: Draw;
 @group(1) @binding(0) var tex0: texture_2d<f32>;
@@ -45,6 +47,11 @@ fn vs_main(v: VIn) -> VOut {
     o.pos = vec4<f32>(v.pos.x * u.screen.x + v.pos.w * u.screen.y,
                       v.pos.y * u.screen.z + v.pos.w * u.screen.w,
                       v.pos.z, v.pos.w);
+    // Birdman64VR, stereo eye pass: the eye's own camera (u.eye is stored
+    // for row vectors, which is this product's column-major layout).
+    if (u.vr.x != 0.0) {
+        o.pos = u.eye * v.pos;
+    }
     o.color = v.color;
     o.st = v.st;
     o.st_clamp = v.st_clamp;

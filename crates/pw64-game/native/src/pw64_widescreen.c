@@ -16,7 +16,13 @@
 #include <uv_graphics.h>
 
 /* Output aspect w/h, 0 = 4:3 (off). Set by Rust before boot
- * (pw64_game::set_widescreen_aspect). */
+ * (pw64_game::set_widescreen_aspect).
+ * Birdman64VR: negative = VR. The picture stays 4:3 with its bars (every
+ * `> 0` / `<= 0` test here and in the patches reads it as off), but the
+ * main world view is tagged like a widescreen one, so the renderer can
+ * draw it again for each eye, and culled with a frustum -aspect times the
+ * camera's in both directions: a headset sees far more than the monitor
+ * picture, and the player looks around in it. */
 float pw64_widescreen_aspect = 0.0f;
 
 /* Fill screen, 0 = off. Set by Rust before boot
@@ -58,6 +64,14 @@ float pw64_widescreen_xscale(const void* chan) {
     const UnkStruct_80204D94* c = chan;
     float aspect = pw64_widescreen_aspect;
     float k;
+    if (aspect < 0.0f) {
+        /* VR: the main world view (the same test as below). */
+        if (c->viewX0 > 16 || c->viewX1 < SCREEN_WIDTH - 16 ||
+            c->viewX1 <= c->viewX0 || (!(c->unk0 & 2) && c->unk2 == 0xFFFF)) {
+            return 1.0f;
+        }
+        return -aspect;
+    }
     if (aspect <= 0.0f) {
         if (!pw64_fill_view(c)) {
             return 1.0f;
@@ -83,6 +97,10 @@ float pw64_fill_yscale(const void* chan) {
     const UnkStruct_80204D94* c = chan;
     int g0, g1, half, centre, hi;
     float k;
+    if (pw64_widescreen_aspect < 0.0f) {
+        /* VR: as tall as it is wide (pw64_widescreen_xscale). */
+        return pw64_widescreen_xscale(chan);
+    }
     if (!pw64_fill_view(c)) {
         return 1.0f;
     }

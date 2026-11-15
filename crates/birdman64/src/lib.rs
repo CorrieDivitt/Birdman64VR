@@ -515,8 +515,16 @@ pub fn run_game(
         os::set_pause_hook(pause_hook);
     }
     audio::install(); // audio tasks → pw64-audio HLE, AI → cpal (audio.rs)
-    pw64_game::set_widescreen_aspect(opts::widescreen().unwrap_or(0.0));
-    pw64_game::set_fill_screen(opts::fill_screen());
+    // Birdman64VR: in VR the C side gets a negative "aspect": no widescreen
+    // or fill view, but the world view is tagged for the renderer and
+    // culled with a frustum that many times the camera's (vr.rs,
+    // pw64_widescreen.c).
+    pw64_game::set_widescreen_aspect(if vr::active() {
+        -vr::CULL_SCALE
+    } else {
+        opts::widescreen().unwrap_or(0.0)
+    });
+    pw64_game::set_fill_screen(opts::fill_screen() && !vr::active());
     pw64_game::set_visibility(opts::infinite_lod(), opts::infinite_view_distance());
     // Split-screen spike: with it on the game draws a second camera on
     // kernel channel 1 (splitscreen.md).

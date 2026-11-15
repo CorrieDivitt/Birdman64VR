@@ -17,6 +17,7 @@ use crate::frame::{
     ShaderMode, VAnchor, Vertex, Wide,
 };
 use crate::hud::{HUD_ELEMS, HudBounds, HudOffsets};
+use crate::matrix::Mat4;
 use crate::rdp::FinalBlend;
 use crate::shader;
 use crate::texture::{SamplerKey, TileBinding, Wrap};
@@ -114,7 +115,7 @@ impl Default for RenderOptions {
     }
 }
 
-const UNIFORM_STRIDE: u64 = 256;
+const UNIFORM_STRIDE: u64 = 512;
 
 /// Depth + stencil format: stencil marks the pixels a [`ShaderMode::DepthImage`]
 /// draw passed the depth test on. Float depth when the device has it (see
@@ -146,9 +147,19 @@ enum Step {
 type BindKey = (Option<(u64, SamplerKey)>, Option<(u64, SamplerKey)>);
 
 struct Targets {
-    size: (u32, u32),
     depth: wgpu::TextureView,
     msaa: Option<wgpu::TextureView>,
+}
+
+/// Birdman64VR: one eye's matrices for [`Renderer::render_stereo`]
+/// (row-vector convention, clip space with reversed depth).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StereoEye {
+    /// Camera space (x right, y up, -z forward, game units) → eye clip.
+    pub world: Mat4,
+    /// N64 screen clip space (`Vertex::pos`) → eye clip: the flat panel
+    /// the HUD is drawn on.
+    pub hud: Mat4,
 }
 
 pub struct Renderer {
@@ -172,7 +183,9 @@ pub struct Renderer {
     blit_shader: wgpu::ShaderModule,
     blit_pipelines: HashMap<(wgpu::FilterMode, bool), wgpu::RenderPipeline>,
     blit_samplers: HashMap<wgpu::FilterMode, wgpu::Sampler>,
-    targets: Option<Targets>,
+    /// Depth and MSAA attachments per target size (the framebuffer size;
+    /// Birdman64VR: also the eye size).
+    targets: HashMap<(u32, u32), Targets>,
     vbuf: Option<(wgpu::Buffer, u64)>,
     ubuf: Option<(wgpu::Buffer, u64, wgpu::BindGroup)>,
     /// Persistent N64 framebuffer targets (`fb.rs`).
@@ -371,7 +384,7 @@ impl Renderer {
             }),
             blit_pipelines: HashMap::new(),
             blit_samplers: HashMap::new(),
-            targets: None,
+            targets: HashMap::new(),
             vbuf: None,
             ubuf: None,
             fbs: fb::FbStore::default(),
@@ -666,8 +679,12 @@ impl Renderer {
     }
 
     fn ensure_targets(&mut self, size: (u32, u32)) {
-        if self.targets.as_ref().is_some_and(|t| t.size == size) {
+        if self.targets.contains_key(&size) {
             return;
+        }
+        // Sizes come and go with window resizes: keep the few in use.
+        if self.targets.len() >= 4 {
+            self.targets.clear();
         }
         let tex = |format, samples, label| {
             self.device
@@ -688,11 +705,11 @@ impl Renderer {
                 .create_view(&Default::default())
         };
         let n = self.options.msaa;
-        self.targets = Some(Targets {
-            size,
+        let targets = Targets {
             depth: tex(self.depth_format, n, "pw64 depth"),
             msaa: (n > 1).then(|| tex(self.format, n, "pw64 msaa color")),
-        });
+        };
+        self.targets.insert(size, targets);
     }
 
     /// Output aspect for a target of `size` (4:3 when widescreen is off).
@@ -1199,16 +1216,8 @@ impl Renderer {
         self.draw_frame(frame, target, size, false);
     }
 
-    /// `render`, or with `persist` over `target`'s previous contents (a
-    /// framebuffer target, `fb.rs`). Depth is cleared either way.
-    fn draw_frame(
-        &mut self,
-        frame: &Frame,
-        target: &wgpu::TextureView,
-        size: (u32, u32),
-        persist: bool,
-    ) {
-        self.ensure_targets(size);
+    /// Uploads the textures `frame` references that are not on the GPU yet.
+    fn upload_textures(&mut self, frame: &Frame) {
         for (key, img) in &frame.textures {
             if !self.textures.contains_key(key) {
                 self.upload_texture(*key, img);
@@ -1225,6 +1234,65 @@ impl Renderer {
                 }
             }
         }
+    }
+
+    /// Writes the per-draw uniforms (`ubytes`, [`UNIFORM_STRIDE`] apart) and
+    /// `frame`'s vertices into the (grown as needed) GPU buffers.
+    fn upload_buffers(&mut self, ubytes: &[u8], frame: &Frame) {
+        let need = ubytes.len() as u64;
+        if self.ubuf.as_ref().is_none_or(|u| u.1 < need) {
+            let cap = need.next_power_of_two();
+            let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("pw64 uniforms"),
+                size: cap,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("pw64 uniforms"),
+                layout: &self.uniform_bgl,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &buf,
+                        offset: 0,
+                        size: wgpu::BufferSize::new(size_of::<DrawUniforms>() as u64),
+                    }),
+                }],
+            });
+            self.ubuf = Some((buf, cap, bg));
+        }
+        self.queue
+            .write_buffer(&self.ubuf.as_ref().unwrap().0, 0, ubytes);
+        let vbytes: &[u8] = bytemuck::cast_slice(&frame.vertices);
+        let vneed = (vbytes.len() as u64).max(64).next_multiple_of(4);
+        if self.vbuf.as_ref().is_none_or(|v| v.1 < vneed) {
+            let cap = vneed.next_power_of_two();
+            let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("pw64 vertices"),
+                size: cap,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.vbuf = Some((buf, cap));
+        }
+        if !vbytes.is_empty() {
+            self.queue
+                .write_buffer(&self.vbuf.as_ref().unwrap().0, 0, vbytes);
+        }
+    }
+
+    /// `render`, or with `persist` over `target`'s previous contents (a
+    /// framebuffer target, `fb.rs`). Depth is cleared either way.
+    fn draw_frame(
+        &mut self,
+        frame: &Frame,
+        target: &wgpu::TextureView,
+        size: (u32, u32),
+        persist: bool,
+    ) {
+        self.ensure_targets(size);
+        self.upload_textures(frame);
         // Per-draw uniforms at 256-byte strides.
         let mut ubytes = vec![0u8; frame.draws.len().max(1) * UNIFORM_STRIDE as usize];
         let mut scissors = Vec::with_capacity(frame.draws.len());
@@ -1265,47 +1333,7 @@ impl Renderer {
                 self.pipeline(&d.pipeline, step);
             }
         }
-        let need = ubytes.len() as u64;
-        if self.ubuf.as_ref().is_none_or(|u| u.1 < need) {
-            let cap = need.next_power_of_two();
-            let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("pw64 uniforms"),
-                size: cap,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("pw64 uniforms"),
-                layout: &self.uniform_bgl,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &buf,
-                        offset: 0,
-                        size: wgpu::BufferSize::new(size_of::<DrawUniforms>() as u64),
-                    }),
-                }],
-            });
-            self.ubuf = Some((buf, cap, bg));
-        }
-        self.queue
-            .write_buffer(&self.ubuf.as_ref().unwrap().0, 0, &ubytes);
-        let vbytes: &[u8] = bytemuck::cast_slice(&frame.vertices);
-        let vneed = (vbytes.len() as u64).max(64).next_multiple_of(4);
-        if self.vbuf.as_ref().is_none_or(|v| v.1 < vneed) {
-            let cap = vneed.next_power_of_two();
-            let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("pw64 vertices"),
-                size: cap,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            self.vbuf = Some((buf, cap));
-        }
-        if !vbytes.is_empty() {
-            self.queue
-                .write_buffer(&self.vbuf.as_ref().unwrap().0, 0, vbytes);
-        }
+        self.upload_buffers(&ubytes, frame);
 
         let mut enc = self
             .device
@@ -1319,7 +1347,7 @@ impl Renderer {
         };
         let ub = self.ubuf.as_ref().unwrap();
         {
-            let t = self.targets.as_ref().unwrap();
+            let t = &self.targets[&size];
             let (view, resolve) = match &t.msaa {
                 Some(m) => (m, Some(target)),
                 None => (target, None),
@@ -1363,6 +1391,168 @@ impl Renderer {
                 pass.set_bind_group(0, &ub.2, &[(i as u64 * UNIFORM_STRIDE) as u32]);
                 pass.set_bind_group(1, &self.bind_groups[&bkey], &[]);
                 pass.set_scissor_rect(x, y, w, h);
+                for &step in Self::steps(&d.pipeline) {
+                    pass.set_pipeline(&self.pipelines[&(d.pipeline, step, self.options.filter)]);
+                    pass.draw(d.first_vertex..d.first_vertex + d.vertex_count, 0..1);
+                }
+            }
+        }
+        crate::submit(&self.queue, [enc.finish()]);
+    }
+
+    /// Birdman64VR: one eye of a frame that [`Frame::has_world`], into
+    /// `target` (this renderer's format, `size` pixels).
+    ///
+    /// The world: every draw of the 3D world view
+    /// ([`DrawCall::view`]), in the game's order, with its vertices taken
+    /// back to camera space and through `eye.world` (the eye's view and
+    /// projection, reversed depth like the rest of the renderer). Then,
+    /// over a cleared depth buffer, what the game draws after the world
+    /// starts (HUD, text, pause menu) through `eye.hud`, which places the
+    /// N64 screen on a flat panel in front of the player. Not drawn:
+    /// full-screen fills (clears, fades, border bars) and anything 2D drawn
+    /// before the world. Scissors are not applied (they are screen
+    /// rectangles). The background is the colour the game cleared the
+    /// screen with.
+    pub fn render_stereo(
+        &mut self,
+        frame: &Frame,
+        target: &wgpu::TextureView,
+        size: (u32, u32),
+        eye: &StereoEye,
+    ) {
+        let Some(first_world) = frame.draws.iter().position(|d| d.view != 0) else {
+            return;
+        };
+        self.ensure_targets(size);
+        self.upload_textures(frame);
+        let world: Vec<Mat4> = frame
+            .views
+            .iter()
+            .map(|v| crate::matrix::mul(v, &eye.world))
+            .collect();
+        let n64 = self.options.filter == TexFilter::N64;
+        let mut ubytes = vec![0u8; frame.draws.len().max(1) * UNIFORM_STRIDE as usize];
+        let last_world = frame.draws.iter().rposition(|d| d.view != 0).unwrap();
+        // The passes, each a list of draws over a cleared depth buffer: the
+        // world (a new pass wherever the game cleared the depth buffer
+        // between world draws: the sky is drawn first and must not hide
+        // the land), then the panel.
+        let mut passes: Vec<Vec<usize>> = vec![Vec::new()];
+        let mut panel = Vec::new();
+        for (i, d) in frame.draws.iter().enumerate() {
+            if d.pipeline.shader.mode == ShaderMode::DepthClear
+                && i > first_world
+                && i < last_world
+                && passes.last().is_some_and(|p| !p.is_empty())
+            {
+                passes.push(Vec::new());
+            }
+            let m = if d.view != 0 {
+                world.get(d.view as usize - 1)
+            } else if i > first_world
+                && !matches!(d.wide, Wide::Stretch(_))
+                && d.pipeline.shader.mode != ShaderMode::DepthClear
+            {
+                Some(&eye.hud)
+            } else {
+                None
+            };
+            let Some(m) = m else { continue };
+            if d.vertex_count == 0 {
+                continue;
+            }
+            if d.view != 0 {
+                passes.last_mut().unwrap().push(i);
+            } else {
+                panel.push(i);
+            }
+            let mut u = d.uniforms;
+            u.vr = [1.0, 0.0, 0.0, 0.0];
+            u.eye = *m;
+            u.lod[1] = 0.0;
+            if n64 {
+                u.filt = filter_uniform(&d.textures);
+            }
+            let o = i * UNIFORM_STRIDE as usize;
+            ubytes[o..o + size_of::<DrawUniforms>()].copy_from_slice(bytemuck::bytes_of(&u));
+            self.bind_group(&d.textures);
+            for &step in Self::steps(&d.pipeline) {
+                self.pipeline(&d.pipeline, step);
+            }
+        }
+        self.upload_buffers(&ubytes, frame);
+        // The game's own screen clear, if it made one before the world.
+        let clear = frame.draws[..first_world]
+            .iter()
+            .rev()
+            .find(|d| {
+                matches!(d.wide, Wide::Stretch(_)) && d.pipeline.shader.mode == ShaderMode::Fill
+            })
+            .map_or(wgpu::Color::BLACK, |d| {
+                let c = d.uniforms.fill;
+                wgpu::Color {
+                    r: c[0] as f64,
+                    g: c[1] as f64,
+                    b: c[2] as f64,
+                    a: 1.0,
+                }
+            });
+        let mut enc = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("pw64 eye"),
+            });
+        let ub = self.ubuf.as_ref().unwrap();
+        let t = &self.targets[&size];
+        passes.push(panel);
+        let last = passes.len() - 1;
+        for (pass_no, draws) in passes.iter().enumerate() {
+            // With MSAA every pass draws into the multisampled attachment
+            // and the last one resolves it.
+            let (view, resolve) = match &t.msaa {
+                Some(m) => (m, (pass_no == last).then_some(target)),
+                None => (target, None),
+            };
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("pw64 eye"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    depth_slice: None,
+                    resolve_target: resolve,
+                    ops: wgpu::Operations {
+                        load: if pass_no == 0 {
+                            wgpu::LoadOp::Clear(clear)
+                        } else {
+                            wgpu::LoadOp::Load
+                        },
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &t.depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_vertex_buffer(0, self.vbuf.as_ref().unwrap().0.slice(..));
+            pass.set_stencil_reference(1);
+            for &i in draws {
+                let d = &frame.draws[i];
+                let bkey: BindKey = (
+                    d.textures[0].map(|b| (b.key, b.sampler)),
+                    d.textures[1].map(|b| (b.key, b.sampler)),
+                );
+                pass.set_bind_group(0, &ub.2, &[(i as u64 * UNIFORM_STRIDE) as u32]);
+                pass.set_bind_group(1, &self.bind_groups[&bkey], &[]);
                 for &step in Self::steps(&d.pipeline) {
                     pass.set_pipeline(&self.pipelines[&(d.pipeline, step, self.options.filter)]);
                     pass.draw(d.first_vertex..d.first_vertex + d.vertex_count, 0..1);
@@ -1750,6 +1940,145 @@ mod tests {
         assert_eq!(px(48, 24), [0, 255, 0], "right: green over red");
     }
 
+    /// Birdman64VR: a world view drawn through `render_stereo` with an eye
+    /// matrix that repeats the game's own projection, viewport and screen
+    /// transform gives the flat picture; and a narrower eye shows the same
+    /// scene bigger. Checks the camera-space recovery
+    /// (`Interpreter::world_view`), the uniform layout and the shader path.
+    #[test]
+    fn stereo_eye_matches_the_flat_picture() {
+        let Some((device, queue)) = device() else {
+            eprintln!("no GPU adapter; skipped");
+            return;
+        };
+        let mut mem = VecMemory::default();
+        // uvMat4SetFrustrum(-1, 1, -1, 1, near 1, far 100).
+        let (n, f) = (1.0f32, 100.0f32);
+        let mut proj = [[0.0f32; 4]; 4];
+        proj[0][0] = 1.0;
+        proj[1][1] = 1.0;
+        proj[2][2] = -(f + n) / (f - n);
+        proj[2][3] = -1.0;
+        proj[3][2] = -(2.0 * n * f) / (f - n);
+        // Quads of +-100 object units = +-1 at 3 units in front.
+        let mut mv = matrix::IDENTITY;
+        (0..3).for_each(|i| mv[i][i] = 0.01);
+        mv[3][2] = -3.0;
+        let proj_m = mem.push(&matrix::to_fixed(&proj), 8);
+        let mv_m = mem.push(&matrix::to_fixed(&mv), 8);
+        let red = quad(&mut mem, -100, 100, 0, [255, 0, 0, 255]);
+        let green = quad(&mut mem, 0, 100, 50, [0, 255, 0, 255]);
+        let tris = [(0xBF00_0000, 0x0000_0A14), (0xBF00_0000, 0x0000_141E)];
+        let mut cmds = vec![
+            (0xC000_0000, crate::interp::WIDE_TAG_ON),
+            (0x0103_0040, proj_m),
+            (0x0102_0040, mv_m),
+            (0xBA00_1402, 0),           // 1-cycle
+            (0xFCFF_FFFF, 0xFFFE_793C), // G_CC_SHADE
+            (0xB900_031D, 0x30),        // Z_CMP | Z_UPD, opaque
+            (
+                0xB700_0000,
+                geom::G_ZBUFFER | geom::G_SHADE | geom::G_SHADING_SMOOTH,
+            ),
+            (0x0430_0040, green),
+        ];
+        cmds.extend(tris);
+        cmds.push((0x0430_0040, red));
+        cmds.extend(tris);
+        cmds.push((0xC000_0000, crate::interp::WIDE_TAG_OFF));
+        cmds.push((0xB800_0000, 0));
+        let words: Vec<u32> = cmds.iter().flat_map(|&(a, b)| [a, b]).collect();
+        let dl = mem.push_words(&words);
+        let mut interp = Interpreter::new();
+        interp.wide_tags = true;
+        let frame = interp.run(&mem, dl);
+        assert!(frame.has_world());
+        assert_eq!(frame.views.len(), 1);
+        assert!(frame.draws.iter().all(|d| d.view == 1));
+        // A camera-space point comes back from its `pos`: the red quad's
+        // corner (-1, -1, -3).
+        let corner = frame
+            .vertices
+            .iter()
+            .map(|v| {
+                let p = v.pos;
+                let m = &frame.views[0];
+                let c: Vec<f32> = (0..4)
+                    .map(|j| (0..4).map(|k| p[k] * m[k][j]).sum())
+                    .collect();
+                [c[0] / c[3], c[1] / c[3], c[2] / c[3]]
+            })
+            .find(|c| (c[2] + 3.0).abs() < 1e-3 && c[0] < 0.0 && c[1] < 0.0)
+            .expect("a vertex at depth 3");
+        assert!((corner[0] + 1.0).abs() < 1e-3 && (corner[1] + 1.0).abs() < 1e-3);
+
+        let mut r = Renderer::new(
+            &device,
+            &queue,
+            wgpu::TextureFormat::Rgba8Unorm,
+            RenderOptions {
+                msaa: 1,
+                fill_view: false,
+                ..Default::default()
+            },
+        );
+        let (w, h) = (64u32, 48u32);
+        let flat = r.render_to_rgba(&frame, (w, h));
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&Default::default());
+        // The default viewport and the 4:3 screen transform as matrices.
+        let s: Mat4 = [
+            [160.0, 0.0, 0.0, 0.0],
+            [0.0, -120.0, 0.0, 0.0],
+            [0.0, 0.0, -0.5, 0.0],
+            [160.0, 120.0, 0.5, 1.0],
+        ];
+        let k: Mat4 = [
+            [1.0 / 160.0, 0.0, 0.0, 0.0],
+            [0.0, -1.0 / 120.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [-1.0, 1.0, 0.0, 1.0],
+        ];
+        let same = matrix::mul(&matrix::mul(&proj, &s), &k);
+        let mut eye = StereoEye {
+            world: same,
+            hud: matrix::IDENTITY,
+        };
+        r.render_stereo(&frame, &view, (w, h), &eye);
+        let stereo = read_rgba(&device, &queue, &tex);
+        let px = |img: &[u8], x: u32, y: u32| {
+            let o = ((y * w + x) * 4) as usize;
+            [img[o], img[o + 1], img[o + 2]]
+        };
+        // Red quad: the middle third; the nearer green one: its right half.
+        assert_eq!(px(&flat, 26, 24), [255, 0, 0]);
+        assert_eq!(px(&flat, 38, 24), [0, 255, 0]);
+        assert_eq!(px(&flat, 4, 24), [0, 0, 0]);
+        for (x, y) in [(26, 24), (38, 24), (4, 24), (32, 4), (22, 10), (41, 40)] {
+            assert_eq!(px(&stereo, x, y), px(&flat, x, y), "pixel {x},{y}");
+        }
+        // Half the field of view: the red quad now reaches x = -2/3.
+        eye.world[0][0] *= 2.0;
+        eye.world[1][1] *= 2.0;
+        r.render_stereo(&frame, &view, (w, h), &eye);
+        let zoomed = read_rgba(&device, &queue, &tex);
+        assert_eq!(px(&zoomed, 14, 24), [255, 0, 0]);
+        assert_eq!(px(&zoomed, 6, 24), [0, 0, 0]);
+    }
+
     /// A left-red / right-green frame at half-screen each, via two Fill
     /// draws (the simplest renderer path).
     pub(super) fn red_green_frame() -> Frame {
@@ -1807,6 +2136,7 @@ mod tests {
             hud: false,
             split: None,
             elem: 0,
+            view: 0,
         };
         Frame {
             vertices: verts(0.0, 320.0),
@@ -1816,6 +2146,7 @@ mod tests {
             ],
             textures: HashMap::new(),
             chains: HashMap::new(),
+            views: Vec::new(),
         }
     }
 
