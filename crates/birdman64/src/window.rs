@@ -1399,6 +1399,35 @@ impl App {
             },
         };
         g.renderer.options.hud_offsets = g.hud_offsets;
+        // Birdman64VR: a new game frame is shown: its world view, if it has
+        // one, goes to the headset in stereo. First, before the flat
+        // picture below: the headset frame it is for starts within ms.
+        if q.frames > 0
+            && let Some(vr) = &mut self.vr
+        {
+            let shown = q.show.or(self.shown);
+            let frame = q
+                .ops
+                .iter()
+                .rev()
+                .find_map(|op| match op {
+                    pw64_gfx::FbOp::Draw { fb, frame }
+                        if Some(*fb) == shown && !frame.draws.is_empty() =>
+                    {
+                        Some(frame.clone())
+                    }
+                    _ => None,
+                })
+                .or_else(|| shown.and_then(|fb| g.renderer.fb_last_frame(fb)).cloned());
+            let timing = Instant::now();
+            vr.world(
+                &mut g.renderer,
+                &g.device,
+                g.config.format,
+                frame.as_deref(),
+            );
+            crate::vr::note(crate::vr::Stage::Eyes, timing.elapsed());
+        }
         let timing = Instant::now();
         for op in &q.ops {
             g.renderer.fb_apply(op);
@@ -1411,22 +1440,6 @@ impl App {
             self.vr_shown_at = q.shown_at;
         }
         if q.frames > 0 {
-            // Birdman64VR: a new game frame is shown: its world view, if
-            // it has one, goes to the headset in stereo.
-            if let Some(vr) = &mut self.vr {
-                let frame = self
-                    .shown
-                    .and_then(|fb| g.renderer.fb_last_frame(fb))
-                    .cloned();
-                let timing = Instant::now();
-                vr.world(
-                    &mut g.renderer,
-                    &g.device,
-                    g.config.format,
-                    frame.as_deref(),
-                );
-                crate::vr::note(crate::vr::Stage::Eyes, timing.elapsed());
-            }
             crate::vr::count_frames(q.frames);
             self.frames += q.frames;
             self.perf.frames(q.frames as u32);

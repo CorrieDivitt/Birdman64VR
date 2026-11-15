@@ -290,7 +290,7 @@ mod real {
     use crate::gpu_context::GpuContext;
     use pw64_xr::math::{self, Mat4};
     use pw64_xr::{EyePose, FrameOutcome, Layers, Panel, XrContext};
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use std::sync::{Arc, Condvar, Mutex, OnceLock};
     use std::time::{Duration, Instant};
     use winit::window::Window;
@@ -301,22 +301,38 @@ mod real {
     static STARTED: AtomicBool = AtomicBool::new(false);
 
     /// How long before the next headset frame the game is cued to show its
-    /// newest frame (`PW64_VR_LEAD_MS`, default 6). The cue latches the
-    /// frame the game finished and the window then draws it into the panel;
-    /// that must be done when the headset thread samples the panel. A
+    /// newest frame. The cue latches the frame the game finished and the
+    /// window then draws it (into the panel, or as the stereo world's eye
+    /// pictures); that must be done when the headset frame starts. A
     /// longer lead is safer against a late (repeated) frame, a shorter one
     /// has less input lag.
+    ///
+    /// `PW64_VR_LEAD_MS` fixes it; otherwise 6 ms for the panel, and for
+    /// the stereo world what the window thread measured it needs
+    /// ([`STEREO_LEAD_US`]): drawing two eyes takes several ms, and a
+    /// picture that is ready for some headset frames and late for others
+    /// shows as judder (one shown twice, the next skipped).
     fn lead() -> Duration {
-        static LEAD: OnceLock<Duration> = OnceLock::new();
-        *LEAD.get_or_init(|| {
-            let ms = std::env::var("PW64_VR_LEAD_MS")
+        static FIXED: OnceLock<Option<Duration>> = OnceLock::new();
+        let fixed = *FIXED.get_or_init(|| {
+            std::env::var("PW64_VR_LEAD_MS")
                 .ok()
                 .and_then(|v| v.parse::<f64>().ok())
                 .filter(|v| (0.0..=50.0).contains(v))
-                .unwrap_or(6.0);
-            Duration::from_secs_f64(ms / 1e3)
+                .map(|ms| Duration::from_secs_f64(ms / 1e3))
+        });
+        fixed.unwrap_or_else(|| match STEREO_LEAD_US.load(Ordering::Relaxed) {
+            0 => Duration::from_millis(6),
+            us => Duration::from_micros(us.into()),
         })
     }
+
+    /// The lead the stereo world needs, in microseconds (0: no stereo
+    /// world): the longest recent time from the cue to the eye pictures
+    /// being published, plus a margin (`Vr::world`).
+    static STEREO_LEAD_US: AtomicU32 = AtomicU32::new(0);
+    /// When the cue thread last cued the game.
+    static CUED_AT: Mutex<Option<Instant>> = Mutex::new(None);
 
     /// When the game's next cue is due (set per headset frame).
     static CUE_AT: Mutex<Option<Instant>> = Mutex::new(None);
@@ -336,6 +352,7 @@ mod real {
                 }
             };
             std::thread::sleep(at.saturating_duration_since(Instant::now()));
+            *CUED_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
             pw64_platform::os::vi::VBLANK.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -493,6 +510,9 @@ mod real {
         stereo: bool,
         /// Eye picture sets drawn so far.
         eye_serial: u64,
+        /// How long the last eye picture sets took from the game's cue to
+        /// being published, in microseconds (a ring, for [`lead`]).
+        cue_to_eyes: [u32; 64],
         /// The window thread's probe bar (`probe_on`).
         probe: Option<Bar>,
     }
@@ -555,6 +575,7 @@ mod real {
                     eyes: None,
                     stereo: false,
                     eye_serial: 0,
+                    cue_to_eyes: [0; 64],
                     probe: None,
                 },
             ))
@@ -645,6 +666,8 @@ mod real {
             else {
                 if self.stereo {
                     self.stereo = false;
+                    STEREO_LEAD_US.store(0, Ordering::Relaxed);
+                    self.cue_to_eyes = [0; 64];
                     self.source.lock().unwrap_or_else(|e| e.into_inner()).world = None;
                     log("stereo world off", true);
                 }
@@ -694,6 +717,18 @@ mod real {
             self.eye_serial += 1;
             self.source.lock().unwrap_or_else(|e| e.into_inner()).world =
                 Some((back, poses, self.eye_serial));
+            // The lead for the next cues: the slowest of the last 64 sets
+            // (under a second) plus a millisecond, at least the panel's 6 ms
+            // and at most a frame less a millisecond. Hitches (level loads)
+            // hit the cap and fall out of the ring again.
+            if let Some(cued) = *CUED_AT.lock().unwrap_or_else(|e| e.into_inner()) {
+                let us = cued.elapsed().as_micros().min(u32::MAX as u128) as u32;
+                self.cue_to_eyes[(self.eye_serial % 64) as usize] = us;
+                let worst = self.cue_to_eyes.iter().copied().max().unwrap_or(0);
+                let period_us = 1_000_000_000 / HEADSET_MHZ.load(Ordering::Relaxed).max(1);
+                let lead = (worst + 1000).clamp(6000, period_us.saturating_sub(1000).max(6000));
+                STEREO_LEAD_US.store(lead, Ordering::Relaxed);
+            }
             if !self.stereo {
                 self.stereo = true;
                 log(
@@ -1367,7 +1402,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                          {to_panel_max:.1} ms, age when the headset draws it avg {age_avg:.1} \
                          max {age_max:.1} ms, then shown {ahead_avg:.1} (max {ahead_max:.1}) ms \
                          later; headset frames not shown {idle}; stereo: {} new eye pictures, \
-                         {} shown again; longest, ms: {}",
+                         {} shown again, lead {:.1} ms; longest, ms: {}",
                         if hitch { "hitch, " } else { "" },
                         started.elapsed().as_secs_f64(),
                         shown as f64 / secs,
@@ -1375,6 +1410,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                         ms(worst_wait),
                         std::mem::take(&mut eyes_new),
                         std::mem::take(&mut eyes_repeated),
+                        lead().as_secs_f64() * 1e3,
                         detail.join(", ")
                     ),
                     hitch,

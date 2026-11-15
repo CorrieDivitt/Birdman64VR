@@ -144,6 +144,18 @@ menus and everything else stay on the panel.
   wait is the one shown, with the pose it was drawn for. The 5 s report
   counts eye pictures shown new and shown again, and the longest
   "eye pictures" draw time (window thread, CPU).
+- **Judder found on the Quest (2026-11-14):** game and headset both at 72 fps,
+  yet 25-30% of headset frames showed the previous eye pictures: cue lead
+  6 ms, but flat picture (2-3 ms) + eye pictures (4-5 ms CPU) took 7-8 ms,
+  so the pictures were ready for some frames and late for others. Now the
+  eyes are drawn before the flat picture and the lead follows the measured
+  cue-to-published time (`STEREO_LEAD_US`: worst of the last 64 + 1 ms,
+  6 ms to a frame less 1 ms).
+- **Culling in VR is by distance only** for the main world view
+  (`code_7150.c.patch`): side-plane normals zeroed, forward plane skipped,
+  terrain footprint = a square around the camera out to the far plane.
+  `CULL_SCALE` still widens the frustum corners but no longer decides
+  anything.
 - No border bars in VR (`pw64_fill_frame` set with the world tag): they
   floated in the world as black bars.
 - **Rocket belt first person:** in VR the R button switches between the chase
