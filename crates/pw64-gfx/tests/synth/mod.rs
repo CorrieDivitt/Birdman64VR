@@ -486,9 +486,11 @@ fn strip_placement(mut s: String) -> String {
         let b = a + s[a..].find(']').unwrap() + 1;
         s.replace_range(a..b, "");
     }
-    if let Some(a) = s.find(", eye: [[") {
-        let b = a + s[a..].find("]]").unwrap() + 2;
-        s.replace_range(a..b, "");
+    for field in [", eye: [[", ", clip: [["] {
+        if let Some(a) = s.find(field) {
+            let b = a + s[a..].find("]]").unwrap() + 2;
+            s.replace_range(a..b, "");
+        }
     }
     if let Some(a) = s.find(", view: ") {
         let digits = s[a + 8..].chars().take_while(char::is_ascii_digit).count();
