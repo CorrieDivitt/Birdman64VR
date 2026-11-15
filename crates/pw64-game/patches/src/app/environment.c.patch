@@ -8,7 +8,7 @@
  
  typedef struct {
      Vec3F unk0;
-@@ -57,6 +58,51 @@
+@@ -57,6 +58,53 @@
  void env_802E1C1C(s32);
  void env_802E23E0(void);
  void env_802E2504(void);
@@ -38,7 +38,9 @@
 +    m.m[3][1] = cy;
 +    uvGfxStatePush();
 +    uvGfxSetFlags(GFX_STATE_XLU | GFX_STATE_AA | GFX_STATE_GOURAUD | GFX_STATE_TEXTURE_NONE);
-+    uvGfxClearFlags(GFX_STATE_DECAL | GFX_STATE_ZBUFFER);
++    // Both faces: the ring is seen from above and its winding is not the
++    // card's (the first build without this showed nothing).
++    uvGfxClearFlags(GFX_STATE_DECAL | GFX_STATE_ZBUFFER | GFX_STATE_CULL_FRONT | GFX_STATE_CULL_BACK);
 +    uvGfx_802236CC(&m);
 +    for (i = 0; i < 32; i++) {
 +        c0 = uvCosF(i * (6.2831855f / 32.0f));
@@ -60,7 +62,7 @@
  
  s32 env_802E0CF0(void) {
      f32 pad_sp174;
-@@ -93,10 +139,21 @@ s32 env_802E0CF0(void) {
+@@ -93,10 +141,21 @@ s32 env_802E0CF0(void) {
      u8 fogA;
      f32 sp3C;
      f32 sp38;
@@ -82,7 +84,7 @@
 +    }
      sp154.x = sp68.m[1][0];
      sp154.y = sp68.m[1][1];
-@@ -106,16 +163,16 @@ s32 env_802E0CF0(void) {
+@@ -106,16 +165,16 @@ s32 env_802E0CF0(void) {
      sp130.z = 0.0f;
      uvVec3Cross(&sp13C, &sp130, &sp154);
      uvVec3Normal(&sp13C, &sp13C);
@@ -106,7 +108,7 @@
          uvEnvProps(D_80362690->envId, ENV_PROP_FOG_FACTOR(0.996f), ENV_PROP_END);
          return 0;
      }
-@@ -127,12 +184,12 @@ s32 env_802E0CF0(void) {
+@@ -127,12 +186,12 @@ s32 env_802E0CF0(void) {
      }
      sp16C = (sp54 * sp60) + spF4;
      sp170 = (sp54 * sp5C) + spF8;
@@ -125,7 +127,7 @@
      if (var_fa1 == spFC) {
          sp54 = 0.0f;
      } else {
-@@ -140,7 +197,7 @@ s32 env_802E0CF0(void) {
+@@ -140,7 +199,7 @@ s32 env_802E0CF0(void) {
      }
      var_fa1 = 1.0f / camera->unk20;
      var_ft4 = (camera->clipX1 * (var_fa1));
@@ -134,7 +136,7 @@
      sp148 = sp154.y * sp38;
      sp14C = -sp154.x * sp38;
      sp38 = sp68.m[3][2] / 15.0f;
-@@ -313,7 +366,9 @@ void env_802E14E8(Vec3F* arg0, f32 arg1, f32 arg2, f32 arg3, f32 arg4) {
+@@ -313,7 +368,9 @@ void env_802E14E8(Vec3F* arg0, f32 arg1, f32 arg2, f32 arg3, f32 arg4) {
  void env_802E15F0(void) {
      f32 var_fv1;
  
@@ -145,7 +147,7 @@
      if ((D_80359D80.unk20 < D_80359D80.unk10) && (var_fv1 > 0.0f)) {
          var_fv1 = -var_fv1;
      }
-@@ -321,7 +376,7 @@ void env_802E15F0(void) {
+@@ -321,7 +378,7 @@ void env_802E15F0(void) {
          var_fv1 = -var_fv1;
      }
      D_80359D80.unk10 += var_fv1;
