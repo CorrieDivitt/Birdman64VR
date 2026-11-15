@@ -265,6 +265,21 @@ pub struct Frame {
     /// camera space: `pos * views[i]` = the point as the game's camera
     /// sees it, x right, y up, looking down -z, in game units (metres).
     pub views: Vec<[[f32; 4]; 4]>,
+    /// Birdman64VR: the game camera of the world view, when the game tagged
+    /// it (`CAMERA_TAG`, VR only).
+    pub camera: Option<GameCamera>,
+}
+
+/// Birdman64VR: the game camera a frame's world view was drawn from
+/// (`pw64_vr_camera_tag` in `pw64_widescreen.c`).
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct GameCamera {
+    /// Camera → world (row vectors, translation in row 3) in the game's
+    /// axes: z up; the camera's own axes are x right, y forward, z up.
+    pub world: [[f32; 4]; 4],
+    /// Not a flight: a menu, the title, a demo, results or a replay. The
+    /// headset shows these as a small model of the scene (`vr.rs`).
+    pub scenery: bool,
 }
 
 impl Frame {

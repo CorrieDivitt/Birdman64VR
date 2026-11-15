@@ -36,6 +36,15 @@ int pw64_vr_flight(void) {
            D_80362690->state == GAME_STATE_TEST_UPDATE;
 }
 
+/* VR: the main world view goes to the headset in every game state: in
+ * flight around the player (pw64_vr_flight), everywhere else as scenery,
+ * a small model of the scene in front of the player that the game's camera
+ * cannot swing around (vr.rs, the camera tag below). Tagged and culled for
+ * VR either way. */
+static int pw64_vr_world(void) {
+    return pw64_widescreen_aspect < 0.0f && D_80362690 != NULL;
+}
+
 /* Fill screen, 0 = off. Set by Rust before boot
  * (pw64_game::set_fill_screen). */
 int pw64_fill_screen = 0;
@@ -77,7 +86,7 @@ float pw64_widescreen_xscale(const void* chan) {
     float k;
     if (aspect < 0.0f) {
         /* VR: the main world view (the same test as below), in flight. */
-        if (!pw64_vr_flight() || c->viewX0 > 16 || c->viewX1 < SCREEN_WIDTH - 16 ||
+        if (!pw64_vr_world() || c->viewX0 > 16 || c->viewX1 < SCREEN_WIDTH - 16 ||
             c->viewX1 <= c->viewX0 || (!(c->unk0 & 2) && c->unk2 == 0xFFFF)) {
             return 1.0f;
         }
@@ -172,6 +181,29 @@ static int pw64_split_world_view(const UnkStruct_80204D94* c) {
            !(c->viewX0 <= 16 && c->viewX1 >= SCREEN_WIDTH - 16);
 }
 
+/* Must match pw64-gfx `interp::CAMERA_TAG` ("PC" in G_NOOP w0). */
+#define PW64_CAMERA_TAG 0x504300u
+
+/* VR: the world view's camera (camera -> world, unk110) for the renderer,
+ * one f32 per G_NOOP (words 0..11: rows 0..3, columns 0..2), then word 12
+ * with bit 0 = scenery (not a flight). */
+static void pw64_vr_camera_tag(const UnkStruct_80204D94* c) {
+    int i;
+    union {
+        f32 f;
+        u32 u;
+    } w;
+    for (i = 0; i < 12; i++) {
+        w.f = c->unk110.m[i / 3][i % 3];
+        gGfxDisplayListHead->words.w0 = ((u32)G_NOOP << 24) | PW64_CAMERA_TAG | (u32)i;
+        gGfxDisplayListHead->words.w1 = w.u;
+        gGfxDisplayListHead++;
+    }
+    gGfxDisplayListHead->words.w0 = ((u32)G_NOOP << 24) | PW64_CAMERA_TAG | 12u;
+    gGfxDisplayListHead->words.w1 = pw64_vr_flight() ? 0u : 1u;
+    gGfxDisplayListHead++;
+}
+
 /* Brackets a channel's draw (on = 1 at the start, 0 at the end) with
  * G_NOOP markers when it is a widened world view or a fill view. RDP NOOPs
  * are harmless on hardware. A fill view marks the frame: the border bars
@@ -201,6 +233,9 @@ void pw64_widescreen_tag(const void* chan, int on) {
     gGfxDisplayListHead->words.w0 = (u32)G_NOOP << 24;
     gGfxDisplayListHead->words.w1 = on ? PW64_WIDE_TAG_ON : PW64_WIDE_TAG_OFF;
     gGfxDisplayListHead++;
+    if (on && pw64_widescreen_aspect < 0.0f) {
+        pw64_vr_camera_tag((const UnkStruct_80204D94*)chan);
+    }
 }
 
 /*

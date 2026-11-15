@@ -160,6 +160,11 @@ pub struct StereoEye {
     /// N64 screen clip space (`Vertex::pos`) → eye clip: the flat panel
     /// the HUD is drawn on.
     pub hud: Mat4,
+    /// The world is shown as a small model (menus, `GameCamera::scenery`):
+    /// without the environment (sky and the camera-following sea, the
+    /// world draws before the game's first depth clear between them), on a
+    /// dark background.
+    pub scenery: bool,
 }
 
 pub struct Renderer {
@@ -1482,6 +1487,9 @@ impl Renderer {
             }
         }
         self.upload_buffers(&ubytes, frame);
+        if eye.scenery && passes.len() > 1 {
+            passes.remove(0);
+        }
         // The game's own screen clear, if it made one before the world.
         let clear = frame.draws[..first_world]
             .iter()
@@ -1498,6 +1506,16 @@ impl Renderer {
                     a: 1.0,
                 }
             });
+        let clear = if eye.scenery {
+            wgpu::Color {
+                r: 0.012,
+                g: 0.016,
+                b: 0.024,
+                a: 1.0,
+            }
+        } else {
+            clear
+        };
         let mut enc = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -2056,6 +2074,7 @@ mod tests {
         let mut eye = StereoEye {
             world: same,
             hud: matrix::IDENTITY,
+            scenery: false,
         };
         r.render_stereo(&frame, &view, (w, h), &eye);
         let stereo = read_rgba(&device, &queue, &tex);
@@ -2147,6 +2166,7 @@ mod tests {
             textures: HashMap::new(),
             chains: HashMap::new(),
             views: Vec::new(),
+            camera: None,
         }
     }
 

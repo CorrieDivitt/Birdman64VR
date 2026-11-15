@@ -184,6 +184,8 @@ pub struct Interpreter {
     /// Sizes of the last frame (vertices, draws, textures): the next
     /// frame's initial capacity. Kept across runs.
     cap_hint: [usize; 3],
+    /// `CAMERA_TAG` words received so far this frame.
+    camera_words: [f32; 12],
 }
 
 /// Projection, viewport (scale, translate) and [`DrawCall::view`] of the
@@ -194,6 +196,12 @@ type ViewMemo = (matrix::Mat4, ([f32; 3], [f32; 3]), u16);
 /// widescreen; `crates/pw64-game/native/src/pw64_widescreen.c`).
 pub const WIDE_TAG_ON: u32 = 0x5057_5731;
 pub const WIDE_TAG_OFF: u32 = 0x5057_5730;
+/// Birdman64VR: `G_NOOP` w0 camera marker ("PC" + word index in the low
+/// byte, `pw64_vr_camera_tag` in `pw64_widescreen.c`): words 0..11 are the
+/// world view's camera → world matrix, rows 0..3 and columns 0..2, as f32
+/// bits in w1; word 12 commits it ([`crate::frame::GameCamera`], w1 bit 0 =
+/// `scenery`).
+pub const CAMERA_TAG: u32 = 0x0050_4300;
 /// `G_NOOP` w1 HUD anchor marker: "PWA" + `L`/`C`/`R` in the low byte;
 /// applies to the following draws (see [`Anchor`]).
 pub const ANCHOR_TAG: u32 = 0x5057_4100;
@@ -333,6 +341,7 @@ impl Interpreter {
             last_serial: 0,
             load_buf: Vec::new(),
             cap_hint: [0; 3],
+            camera_words: [0.0; 12],
         }
     }
 
@@ -356,6 +365,7 @@ impl Interpreter {
             textures: std::collections::HashMap::with_capacity(t),
             chains: Default::default(),
             views: Vec::new(),
+            camera: None,
         };
         self.run_into(mem, dl, &mut frame);
         frame
@@ -385,6 +395,7 @@ impl Interpreter {
         frame.textures.clear();
         frame.chains.clear();
         frame.views.clear();
+        frame.camera = None;
         std::mem::swap(&mut self.frame, frame);
         self.execute(mem, dl);
         std::mem::swap(&mut self.frame, frame);
@@ -466,6 +477,21 @@ impl Interpreter {
     fn command(&mut self, mem: &dyn Memory, w0: u32, w1: u32) {
         let opc = (w0 >> 24) as u8;
         match opc {
+            // Birdman64VR: the world view's camera, one word at a time
+            // (`CAMERA_TAG`).
+            op::G_NOOP if w0 & 0x00FF_FF00 == CAMERA_TAG => {
+                let i = (w0 & 0xFF) as usize;
+                if i < 12 {
+                    self.camera_words[i] = f32::from_bits(w1);
+                } else if i == 12 {
+                    let c = &self.camera_words;
+                    let row = |r: usize, w: f32| [c[r * 3], c[r * 3 + 1], c[r * 3 + 2], w];
+                    self.frame.camera = Some(crate::frame::GameCamera {
+                        world: [row(0, 0.0), row(1, 0.0), row(2, 0.0), row(3, 1.0)],
+                        scenery: w1 & 1 != 0,
+                    });
+                }
+            }
             // Widescreen world-view markers (native game, pw64_widescreen.c).
             op::G_NOOP if w1 == WIDE_TAG_ON || w1 == WIDE_TAG_OFF => {
                 self.wide_view = w1 == WIDE_TAG_ON;

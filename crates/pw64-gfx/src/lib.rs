@@ -22,7 +22,7 @@ pub mod renderer;
 pub mod shader;
 pub mod texture;
 
-pub use frame::{Anchor, Frame, N64_HEIGHT, N64_WIDTH, Wide};
+pub use frame::{Anchor, Frame, GameCamera, N64_HEIGHT, N64_WIDTH, Wide};
 pub use interp::Interpreter;
 pub use memory::{Memory, VecMemory};
 pub use renderer::{FbOp, RenderOptions, Renderer, StereoEye, TexFilter, Widescreen};

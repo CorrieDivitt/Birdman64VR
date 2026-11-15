@@ -537,6 +537,18 @@ mod real {
             &math::view(pose.orientation, pose.position.map(|v| v * scale)),
             &projection(NEAR_M * scale),
         );
+        pw64_gfx::StereoEye {
+            world,
+            hud: panel_hud(pose),
+            scenery: false,
+        }
+    }
+
+    /// N64 screen clip space → eye clip for `pose` (seated space): the
+    /// screen's 2D draws (HUD, menus) on the panel's plane.
+    fn panel_hud(pose: &EyePose) -> Mat4 {
+        use pw64_gfx::matrix::mul;
+        let [l, r, u, d] = pose.fov;
         // The N64 screen (320x240, y down) on the panel's plane, in metres.
         let s = PANEL_HEIGHT_M / pw64_gfx::N64_HEIGHT;
         let on_panel: Mat4 = [
@@ -552,12 +564,137 @@ mod real {
         ];
         let mut hud = mul(
             &mul(&on_panel, &math::view(pose.orientation, pose.position)),
-            &projection(NEAR_M),
+            &math::projection_reversed(l, r, u, d, NEAR_M),
         );
         // Everything on the panel has one depth; a little of each draw's
         // own depth on top keeps 3D HUD parts sorted among themselves.
         hud[2][2] += 0.05;
-        pw64_gfx::StereoEye { world, hud }
+        hud
+    }
+
+    /// Scenery (menus, title, demos, results, replays: everything but a
+    /// flight) is shown as a small model on a round table in front of and
+    /// below the player, fixed in place, so the game's swooping camera no
+    /// longer moves the player's view: the model's radius in metres...
+    const TABLE_RADIUS_M: f32 = 0.45;
+    /// ...and where its centre (at sea level) sits in the seated space.
+    const TABLE_AT: [f32; 3] = [0.0, -0.65, -1.3];
+
+    /// The part of the game world on the table: centre (world x, y) and
+    /// radius in game metres, eased from frame to frame.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub(super) struct Fit {
+        pub(super) centre: [f32; 2],
+        pub(super) radius: f32,
+        /// The middle 90% of the scene's heights (world z), for the log:
+        /// near sea level and up the hills when the axes are right.
+        pub(super) heights: [f32; 2],
+    }
+
+    /// Camera space as the renderer recovers it (x right, y up, -z ahead)
+    /// → the game world (z up), for the frame's game camera.
+    pub(super) fn camera_to_world(cam: &pw64_gfx::GameCamera) -> Mat4 {
+        // Camera space → the game camera's own axes (x right, y ahead,
+        // z up): (x, -z, y).
+        let axes: Mat4 = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        pw64_gfx::matrix::mul(&axes, &cam.world)
+    }
+
+    /// Where the frame's scene is, in world x and y: the middle 90% of its
+    /// world vertices along each axis (a few far-off or camera-near pieces
+    /// don't stretch it), without the environment pass (sky and the
+    /// camera-following sea, before the first depth clear between world
+    /// draws, as `Renderer::render_stereo` drops it).
+    pub(super) fn scene_extent(frame: &pw64_gfx::Frame, c2w: &Mat4) -> Option<Fit> {
+        let draws = &frame.draws;
+        let first = draws.iter().position(|d| d.view != 0)?;
+        let last = draws.iter().rposition(|d| d.view != 0)?;
+        let clear = draws[first..last]
+            .iter()
+            .position(|d| d.pipeline.shader.mode == pw64_gfx::frame::ShaderMode::DepthClear)
+            .map_or(first, |i| first + i);
+        let (mut xs, mut ys, mut zs) = (Vec::new(), Vec::new(), Vec::new());
+        for d in &draws[clear..=last] {
+            if d.view == 0 {
+                continue;
+            }
+            let m = pw64_gfx::matrix::mul(&frame.views[d.view as usize - 1], c2w);
+            let first = d.first_vertex as usize;
+            // Every third vertex is plenty for an extent.
+            for v in frame.vertices[first..first + d.vertex_count as usize]
+                .iter()
+                .step_by(3)
+            {
+                let c: [f32; 4] = [0, 1, 2, 3].map(|j| (0..4).map(|k| v.pos[k] * m[k][j]).sum());
+                if c[3].abs() < 1e-9 {
+                    continue;
+                }
+                xs.push(c[0] / c[3]);
+                ys.push(c[1] / c[3]);
+                zs.push(c[2] / c[3]);
+            }
+        }
+        if xs.len() < 16 {
+            return None;
+        }
+        let span = |v: &mut Vec<f32>| {
+            let n = v.len();
+            let lo = *v.select_nth_unstable_by(n / 20, f32::total_cmp).1;
+            let hi = *v.select_nth_unstable_by(n - 1 - n / 20, f32::total_cmp).1;
+            (lo, hi)
+        };
+        let ((x0, x1), (y0, y1), (z0, z1)) = (span(&mut xs), span(&mut ys), span(&mut zs));
+        Some(Fit {
+            centre: [0.5 * (x0 + x1), 0.5 * (y0 + y1)],
+            radius: (0.5 * (x1 - x0)).max(0.5 * (y1 - y0)).max(50.0),
+            heights: [z0, z1],
+        })
+    }
+
+    /// `fit` moved a little towards `target` (about a second to settle at
+    /// the headset's rate), so the model glides instead of jumping when
+    /// the camera shows a different part of the scene.
+    pub(super) fn ease(fit: Fit, target: Fit) -> Fit {
+        let k = 0.04;
+        Fit {
+            centre: [0, 1].map(|i| fit.centre[i] + (target.centre[i] - fit.centre[i]) * k),
+            radius: fit.radius + (target.radius - fit.radius) * k,
+            heights: target.heights,
+        }
+    }
+
+    /// The matrices one eye's picture of the scenery model is drawn with:
+    /// camera space → world → the table (`fit` scaled to `TABLE_RADIUS_M`,
+    /// z up becoming y up, the world's +y ahead) → the eye.
+    pub(super) fn scenery_eye(pose: &EyePose, c2w: &Mat4, fit: &Fit) -> pw64_gfx::StereoEye {
+        use pw64_gfx::matrix::mul;
+        let [l, r, u, d] = pose.fov;
+        let k = TABLE_RADIUS_M / fit.radius;
+        let to_table: Mat4 = [
+            [k, 0.0, 0.0, 0.0],
+            [0.0, 0.0, -k, 0.0],
+            [0.0, k, 0.0, 0.0],
+            [
+                TABLE_AT[0] - k * fit.centre[0],
+                TABLE_AT[1],
+                TABLE_AT[2] + k * fit.centre[1],
+                1.0,
+            ],
+        ];
+        let eye = mul(
+            &math::view(pose.orientation, pose.position),
+            &math::projection_reversed(l, r, u, d, 0.05),
+        );
+        pw64_gfx::StereoEye {
+            world: mul(&mul(c2w, &to_table), &eye),
+            hud: panel_hud(pose),
+            scenery: true,
+        }
     }
 
     pub(crate) struct Vr {
@@ -573,6 +710,8 @@ mod real {
         eyes: Option<(wgpu::TextureFormat, [[wgpu::TextureView; 2]; 3])>,
         /// The headset shows the stereo world (the last game frame had one).
         stereo: bool,
+        /// The scenery model's placement while one is shown (`scenery_eye`).
+        fit: Option<Fit>,
         /// Eye picture sets drawn so far.
         eye_serial: u64,
         /// When the world was last described in the log ([`describe`]).
@@ -641,6 +780,7 @@ mod real {
                     eye_size,
                     eyes: None,
                     stereo: false,
+                    fit: None,
                     eye_serial: 0,
                     described: Instant::now(),
                     cue_to_eyes: [0; 256],
@@ -734,6 +874,7 @@ mod real {
             else {
                 if self.stereo {
                     self.stereo = false;
+                    self.fit = None;
                     STEREO_LEAD_US.store(0, Ordering::Relaxed);
                     self.cue_to_eyes = [0; 256];
                     self.source.lock().unwrap_or_else(|e| e.into_inner()).world = None;
@@ -783,14 +924,42 @@ mod real {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .unwrap_or_default();
+            // Scenery: a model on the table, placed to fit what the camera
+            // shows (eased); a flight: the world around the player.
+            let scenery = frame.camera.filter(|c| c.scenery).and_then(|cam| {
+                let c2w = camera_to_world(&cam);
+                let target = scene_extent(frame, &c2w)?;
+                Some((c2w, target))
+            });
+            match (scenery, self.fit) {
+                (Some((_, target)), None) => {
+                    self.fit = Some(target);
+                    log(
+                        &format!(
+                            "scenery model: centre {:.0} {:.0}, radius {:.0} m, heights {:.0}..{:.0} m",
+                            target.centre[0],
+                            target.centre[1],
+                            target.radius,
+                            target.heights[0],
+                            target.heights[1]
+                        ),
+                        true,
+                    );
+                }
+                (Some((_, target)), Some(fit)) => self.fit = Some(ease(fit, target)),
+                (None, Some(_)) => {
+                    self.fit = None;
+                    log("scenery model off", true);
+                }
+                (None, None) => {}
+            }
             for (eye, pose) in poses.iter().enumerate() {
                 let seated = seat.seated(pose);
-                renderer.render_stereo(
-                    frame,
-                    &views[back][eye],
-                    self.eye_size,
-                    &stereo_eye(&seated),
-                );
+                let matrices = match (scenery, &self.fit) {
+                    (Some((c2w, _)), Some(fit)) => scenery_eye(&seated, &c2w, fit),
+                    _ => stereo_eye(&seated),
+                };
+                renderer.render_stereo(frame, &views[back][eye], self.eye_size, &matrices);
             }
             self.eye_serial += 1;
             self.source.lock().unwrap_or_else(|e| e.into_inner()).world =
@@ -831,6 +1000,23 @@ mod real {
             if self.described.elapsed() >= Duration::from_secs(10) {
                 self.described = Instant::now();
                 log(&describe(frame), true);
+                if let (Some(fit), Some(cam)) = (self.fit, frame.camera) {
+                    let p = cam.world[3];
+                    log(
+                        &format!(
+                            "scenery: centre {:.0} {:.0}, radius {:.0} m, heights {:.0}..{:.0} m; camera at {:.0} {:.0} {:.0}",
+                            fit.centre[0],
+                            fit.centre[1],
+                            fit.radius,
+                            fit.heights[0],
+                            fit.heights[1],
+                            p[0],
+                            p[1],
+                            p[2]
+                        ),
+                        true,
+                    );
+                }
             }
         }
 
@@ -1525,6 +1711,48 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         /// The eye matrices: the world straight ahead lands in the middle
         /// of a symmetric eye with reversed depth; the N64 screen lands on
         /// the panel, its top-left corner up and to the left.
+        #[test]
+        fn scenery_model_sits_on_the_table() {
+            let fov = std::f32::consts::FRAC_PI_4;
+            let pose = pw64_xr::EyePose {
+                orientation: [0.0, 0.0, 0.0, 1.0],
+                position: [0.0; 3],
+                fov: [-fov, fov, fov, -fov],
+            };
+            // The game camera at (1000, 2000), 300 m up, looking north (+y).
+            let cam = pw64_gfx::GameCamera {
+                world: [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [1000.0, 2000.0, 300.0, 1.0],
+                ],
+                scenery: true,
+            };
+            let fit = super::Fit {
+                centre: [1000.0, 2100.0],
+                radius: 450.0,
+                heights: [0.0; 2],
+            };
+            let eye = super::scenery_eye(&pose, &super::camera_to_world(&cam), &fit);
+            let apply = |m: &super::Mat4, p: [f32; 4]| -> [f32; 4] {
+                [0, 1, 2, 3].map(|j| (0..4).map(|k| p[k] * m[k][j]).sum())
+            };
+            let near = |a: f32, b: f32| (a - b).abs() < 1e-4;
+            // 100 m ahead of the camera = the table's centre, 300 m (0.3 m
+            // on the table) above it.
+            let c = apply(&eye.world, [0.0, 0.0, -100.0, 1.0]);
+            let at = super::TABLE_AT;
+            assert!(near(c[3], -at[2]), "{c:?}");
+            assert!(near(c[0] / c[3], 0.0));
+            assert!(near(c[1] / c[3], (at[1] + 0.3) / -at[2]));
+            // Further north is further away; east is to the right.
+            let north = apply(&eye.world, [0.0, 0.0, -200.0, 1.0]);
+            assert!(north[3] > c[3]);
+            let east = apply(&eye.world, [100.0, 0.0, -100.0, 1.0]);
+            assert!(east[0] / east[3] > 0.0);
+        }
+
         #[test]
         fn stereo_eye_matrices() {
             let fov = std::f32::consts::FRAC_PI_4;

@@ -137,6 +137,7 @@ fn frame(
         textures: images.into_iter().collect(),
         chains: HashMap::new(),
         views: Vec::new(),
+        camera: None,
     }
 }
 
