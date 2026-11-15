@@ -173,6 +173,12 @@ menus and everything else stay on the panel.
   camera's pitch) distant water seeming to rise when climbing. Now z/w is
   taken for the point straight ahead at the vertex's distance. Reported by
   the user as a white line "like a wake" at sea, "a layer of fog" over land.
+  **Did not fix it** (headset test 2026-11-15): the line and the rising
+  distant water are still there, so the cause is something else (the
+  radial fog stays: it is right for VR anyway). Next: `describe` in vr.rs
+  logs the world's draws every 10 s in flight (per run of one world view:
+  draw count, depth state, distance and height range in camera space) to
+  find which geometry it is, plus a headset screenshot.
 - No border bars in VR (`pw64_fill_frame` set with the world tag): they
   floated in the world as black bars.
 - **Rocket belt first person:** in VR the R button switches between the chase

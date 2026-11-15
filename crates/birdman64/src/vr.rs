@@ -456,6 +456,54 @@ mod real {
     /// Nearest distance drawn, in metres (the game's own near plane is 1).
     const NEAR_M: f32 = 0.1;
 
+    /// One line about a stereo frame's world: its draws in order, as runs
+    /// of one world view (`v<n>`), with per run the draw count, the depth
+    /// state (`t` test, `w` write) and, in the game camera's space (metres,
+    /// y up, -z ahead), the nearest and farthest vertex and the lowest and
+    /// highest one relative to the camera; `|` = a depth clear between.
+    pub(super) fn describe(frame: &pw64_gfx::Frame) -> String {
+        let mut out = String::from("world:");
+        let mut i = 0;
+        let draws = &frame.draws;
+        while i < draws.len() {
+            let d = &draws[i];
+            if d.view == 0 {
+                if d.pipeline.shader.mode == pw64_gfx::frame::ShaderMode::DepthClear {
+                    out += " |";
+                }
+                i += 1;
+                continue;
+            }
+            let (view, depth) = (d.view, d.pipeline.depth);
+            let mut n = 0;
+            let (mut near, mut far, mut low, mut high) = (f32::MAX, 0f32, f32::MAX, f32::MIN);
+            while i < draws.len() && draws[i].view == view && draws[i].pipeline.depth == depth {
+                let d = &draws[i];
+                let m = &frame.views[view as usize - 1];
+                let first = d.first_vertex as usize;
+                for v in &frame.vertices[first..first + d.vertex_count as usize] {
+                    let c: [f32; 4] =
+                        [0, 1, 2, 3].map(|j| (0..4).map(|k| v.pos[k] * m[k][j]).sum());
+                    if c[3].abs() < 1e-9 {
+                        continue;
+                    }
+                    let p = [c[0] / c[3], c[1] / c[3], c[2] / c[3]];
+                    let r = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
+                    (near, far) = (near.min(r), far.max(r));
+                    (low, high) = (low.min(p[1]), high.max(p[1]));
+                }
+                n += 1;
+                i += 1;
+            }
+            out += &format!(
+                " v{view}x{n}{}{} r {near:.0}..{far:.0} y {low:.0}..{high:.0};",
+                if depth.test { "t" } else { "" },
+                if depth.write { "w" } else { "" },
+            );
+        }
+        out
+    }
+
     /// The matrices one eye's picture is drawn with
     /// (`Renderer::render_stereo`). The game's camera sits at the seated
     /// origin (where the head was when the session started), looking the
@@ -510,6 +558,8 @@ mod real {
         stereo: bool,
         /// Eye picture sets drawn so far.
         eye_serial: u64,
+        /// When the world was last described in the log ([`describe`]).
+        described: Instant,
         /// How long the last eye picture sets took from the game's cue to
         /// being published, in microseconds (a ring, for [`lead`]).
         cue_to_eyes: [u32; 256],
@@ -575,6 +625,7 @@ mod real {
                     eyes: None,
                     stereo: false,
                     eye_serial: 0,
+                    described: Instant::now(),
                     cue_to_eyes: [0; 256],
                     probe: None,
                 },
@@ -736,6 +787,7 @@ mod real {
             }
             if !self.stereo {
                 self.stereo = true;
+                self.described = Instant::now() - Duration::from_secs(60);
                 log(
                     &format!(
                         "stereo world on: {} draws, {} world views, eye {:?}",
@@ -745,6 +797,13 @@ mod real {
                     ),
                     true,
                 );
+            }
+            // What the world is made of, every 10 s in flight (vr.log and
+            // logcat): for tracking down what a strange shape in the
+            // headset is.
+            if self.described.elapsed() >= Duration::from_secs(10) {
+                self.described = Instant::now();
+                log(&describe(frame), true);
             }
         }
 
