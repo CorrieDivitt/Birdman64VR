@@ -54,6 +54,11 @@
 +    uvFontColor(0xFF, 0xFF, 0xFF, 0xFF);
 +    uvFontPrintStr16(PW64_HINT_X, PW64_HINT_Y, sPw64HintStr, 100, 0xFFE);
 +}
+@@ -93,1 +145,4 @@
+-        var_fs0 += D_80378CE0->unk23C * D_8034F854;
++        // PW64 VR: the scene turns around the island at a quarter of the
++        // speed in the headset (vr.rs follows this camera, level).
++        var_fs0 += D_80378CE0->unk23C * D_8034F854 * ((pw64_widescreen_aspect < 0.0f) ? 0.25f : 1.0f);
 @@ -98,1 +150,4 @@
          var_s1 = func_80343550();
 +        // PW64 split-screen: a settings-row switch made at the title applies now.
@@ -92,12 +97,11 @@
 @@ -487,1 +501,2 @@
          menuRender();
 +        pw64_title_hint();
-@@ -502,1 +516,8 @@
-     uvChan_80204B34(camera->unk22C, &camera->unk108);
-+    // PW64 VR: where this path ends (the camera once it has dropped in),
-+    // for the headset's fixed view of the title (pw64_widescreen.c).
-+    extern Mtx4F pw64_vr_title_end;
-+    extern int pw64_vr_title_end_set;
-+    spathUpdate(&pw64_vr_title_end, D_80378CE0->unk14, 100.0f, 1.0f);
-+    uvMat4Mul(&pw64_vr_title_end, &pw64_vr_title_end, &D_80378CE0->unk1EC);
-+    pw64_vr_title_end_set = 1;
+@@ -498,1 +515,7 @@
+     f0 = ((1.0 - ((4.65f - D_80378CE0->unk22C) / 4.65f)) * 100.0);
++    // PW64 VR: in the headset only the last 30% of the drop, in the same
++    // time (about three times slower), and the title's phase for the log.
++    if (pw64_widescreen_aspect < 0.0f) {
++        f0 = 100.0f - (100.0f - f0) * 0.3f;
++    }
++    pw64_vr_title_phase = D_80378CE0->unk28;

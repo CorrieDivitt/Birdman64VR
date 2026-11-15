@@ -106,6 +106,9 @@ int pw64_vr_diorama(const void* chan);
 /* Birdman64VR, same file: 1 between the world tags of a world view shown
  * in stereo (flight or diorama). */
 extern int pw64_vr_stereo_view;
+/* Birdman64VR, same file: the title screen's phase (its unk28, 1..8;
+ * title_screen.c.patch), sent to the renderer for the log. */
+extern int pw64_vr_title_phase;
 /* Fill screen (renderer.md "Fill screen"), same file: 0 = off (set by Rust
  * before boot), the per-frame "a filled world view was drawn" flag (reset
  * at the top of uvGfxBegin, graphics.c.patch) and the vertical

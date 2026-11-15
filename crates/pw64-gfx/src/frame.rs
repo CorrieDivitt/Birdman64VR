@@ -284,20 +284,26 @@ pub struct Diorama {
     pub camera: [[f32; 3]; 4],
     /// The island's bounds: min x, y, z, max x, y, z.
     pub bounds: [f32; 6],
-    /// On the title: the camera's world matrix at the end of its drop
-    /// (same layout as `camera`). The headset's view stays there, at full
-    /// size, instead of showing a model.
-    pub fixed_view: Option<[[f32; 3]; 4]>,
+    /// The title screen: the headset follows the game camera (level,
+    /// a little behind it) at full size instead of showing a model; the
+    /// game's title moves that camera slower in VR.
+    pub title: bool,
+    /// The game state and, on the title, its phase (-1 otherwise): for
+    /// the log.
+    pub state: i32,
+    pub title_phase: i32,
 }
 
 impl Diorama {
-    /// From the 18 values in tag order.
-    pub fn from_values(v: &[f32; 18]) -> Self {
+    /// From the 21 values in tag order.
+    pub fn from_values(v: &[f32; 21]) -> Self {
         let r = |i: usize| [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
         Self {
             camera: [r(0), r(1), r(2), r(3)],
             bounds: [v[12], v[13], v[14], v[15], v[16], v[17]],
-            fixed_view: None,
+            title: v[18] != 0.0,
+            state: v[19] as i32,
+            title_phase: v[20] as i32,
         }
     }
 
