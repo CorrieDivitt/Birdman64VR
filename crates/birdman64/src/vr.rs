@@ -512,7 +512,7 @@ mod real {
         eye_serial: u64,
         /// How long the last eye picture sets took from the game's cue to
         /// being published, in microseconds (a ring, for [`lead`]).
-        cue_to_eyes: [u32; 64],
+        cue_to_eyes: [u32; 256],
         /// The window thread's probe bar (`probe_on`).
         probe: Option<Bar>,
     }
@@ -575,7 +575,7 @@ mod real {
                     eyes: None,
                     stereo: false,
                     eye_serial: 0,
-                    cue_to_eyes: [0; 64],
+                    cue_to_eyes: [0; 256],
                     probe: None,
                 },
             ))
@@ -667,7 +667,7 @@ mod real {
                 if self.stereo {
                     self.stereo = false;
                     STEREO_LEAD_US.store(0, Ordering::Relaxed);
-                    self.cue_to_eyes = [0; 64];
+                    self.cue_to_eyes = [0; 256];
                     self.source.lock().unwrap_or_else(|e| e.into_inner()).world = None;
                     log("stereo world off", true);
                 }
@@ -717,16 +717,21 @@ mod real {
             self.eye_serial += 1;
             self.source.lock().unwrap_or_else(|e| e.into_inner()).world =
                 Some((back, poses, self.eye_serial));
-            // The lead for the next cues: the slowest of the last 64 sets
-            // (under a second) plus a millisecond, at least the panel's 6 ms
-            // and at most a frame less a millisecond. Hitches (level loads)
+            // The lead for the next cues: the slowest of the last 256 sets
+            // (a few seconds) plus a millisecond, in whole milliseconds, at
+            // least the panel's 6 ms and at most a frame less a millisecond.
+            // Whole steps over a long window, so it rarely changes: every
+            // change moves the cue, i.e. makes one game frame's time step
+            // differ from the time it is shown for. Hitches (level loads)
             // hit the cap and fall out of the ring again.
             if let Some(cued) = *CUED_AT.lock().unwrap_or_else(|e| e.into_inner()) {
                 let us = cued.elapsed().as_micros().min(u32::MAX as u128) as u32;
-                self.cue_to_eyes[(self.eye_serial % 64) as usize] = us;
+                self.cue_to_eyes[(self.eye_serial % 256) as usize] = us;
                 let worst = self.cue_to_eyes.iter().copied().max().unwrap_or(0);
                 let period_us = 1_000_000_000 / HEADSET_MHZ.load(Ordering::Relaxed).max(1);
-                let lead = (worst + 1000).clamp(6000, period_us.saturating_sub(1000).max(6000));
+                let lead = (worst + 1000)
+                    .next_multiple_of(1000)
+                    .clamp(6000, period_us.saturating_sub(1000).max(6000));
                 STEREO_LEAD_US.store(lead, Ordering::Relaxed);
             }
             if !self.stereo {

@@ -14,6 +14,7 @@
  */
 #include <ultra64.h>
 #include <uv_graphics.h>
+#include "app/game.h"
 
 /* Output aspect w/h, 0 = 4:3 (off). Set by Rust before boot
  * (pw64_game::set_widescreen_aspect).
@@ -24,6 +25,16 @@
  * camera's in both directions: a headset sees far more than the monitor
  * picture, and the player looks around in it. */
 float pw64_widescreen_aspect = 0.0f;
+
+/* VR: the world goes to the headset in stereo only while the player flies
+ * a test (pause included). Everywhere else (title fly-over, menus with a
+ * 3D background, results, replays) the camera moves on its own, swooping
+ * and cutting, which is disorienting when it is the player's head: those
+ * stay a flat picture on the VR panel, untagged and culled as usual. */
+static int pw64_vr_flight(void) {
+    return pw64_widescreen_aspect < 0.0f && D_80362690 != NULL &&
+           D_80362690->state == GAME_STATE_TEST_UPDATE;
+}
 
 /* Fill screen, 0 = off. Set by Rust before boot
  * (pw64_game::set_fill_screen). */
@@ -65,8 +76,8 @@ float pw64_widescreen_xscale(const void* chan) {
     float aspect = pw64_widescreen_aspect;
     float k;
     if (aspect < 0.0f) {
-        /* VR: the main world view (the same test as below). */
-        if (c->viewX0 > 16 || c->viewX1 < SCREEN_WIDTH - 16 ||
+        /* VR: the main world view (the same test as below), in flight. */
+        if (!pw64_vr_flight() || c->viewX0 > 16 || c->viewX1 < SCREEN_WIDTH - 16 ||
             c->viewX1 <= c->viewX0 || (!(c->unk0 & 2) && c->unk2 == 0xFFFF)) {
             return 1.0f;
         }

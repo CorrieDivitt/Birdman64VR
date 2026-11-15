@@ -156,6 +156,19 @@ menus and everything else stay on the panel.
   terrain footprint = a square around the camera out to the far plane.
   `CULL_SCALE` still widens the frustum corners but no longer decides
   anything.
+- **Stereo only in flight** (`pw64_vr_flight`: `GAME_STATE_TEST_UPDATE`, pause
+  included). Title fly-over, menus with 3D backgrounds, results and replays
+  stay flat on the panel: their cameras swoop and cut on their own, which is
+  disorienting as the player's head (reported on the title sequence).
+- Second headset log: repeats down from 25-30% to 1-3% of frames, lead
+  settling around 7 ms; the lead is now quantised to whole ms over 256
+  frames so the cue (the game's time step) does not wander. The game itself
+  runs 70-71 of 72 fps in flight (a 28 ms gap about once a second): open.
+- Open, reported in the headset: far out at sea a long white line, and the
+  distant water seeming to rise with altitude; both keep their distance and
+  orientation to the camera. Probably the environment models (sea disc and
+  sky dome follow the camera in x/y, `_uvEnvDraw` flag 8); needs a
+  screenshot before changing anything.
 - No border bars in VR (`pw64_fill_frame` set with the world tag): they
   floated in the world as black bars.
 - **Rocket belt first person:** in VR the R button switches between the chase
