@@ -526,6 +526,12 @@ mod real {
     /// session started or the player last recentred), looking the same
     /// way; the head moves around it.
     pub(super) fn stereo_eye(pose: &EyePose) -> pw64_gfx::StereoEye {
+        stereo_eye_panel_at(pose, 0.0)
+    }
+
+    /// [`stereo_eye`] with the panel (the N64 screen's 2D draws) `up`
+    /// metres higher than usual.
+    fn stereo_eye_panel_at(pose: &EyePose, up: f32) -> pw64_gfx::StereoEye {
         // pw64-xr's column-vector matrices are stored column-major, which
         // is pw64-gfx's row-vector layout: the same arrays, multiplied in
         // the opposite order.
@@ -545,7 +551,7 @@ mod real {
             [0.0, 0.0, 0.0, 0.0],
             [
                 -0.5 * pw64_gfx::N64_WIDTH * s,
-                0.5 * pw64_gfx::N64_HEIGHT * s,
+                0.5 * pw64_gfx::N64_HEIGHT * s + up,
                 -PANEL_DISTANCE_M,
                 1.0,
             ],
@@ -567,11 +573,15 @@ mod real {
 
     /// The island model (outside flight, [`pw64_gfx::Diorama`]): how wide
     /// it is, in metres.
-    const MODEL_DIAMETER_M: f32 = 3.0;
+    const MODEL_DIAMETER_M: f32 = 1.6;
     /// Where its centre (the island's middle at sea level) sits in the
-    /// seated space, in metres: ahead, below eye level, a little behind
-    /// the panel (2.5 m) so the menus float in front of it.
-    const MODEL_CENTRE_M: [f32; 3] = [0.0, -1.1, -4.2];
+    /// seated space, in metres: on a table below the menus, about where a
+    /// desk would be (from about 0.6 to 2.2 m ahead). The first try, 3 m
+    /// wide behind the panel, was hidden by the level select's big menus.
+    const MODEL_CENTRE_M: [f32; 3] = [0.0, -0.6, -1.4];
+    /// How much higher the menus float while the model is shown, so they
+    /// clear it: their lower edge about 13 degrees below eye level.
+    const MODEL_PANEL_UP_M: f32 = 0.5;
     /// Around the model: a dim, slightly blue room.
     const MODEL_BACKGROUND: [f64; 3] = [0.012, 0.016, 0.026];
 
@@ -585,7 +595,7 @@ mod real {
     /// leaves out the far sea and the sky dome.
     pub(super) fn diorama_eye(pose: &EyePose, d: &pw64_gfx::Diorama) -> pw64_gfx::StereoEye {
         use pw64_gfx::matrix::mul;
-        let mut eye = stereo_eye(pose);
+        let mut eye = stereo_eye_panel_at(pose, MODEL_PANEL_UP_M);
         let [x0, y0, _, x1, y1, z1] = d.bounds;
         let radius = 0.5 * (x1 - x0).max(y1 - y0).max(1.0);
         let top = z1.max(0.0) + 0.15 * radius;

@@ -36,19 +36,80 @@ int pw64_vr_flight(void) {
            D_80362690->state == GAME_STATE_TEST_UPDATE;
 }
 
-/* VR outside a test's flight: a full-width world view with terrain is
- * shown as a small model of the island in front of the player (pw64-gfx
+/* VR outside a test's flight: a full-width world view of an island is
+ * shown as a small model of it in front of the player (pw64-gfx
  * `Diorama`, birdman64 vr.rs): the game's camera can swoop and cut as it
- * likes, the model stays put. Culled by distance only like flight, with
- * the far plane reaching the whole terrain (pw64_visibility_far), so the
- * whole island is there whatever the camera looks at. */
+ * likes, the model stays put. The island is the view's terrain or, on the
+ * title screen (no terrain, the island is one model at the origin), that
+ * model. Culled by distance only like flight; with terrain the far plane
+ * reaches all of it (pw64_visibility_far), so the whole island is there
+ * whatever the camera looks at. */
+
+/* The title's island (title_screen.c func_803427FC). */
+#define PW64_TITLE_ISLAND 0x028 /* MODEL_CRESCENT_ISLAND_LOW_POLY */
+
+/* Bounds (min xyz, max xyz) of a model's vertices, measured once per
+ * loaded model. 0 if it is not loaded. */
+static int pw64_model_bounds(int id, float out[6]) {
+    static const ParsedUVMD* measured = NULL;
+    static float bounds[6];
+    const ParsedUVMD* m;
+    int i, k;
+
+    if (gGfxUnkPtrs == NULL || (m = gGfxUnkPtrs->models[id]) == NULL || m->vtxCount == 0) {
+        return 0;
+    }
+    if (m != measured) {
+        for (k = 0; k < 3; k++) {
+            bounds[k] = bounds[k + 3] = m->vtxTable[0].v.ob[k];
+        }
+        for (i = 1; i < m->vtxCount; i++) {
+            for (k = 0; k < 3; k++) {
+                float v = m->vtxTable[i].v.ob[k];
+                if (v < bounds[k]) {
+                    bounds[k] = v;
+                }
+                if (v > bounds[k + 3]) {
+                    bounds[k + 3] = v;
+                }
+            }
+        }
+        measured = m;
+    }
+    for (k = 0; k < 6; k++) {
+        out[k] = bounds[k];
+    }
+    return 1;
+}
+
+/* The island model's bounds for channel `c` (see above); 0: none. */
+static int pw64_diorama_bounds(const UnkStruct_80204D94* c, float out[6]) {
+    const ParsedUVTR* t;
+
+    if (gGfxUnkPtrs == NULL) {
+        return 0;
+    }
+    if ((c->unk0 & 2) && c->unk4 < LEVEL_TERRA_COUNT && (t = gGfxUnkPtrs->terras[c->unk4]) != NULL) {
+        out[0] = t->unk0.unk0;
+        out[1] = t->unk0.unk4;
+        out[2] = t->unk0.unk8;
+        out[3] = t->unk0.unkC;
+        out[4] = t->unk0.unk10;
+        out[5] = t->unk0.unk14;
+        return 1;
+    }
+    if (D_80362690 != NULL && D_80362690->state == GAME_STATE_TITLE && c->unk2 != 0xFFFF) {
+        return pw64_model_bounds(PW64_TITLE_ISLAND, out);
+    }
+    return 0;
+}
+
 int pw64_vr_diorama(const void* chan) {
     const UnkStruct_80204D94* c = chan;
+    float b[6];
     return pw64_widescreen_aspect < 0.0f &&
            (D_80362690 == NULL || D_80362690->state != GAME_STATE_TEST_UPDATE) &&
-           (c->unk0 & 2) && c->unk4 < LEVEL_TERRA_COUNT && gGfxUnkPtrs != NULL &&
-           gGfxUnkPtrs->terras[c->unk4] != NULL && c->viewX0 <= 16 &&
-           c->viewX1 >= SCREEN_WIDTH - 16;
+           c->viewX0 <= 16 && c->viewX1 >= SCREEN_WIDTH - 16 && pw64_diorama_bounds(c, b);
 }
 
 int pw64_vr_stereo_view = 0;
@@ -59,9 +120,8 @@ int pw64_vr_stereo_view = 0;
 
 /* The diorama's data for the renderer, right after the world tag: the
  * game camera's world matrix (rows right, forward, up, position; xyz) and
- * the terrain's bounds (min xyz, max xyz). 18 values. */
+ * the island's bounds (min xyz, max xyz). 18 values. */
 static void pw64_diorama_tag(const UnkStruct_80204D94* c) {
-    const ParsedUVTR* t = gGfxUnkPtrs->terras[c->unk4];
     float v[18];
     int i, k;
     for (i = 0; i < 4; i++) {
@@ -69,12 +129,9 @@ static void pw64_diorama_tag(const UnkStruct_80204D94* c) {
             v[i * 3 + k] = c->unk110.m[i][k];
         }
     }
-    v[12] = t->unk0.unk0;
-    v[13] = t->unk0.unk4;
-    v[14] = t->unk0.unk8;
-    v[15] = t->unk0.unkC;
-    v[16] = t->unk0.unk10;
-    v[17] = t->unk0.unk14;
+    if (!pw64_diorama_bounds(c, &v[12])) {
+        return;
+    }
     for (i = 0; i < 18; i++) {
         union {
             float f;
