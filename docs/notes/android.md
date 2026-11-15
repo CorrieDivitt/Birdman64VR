@@ -120,7 +120,7 @@ low 4 GB doesn't matter. The fixed-window modes (`strict`/`alias`) still compile
   16 KB-aligned) → `target/android-apk/birdman64.apk`, ~21 MB, debug-signed. It has
   the game C linked in, so it is for development only.
 - `adb install -r` it, start once, `adb push <rom>.z64
-  /sdcard/Android/data/app.birdman64/files/rom/`, restart; `adb logcat -s birdman64`.
+  /sdcard/Android/data/app.birdman64vr/files/rom/`, restart; `adb logcat -s birdman64`.
 - Test order: platform test binaries via `adb push` + `adb shell` first, then boot to
   the title, then touch controls, then pad buttons, then home → back (audio stops
   and resumes, `[audio] stream paused/resumed` in logcat).

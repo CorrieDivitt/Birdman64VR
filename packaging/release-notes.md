@@ -30,7 +30,7 @@ main since 1.5.1. Please test it! If anything is off, attach the controller log
 **Android (experimental):** sideload `Birdman64-android-arm64.apk` (64-bit phones,
 Android 8+) and start it. The first launch builds the game on the phone (internet
 needed once, about 240 MB installed), then tap **Choose a game file** and pick your
-ROM. Prefer copying the file yourself? `Android/data/app.birdman64/files/rom/`
+ROM. Prefer copying the file yourself? `Android/data/app.birdman64vr/files/rom/`
 still works too. Later APKs install over it and keep your saves.
 
 **iPhone / iPad (test builds):** not attached here and no ready-made

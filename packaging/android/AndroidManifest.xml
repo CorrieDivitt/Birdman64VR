@@ -3,12 +3,15 @@
   Birdman64 for Android: a NativeActivity (with one small Java subclass,
   PwActivity: the SAF ROM picker result forwarding) that loads
   libbirdman64.so and calls its android_main. build-apk.sh packages it;
-  docs/notes/android.md has the details. The package id is a placeholder
-  until the first release. versionName and versionCode come from the
+  docs/notes/android.md has the details. Birdman64VR: the package id is
+  app.birdman64vr so the fork installs next to Birdman64; the Java class
+  keeps its app.birdman64 package (the JNI names in rom_picker.rs and
+  save_picker.rs follow the class, not the package id). versionName and
+  versionCode come from the
   Cargo.toml version (build-apk.sh).
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="app.birdman64">
+    package="app.birdman64vr">
 
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
 
@@ -27,7 +30,7 @@
          (ANativeWindow_setFrameRate). Hiding the system bars is done in code. -->
     <!-- hasCode is true (the default): PwActivity is real Java. -->
     <application
-        android:label="Birdman64"
+        android:label="Birdman64VR"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:hasFragileUserData="true"
