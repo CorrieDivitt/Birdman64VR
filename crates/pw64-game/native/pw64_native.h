@@ -95,6 +95,9 @@ unsigned int pw64_rsp(void);
 extern float pw64_widescreen_aspect;
 float pw64_widescreen_xscale(const void* chan);
 void pw64_widescreen_tag(const void* chan, int on);
+/* Birdman64VR (same file; VR = pw64_widescreen_aspect < 0): 1 while the
+ * world is shown in stereo, i.e. in VR during a test's flight. */
+int pw64_vr_flight(void);
 /* Fill screen (renderer.md "Fill screen"), same file: 0 = off (set by Rust
  * before boot), the per-frame "a filled world view was drawn" flag (reset
  * at the top of uvGfxBegin, graphics.c.patch) and the vertical

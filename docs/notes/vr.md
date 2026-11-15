@@ -179,6 +179,17 @@ menus and everything else stay on the panel.
   logs the world's draws every 10 s in flight (per run of one world view:
   draw count, depth state, distance and height range in camera space) to
   find which geometry it is, plus a headset screenshot.
+  **Found (2026-11-15):** it is `env_802E0CF0`'s haze band (renderer.md
+  "Level polish"): a fog-coloured card across the game camera's view at
+  0.875..1 × far, where the far plane cuts the camera-following sea model,
+  blending that cut into the sky on a monitor. The user confirmed it is in
+  the flat game too, always at the sea/sky line. In the eye pass there is
+  no far plane: the sea model (`[vr] world:` shows the environment draws
+  out to 17.7 km) went on behind the card, so from altitude the player saw
+  past it, and the sea's far edge read as water rising. In VR flight the
+  band is now a ring around the camera on the sea (`pw64_vr_haze_ring`,
+  environment.c.patch): clear at 0.875 far, fog-coloured from far out to
+  30 km (s16 vertices), past the sea model's edge.
 - No border bars in VR (`pw64_fill_frame` set with the world tag): they
   floated in the world as black bars.
 - **Rocket belt first person:** in VR the R button switches between the chase

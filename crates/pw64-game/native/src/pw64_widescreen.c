@@ -31,7 +31,7 @@ float pw64_widescreen_aspect = 0.0f;
  * 3D background, results, replays) the camera moves on its own, swooping
  * and cutting, which is disorienting when it is the player's head: those
  * stay a flat picture on the VR panel, untagged and culled as usual. */
-static int pw64_vr_flight(void) {
+int pw64_vr_flight(void) {
     return pw64_widescreen_aspect < 0.0f && D_80362690 != NULL &&
            D_80362690->state == GAME_STATE_TEST_UPDATE;
 }

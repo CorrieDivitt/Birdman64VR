@@ -8,7 +8,59 @@
  
  typedef struct {
      Vec3F unk0;
-@@ -93,10 +94,14 @@ s32 env_802E0CF0(void) {
+@@ -57,6 +58,51 @@
+ void env_802E1C1C(s32);
+ void env_802E23E0(void);
+ void env_802E2504(void);
++
++// PW64 VR: env_802E0CF0's haze band is a card across the view at the far
++// plane, where the far plane cuts the camera-following sea: on a monitor it
++// blends that cut into the sky. In the headset there is no far-plane cut
++// and the player looks all around: the card stood in the sea at a fixed
++// distance and the sea went on behind it. This is the same band as a ring
++// around the camera on the sea (z = 0): clear at 0.875 far, fog-coloured
++// from far out to 30 km, past the sea model's edge, so the sea fades into
++// the haze in every direction. Vertices are s16, hence the 30 km.
++static void pw64_vr_haze_ring(f32 cx, f32 cy, f32 far, u8 r, u8 g, u8 b) {
++    Mtx4F m;
++    f32 radius[3];
++    f32 c0, s0, c1, s1;
++    s32 i, k;
++
++    radius[0] = 0.875f * far;
++    radius[1] = far;
++    radius[2] = 30000.0f;
++    if (radius[1] >= radius[2]) {
++        return;
++    }
++    uvMat4SetIdentity(&m);
++    m.m[3][0] = cx;
++    m.m[3][1] = cy;
++    uvGfxStatePush();
++    uvGfxSetFlags(GFX_STATE_XLU | GFX_STATE_AA | GFX_STATE_GOURAUD | GFX_STATE_TEXTURE_NONE);
++    uvGfxClearFlags(GFX_STATE_DECAL | GFX_STATE_ZBUFFER);
++    uvGfx_802236CC(&m);
++    for (i = 0; i < 32; i++) {
++        c0 = uvCosF(i * (6.2831855f / 32.0f));
++        s0 = uvSinF(i * (6.2831855f / 32.0f));
++        c1 = uvCosF((i + 1) * (6.2831855f / 32.0f));
++        s1 = uvSinF((i + 1) * (6.2831855f / 32.0f));
++        for (k = 0; k < 2; k++) {
++            uvVtxBeginPoly();
++            uvVtx(c0 * radius[k], s0 * radius[k], 0, 0, 0, r, g, b, (k == 0) ? 0 : 0xFF);
++            uvVtx(c1 * radius[k], s1 * radius[k], 0, 0, 0, r, g, b, (k == 0) ? 0 : 0xFF);
++            uvVtx(c1 * radius[k + 1], s1 * radius[k + 1], 0, 0, 0, r, g, b, 0xFF);
++            uvVtx(c0 * radius[k + 1], s0 * radius[k + 1], 0, 0, 0, r, g, b, 0xFF);
++            uvVtxEndPoly();
++        }
++    }
++    uvGfxMtxViewPop();
++    uvGfxStatePop();
++}
+ 
+ s32 env_802E0CF0(void) {
+     f32 pad_sp174;
+@@ -93,10 +139,21 @@ s32 env_802E0CF0(void) {
      u8 fogA;
      f32 sp3C;
      f32 sp38;
@@ -21,9 +73,16 @@
 +    // that's the channel's extended one this frame draws with (chan.c.patch).
 +    clipFar = pw64_infinite_view_distance ? D_80261730[camera->unk22C].unk1FC : camera->clipFar;
      uvMat4Copy(&sp68, &camera->unk108);
++    // PW64 VR: the band as a ring around the camera (pw64_vr_haze_ring).
++    if (pw64_vr_flight()) {
++        uvEnvGetProps(D_80362690->envId, ENV_PROP_FOG_COLOR(&fogR, &fogG, &fogB, &fogA), ENV_PROP_END);
++        pw64_vr_haze_ring(sp68.m[3][0], sp68.m[3][1], clipFar, fogR, fogG, fogB);
++        uvEnvProps(D_80362690->envId, ENV_PROP_FOG_FACTOR(0.996f), ENV_PROP_END);
++        return 0;
++    }
      sp154.x = sp68.m[1][0];
      sp154.y = sp68.m[1][1];
-@@ -106,16 +111,16 @@ s32 env_802E0CF0(void) {
+@@ -106,16 +163,16 @@ s32 env_802E0CF0(void) {
      sp130.z = 0.0f;
      uvVec3Cross(&sp13C, &sp130, &sp154);
      uvVec3Normal(&sp13C, &sp13C);
@@ -47,7 +106,7 @@
          uvEnvProps(D_80362690->envId, ENV_PROP_FOG_FACTOR(0.996f), ENV_PROP_END);
          return 0;
      }
-@@ -127,12 +132,12 @@ s32 env_802E0CF0(void) {
+@@ -127,12 +184,12 @@ s32 env_802E0CF0(void) {
      }
      sp16C = (sp54 * sp60) + spF4;
      sp170 = (sp54 * sp5C) + spF8;
@@ -66,7 +125,7 @@
      if (var_fa1 == spFC) {
          sp54 = 0.0f;
      } else {
-@@ -140,7 +145,7 @@ s32 env_802E0CF0(void) {
+@@ -140,7 +197,7 @@ s32 env_802E0CF0(void) {
      }
      var_fa1 = 1.0f / camera->unk20;
      var_ft4 = (camera->clipX1 * (var_fa1));
@@ -75,7 +134,7 @@
      sp148 = sp154.y * sp38;
      sp14C = -sp154.x * sp38;
      sp38 = sp68.m[3][2] / 15.0f;
-@@ -313,7 +314,9 @@ void env_802E14E8(Vec3F* arg0, f32 arg1, f32 arg2, f32 arg3, f32 arg4) {
+@@ -313,7 +366,9 @@ void env_802E14E8(Vec3F* arg0, f32 arg1, f32 arg2, f32 arg3, f32 arg4) {
  void env_802E15F0(void) {
      f32 var_fv1;
  
@@ -86,7 +145,7 @@
      if ((D_80359D80.unk20 < D_80359D80.unk10) && (var_fv1 > 0.0f)) {
          var_fv1 = -var_fv1;
      }
-@@ -321,7 +324,7 @@ void env_802E15F0(void) {
+@@ -321,7 +376,7 @@ void env_802E15F0(void) {
          var_fv1 = -var_fv1;
      }
      D_80359D80.unk10 += var_fv1;
