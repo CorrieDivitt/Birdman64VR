@@ -264,6 +264,8 @@ void pw64_vr_cannon_trail(int on, const void* pilot_, float dt) {
     static int ready = 0;
     static int head = 0;
     static float next = 0.0f;
+    static float prev[3];
+    static int had = 0;
     const Mtx4F* pilot = pilot_;
     Mtx4F m;
     float a;
@@ -276,11 +278,18 @@ void pw64_vr_cannon_trail(int on, const void* pilot_, float dt) {
         ready = 1;
     }
     if (on) {
+        /* Possibly several a frame: spread along the way since the last. */
+        if (!had) {
+            for (i = 0; i < 3; i++) {
+                prev[i] = pilot->m[3][i];
+            }
+        }
         next -= dt;
-        if (next <= 0.0f) {
+        while (next <= 0.0f) {
+            float u = (dt > 0.0f) ? 1.0f + next / dt : 1.0f;
             next += PW64_VR_TRAIL_EVERY_S;
-            if (next < 0.0f) {
-                next = 0.0f;
+            if (u < 0.0f) {
+                u = 0.0f;
             }
             i = head;
             head = (head + 1) % PW64_VR_TRAIL_N;
@@ -296,15 +305,20 @@ void pw64_vr_cannon_trail(int on, const void* pilot_, float dt) {
                           FX_PROP_3(PW64_VR_TRAIL_SIZE_M, PW64_VR_TRAIL_SIZE_M, PW64_VR_TRAIL_SIZE_M), FX_PROP_7(1.0f),
                           FX_PROP_END);
                 uvMat4SetIdentity(&m);
-                m.m[3][0] = pilot->m[3][0];
-                m.m[3][1] = pilot->m[3][1];
-                m.m[3][2] = pilot->m[3][2];
+                m.m[3][0] = prev[0] + (pilot->m[3][0] - prev[0]) * u;
+                m.m[3][1] = prev[1] + (pilot->m[3][1] - prev[1]) * u;
+                m.m[3][2] = prev[2] + (pilot->m[3][2] - prev[2]) * u;
                 uvFx_8021A4D8(fx[i], &m);
                 age[i] = 0.0f;
             }
         }
+        for (i = 0; i < 3; i++) {
+            prev[i] = pilot->m[3][i];
+        }
+        had = 1;
     } else {
         next = 0.0f;
+        had = 0;
     }
     for (i = 0; i < PW64_VR_TRAIL_N; i++) {
         if (fx[i] == 0xFF) {

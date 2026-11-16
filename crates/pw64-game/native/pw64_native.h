@@ -147,12 +147,13 @@ float pw64_vr_cannon_scale(const void* pilot, const void* cam);
  * (in flight), a dark grey puff left at the pilot (Mtx4F*) every
  * PW64_VR_TRAIL_EVERY_S, PW64_VR_TRAIL_SIZE_M across and opaque from the
  * start, fading out over the last 30% of PW64_VR_TRAIL_LIFE_S. At most
- * PW64_VR_TRAIL_N puffs (of the 120 effects, fx.c); call every frame. */
-#define PW64_VR_TRAIL_N 48
+ * PW64_VR_TRAIL_N puffs (of the 120 effects, fx.c), so EVERY x N bounds
+ * LIFE; several a frame are spread along the way. Call every frame. */
+#define PW64_VR_TRAIL_N 96
 #define PW64_VR_TRAIL_GREY 40
 #define PW64_VR_TRAIL_SIZE_M 4.0f
-#define PW64_VR_TRAIL_EVERY_S 0.1f
-#define PW64_VR_TRAIL_LIFE_S 4.5f
+#define PW64_VR_TRAIL_EVERY_S 0.01f
+#define PW64_VR_TRAIL_LIFE_S 0.95f
 void pw64_vr_cannon_trail(int on, const void* pilot, float dt);
 void pw64_vr_cannon_cinematic(void* cur, const void* cannon, const void* pilot, float dt, float now);
 /* Fill screen (renderer.md "Fill screen"), same file: 0 = off (set by Rust
