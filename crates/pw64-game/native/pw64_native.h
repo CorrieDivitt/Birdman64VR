@@ -116,6 +116,13 @@ extern int pw64_vr_gyro_windscreen;
 /* Birdman64VR: the gyrocopter's first-person eye this much further back
  * than the game's (code_7CF30.c.patch gyrocopterEnterLeave), metres. */
 #define PW64_VR_GYRO_EYE_BACK_M 0.25f
+/* Birdman64VR: the gyrocopter's fuel gauge in VR (hud.c.patch
+ * hudDrawGyrocopter; the flat game's is at 98, 37), N64 HUD px, y up: on
+ * the HUD sphere at the default spread (275%) its centre sits midway
+ * between the altimeter's lower end and the altitude (sea level) readout
+ * below it, horizontally between their centres. */
+#define PW64_VR_GYRO_FUEL_X 207
+#define PW64_VR_GYRO_FUEL_Y 53
 /* Birdman64VR, same file: outside a test's flight, a world view with
  * terrain is shown as a small model of the island (the "diorama": menus,
  * title fly-over, results, replays). 1 for such a channel

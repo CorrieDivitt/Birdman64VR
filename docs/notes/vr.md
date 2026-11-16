@@ -308,7 +308,13 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   windscreen is part 9 of all six pilots' models (the only translucent
   part, `PW64_GYRO_WINDSCREEN_PART`); VR HUD > Gyrocopter windscreen
   (`[vr] gyro_windscreen`, `pw64_vr_gyro_windscreen`) hides it in first
-  person, never from outside. The pilot
+  person, never from outside.
+- **Gyrocopter fuel gauge** in VR: moved for good to between the altimeter
+  and the altitude (sea level) readout on the HUD sphere
+  (`PW64_VR_GYRO_FUEL_X/Y`, 207, 53 in HUD px, y up; the flat game's
+  98, 37): its centre midway between the altimeter's lower end and the
+  readout at the default spread (275%), horizontally between their
+  centres. The pilot
   is part of the gyrocopter model (one model per pilot; head `unk572`,
   arms posed by the joint animation `unk590`).
 - **Open**: the cannonball landing pull-back is the game's (fine on the
