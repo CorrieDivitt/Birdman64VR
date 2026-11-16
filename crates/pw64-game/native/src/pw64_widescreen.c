@@ -17,6 +17,7 @@
 #include <uv_math.h>
 #include <uv_matrix.h>
 #include "app/game.h"
+#include "app/smoke.h"
 
 /* Output aspect w/h, 0 = 4:3 (off). Set by Rust before boot
  * (pw64_game::set_widescreen_aspect).
@@ -241,8 +242,8 @@ float pw64_vr_cannon_scale(const void* pilot_, const void* cam_) {
         for (i = 0; i < 3; i++) {
             d[i] = pilot->m[3][i] - t[i];
         }
-        /* Back to normal over the last 50 m to 10 m before the target. */
-        w = (uvSqrtF(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) - 10.0f) / 40.0f;
+        /* Back to normal over the last 120 m to 30 m before the target. */
+        w = (uvSqrtF(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) - 30.0f) / 90.0f;
         if (w < 0.0f) {
             w = 0.0f;
         } else if (w > 1.0f) {
@@ -251,6 +252,29 @@ float pw64_vr_cannon_scale(const void* pilot_, const void* cam_) {
         s = 1.0f + (s - 1.0f) * w;
     }
     return s;
+}
+
+void pw64_vr_cannon_trail(int on, const void* pilot_) {
+    static s32 trail = -1;
+    const Mtx4F* pilot = pilot_;
+
+    if (on) {
+        if (trail < 0) {
+            trail = smokeCreate();
+            if (trail < 0) {
+                return;
+            }
+            smokeProps(trail, SMOKE_PROP_1(PW64_VR_TRAIL_GREY, PW64_VR_TRAIL_GREY, PW64_VR_TRAIL_GREY),
+                       SMOKE_PROP_2(PW64_VR_TRAIL_SIZE_M), SMOKE_PROP_3(PW64_VR_TRAIL_LIFE_S),
+                       SMOKE_PROP_5(0.0f, 0.0f, 0.0f), SMOKE_PROP_END);
+        }
+        smokeProps(trail, SMOKE_PROP_6(pilot->m[3][0], pilot->m[3][1], pilot->m[3][2]), SMOKE_PROP_END);
+    } else if (trail >= 0) {
+        /* Landed: no more puffs; the ones out there fade on their own and
+         * the smoke frees itself after the last. */
+        smokeProps(trail, SMOKE_PROP_4(0.0f), SMOKE_PROP_END);
+        trail = -1;
+    }
 }
 
 /* VR outside a test's flight: a full-width world view of an island is
