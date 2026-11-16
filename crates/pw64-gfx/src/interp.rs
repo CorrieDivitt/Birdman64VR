@@ -165,6 +165,8 @@ pub struct Interpreter {
     split_x: [f32; 2],
     /// Birdman64VR: the island model's values as their tags arrive.
     diorama_in: [f32; 22],
+    /// Birdman64VR: the dashboard's values as their tags arrive.
+    dash_in: [f32; 6],
     split: Option<[f32; 4]>,
     /// Current movable HUD element (`HUD_ELEM_TAG` markers, 0 = none);
     /// reset per run.
@@ -200,6 +202,10 @@ pub const WIDE_TAG_OFF: u32 = 0x5057_5730;
 /// byte) of the island model's values, one f32 in w1 each
 /// (`pw64_diorama_tag`, [`Diorama`]).
 pub const DIORAMA_TAG: u32 = 0x44_5200;
+/// Birdman64VR: `G_NOOP` w0 marker (low 24 bits, + an index in the low
+/// byte) of the cockpit dashboard's six values, one f32 in w1 each
+/// (`pw64_vr_dash_tag`, [`crate::Dash`]: point, then right axis).
+pub const DASH_TAG: u32 = 0x44_4800;
 /// `G_NOOP` w1 HUD anchor marker: "PWA" + `L`/`C`/`R` in the low byte;
 /// applies to the following draws (see [`Anchor`]).
 pub const ANCHOR_TAG: u32 = 0x5057_4100;
@@ -330,6 +336,7 @@ impl Interpreter {
             hud: false,
             split_x: [0.0; 2],
             diorama_in: [0.0; 22],
+            dash_in: [0.0; 6],
             split: None,
             elem: 0,
             commands: 0,
@@ -364,6 +371,7 @@ impl Interpreter {
             chains: Default::default(),
             views: Vec::new(),
             diorama: None,
+            dash: None,
         };
         self.run_into(mem, dl, &mut frame);
         frame
@@ -394,6 +402,7 @@ impl Interpreter {
         frame.chains.clear();
         frame.views.clear();
         frame.diorama = None;
+        frame.dash = None;
         std::mem::swap(&mut self.frame, frame);
         self.execute(mem, dl);
         std::mem::swap(&mut self.frame, frame);
@@ -483,6 +492,20 @@ impl Interpreter {
                     self.diorama_in[i] = f32::from_bits(w1);
                     if i == self.diorama_in.len() - 1 {
                         self.frame.diorama = Some(Diorama::from_values(&self.diorama_in));
+                    }
+                }
+            }
+            // Birdman64VR cockpit dashboard (pw64_vr_dash_tag): floats too.
+            op::G_NOOP if w0 & 0xFF_FF00 == DASH_TAG => {
+                let i = (w0 & 0xFF) as usize;
+                if i < self.dash_in.len() {
+                    self.dash_in[i] = f32::from_bits(w1);
+                    if i == self.dash_in.len() - 1 {
+                        let v = self.dash_in;
+                        self.frame.dash = Some(crate::Dash {
+                            point: [v[0], v[1], v[2]],
+                            right: [v[3], v[4], v[5]],
+                        });
                     }
                 }
             }
@@ -1461,6 +1484,33 @@ mod tests {
     /// `LodMode::Chain` (one texture, levels in `Frame::chains`); a broken
     /// chain falls back to Tile; max level 0 and texrect-free non-LOD
     /// combiners stay Off.
+    /// Birdman64VR cockpit dashboard (`pw64_vr_dash_tag`): six float words
+    /// make `Frame::dash`, none without them; float bits that look like
+    /// another tag are not read as one.
+    #[test]
+    fn dash_tag_values() {
+        let mut mem = VecMemory::default();
+        let v = [0.1f32, -0.4, -0.7, 1.0, 0.0, 0.0];
+        let mut cmds: Vec<(u32, u32)> = v
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (0xC000_0000 | DASH_TAG | i as u32, f.to_bits()))
+            .collect();
+        cmds.push((0xC000_0000 | DASH_TAG, WIDE_TAG_ON));
+        cmds.push((0xB800_0000, 0));
+        let dl = mem.push_words(&words(&cmds));
+        let f = Interpreter::new().run(&mem, dl);
+        assert_eq!(
+            f.dash,
+            Some(crate::Dash {
+                point: [0.1, -0.4, -0.7],
+                right: [1.0, 0.0, 0.0]
+            })
+        );
+        let dl = mem.push_words(&words(&[(0xB800_0000, 0)]));
+        assert_eq!(Interpreter::new().run(&mem, dl).dash, None);
+    }
+
     #[test]
     fn lod_params_per_draw() {
         let mut mem = VecMemory::default();

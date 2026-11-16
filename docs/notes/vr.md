@@ -308,7 +308,20 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   windscreen is part 9 of all six pilots' models (the only translucent
   part, `PW64_GYRO_WINDSCREEN_PART`); VR HUD > Gyrocopter windscreen
   (`[vr] gyro_windscreen`, `pw64_vr_gyro_windscreen`) hides it in first
-  person, never from outside. The pilot
+  person, never from outside.
+- **Dashboard gauge** (gyrocopter first person, VR HUD > Throttle: on the
+  dashboard / with the gauges, `[vr] dash_throttle`, default on): the
+  vehicle names a point on its model each frame (`pw64_vr_dash_set`;
+  gyrocopter: `pw64_vr_gyro_dash`, 15 cm behind and 3 cm below the middle
+  of the windscreen's lower edge, per pilot model). At the end of the world
+  view `pw64_vr_dash_tag` sends it in the camera's space with the model's
+  right axis (`DASH_TAG`, six floats; `Frame::dash`), so it stays on the
+  dashboard however the camera turns (the C-button look rotates the
+  first-person camera up to 45 degrees from the nose). The renderer draws
+  the elements in `StereoEye::hud_dash` there instead of on the sphere
+  (`DashPanel`, shader `u.vr.w == 3`: a flat panel facing the eye, level
+  with the vehicle, 2 mm per N64 pixel, over the cockpit like the rest of
+  the HUD). The pilot
   is part of the gyrocopter model (one model per pilot; head `unk572`,
   arms posed by the joint animation `unk590`).
 - **Open**: the cannonball landing pull-back is the game's (fine on the

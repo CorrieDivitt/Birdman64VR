@@ -71,6 +71,18 @@ fn vs_main(v: VIn) -> VOut {
         let s = vec3<f32>(sin(yaw) * cos(pitch), sin(pitch), -cos(yaw) * cos(pitch)) * r;
         o.pos = u.eye * vec4<f32>(s, 1.0);
     }
+    // Birdman64VR, a gauge on the cockpit's dashboard (`DashPanel`):
+    // u.clip rows = (point, m per N64 px), (right, centre x), (up, centre
+    // y), camera space; a nearer N64 depth sits a little nearer.
+    if (u.vr.w == 3.0) {
+        let w = select(v.pos.w, 1.0, v.pos.w == 0.0);
+        let p = v.pos.xyz / w;
+        let a = u.clip[0];
+        let r = u.clip[1];
+        let up = u.clip[2];
+        let q = a.xyz + r.xyz * ((p.x - r.w) * a.w) + up.xyz * ((up.w - p.y) * a.w);
+        o.pos = u.eye * vec4<f32>(q * (1.0 - 0.01 * clamp(p.z, 0.0, 1.0)), 1.0);
+    }
     o.color = v.color;
     o.st = v.st;
     o.st_clamp = v.st_clamp;

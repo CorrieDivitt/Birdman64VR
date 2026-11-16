@@ -194,8 +194,35 @@ pub(crate) fn gyro_windscreen() -> bool {
 pub(crate) fn set_gyro_windscreen(on: bool) {
     GYRO_WINDSCREEN.store(if on { 1 } else { 2 }, Ordering::Relaxed);
     HUD_CHANGED.store(true, Ordering::Relaxed);
-    if let Err(e) = crate::config::save_vr_gyro_windscreen(on) {
+    if let Err(e) = crate::config::save_vr_bool("gyro_windscreen", on) {
         eprintln!("[vr] windscreen choice not saved: {e}");
+    }
+}
+
+/// The throttle gauge on the cockpit's dashboard in first person, where the
+/// game gives one (`[vr] dash_throttle`, the settings' VR HUD page; the
+/// gyrocopter): 0 = not loaded yet, 1 = on, 2 = off (on the sphere).
+static DASH_THROTTLE: AtomicU8 = AtomicU8::new(0);
+
+/// Whether the throttle gauge sits on the cockpit's dashboard.
+pub(crate) fn dash_throttle() -> bool {
+    match DASH_THROTTLE.load(Ordering::Relaxed) {
+        0 => {
+            let on = crate::config::get().vr_dash_throttle.unwrap_or(true);
+            DASH_THROTTLE.store(if on { 1 } else { 2 }, Ordering::Relaxed);
+            on
+        }
+        v => v == 1,
+    }
+}
+
+/// Puts the throttle gauge on the dashboard or back on the sphere and
+/// saves the choice.
+pub(crate) fn set_dash_throttle(on: bool) {
+    DASH_THROTTLE.store(if on { 1 } else { 2 }, Ordering::Relaxed);
+    HUD_CHANGED.store(true, Ordering::Relaxed);
+    if let Err(e) = crate::config::save_vr_bool("dash_throttle", on) {
+        eprintln!("[vr] dashboard choice not saved: {e}");
     }
 }
 
@@ -719,6 +746,11 @@ mod real {
             background: None,
             hud_sphere: Some(hud_sphere),
             hud_hidden: super::hud_hidden(),
+            hud_dash: if super::dash_throttle() {
+                crate::hud_edit::element_id("throttle").map_or(0, |id| 1 << id)
+            } else {
+                0
+            },
         }
     }
 

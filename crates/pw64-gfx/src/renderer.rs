@@ -170,6 +170,69 @@ pub struct StereoEye {
     pub hud_sphere: Option<HudSphere>,
     /// Movable HUD element ids (`DrawCall::elem`, bit per id) not drawn.
     pub hud_hidden: u16,
+    /// Birdman64VR: movable HUD element ids (bit per id) drawn on the
+    /// cockpit's dashboard instead of the sphere while the frame has one
+    /// ([`crate::Frame::dash`], [`DashPanel`]).
+    pub hud_dash: u16,
+}
+
+/// Birdman64VR: a flight gauge on the cockpit's dashboard
+/// ([`StereoEye::hud_dash`]): a small flat panel at the frame's
+/// [`crate::Dash`] point, facing the eye, level with the vehicle's right
+/// axis, [`DashPanel::M_PER_PX`] metres per N64 pixel, centred on the
+/// element's centre. In camera space (game units), so it moves with the
+/// vehicle however the camera turns.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DashPanel {
+    pub point: [f32; 3],
+    pub right: [f32; 3],
+    pub up: [f32; 3],
+}
+
+impl DashPanel {
+    /// Size of an N64 pixel on the dashboard, metres: the throttle gauge
+    /// (about 62 x 32 px) is about 12 cm wide.
+    pub const M_PER_PX: f32 = 0.002;
+
+    /// The panel's axes for `dash`: facing the camera (the eye is within
+    /// centimetres of it), its right as close to the vehicle's right as
+    /// that allows; `None` when degenerate.
+    pub fn new(dash: &crate::Dash) -> Option<Self> {
+        let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let p = dash.point;
+        let len = dot(p, p).sqrt();
+        if len < 1e-4 {
+            return None;
+        }
+        let n = [-p[0] / len, -p[1] / len, -p[2] / len];
+        let r = dash.right;
+        let k = dot(r, n);
+        let r = [r[0] - k * n[0], r[1] - k * n[1], r[2] - k * n[2]];
+        let rl = dot(r, r).sqrt();
+        if rl < 1e-3 {
+            return None;
+        }
+        let r = r.map(|v| v / rl);
+        Some(Self {
+            point: p,
+            right: r,
+            up: [
+                n[1] * r[2] - n[2] * r[1],
+                n[2] * r[0] - n[0] * r[2],
+                n[0] * r[1] - n[1] * r[0],
+            ],
+        })
+    }
+
+    /// Where the shader puts N64 screen point `q` of an element centred at
+    /// `c` (camera space; depth bias left out).
+    pub fn place(&self, q: [f32; 2], c: [f32; 2]) -> [f32; 3] {
+        let (x, y) = (
+            (q[0] - c[0]) * Self::M_PER_PX,
+            (c[1] - q[1]) * Self::M_PER_PX,
+        );
+        [0, 1, 2].map(|i| self.point[i] + x * self.right[i] + y * self.up[i])
+    }
 }
 
 /// The flight HUD on the inside of a sphere around the player
@@ -1522,6 +1585,7 @@ impl Renderer {
                 *c = b.map(|b| [0.5 * (b[0] + b[2]), 0.5 * (b[1] + b[3])]);
             }
         }
+        let dash = frame.dash.as_ref().and_then(DashPanel::new);
         let clip_views: Vec<Mat4> = match &eye.clip {
             Some(c) => frame
                 .views
@@ -1571,19 +1635,28 @@ impl Renderer {
             u.vr = [1.0, 0.0, 0.0, 0.0];
             u.eye = *m;
             if let Some(h) = eye.hud_sphere.as_ref().filter(|_| d.view == 0) {
-                let shift = elem_centres
-                    .get(d.elem as usize)
-                    .copied()
-                    .flatten()
-                    .map_or([0.0; 2], |c| h.shift(c));
-                u.vr = [1.0, 0.0, 0.0, 2.0];
-                u.eye = h.eye;
-                u.clip = [
-                    [h.rad_per_px, h.radius, shift[0], shift[1]],
-                    [0.0; 4],
-                    [0.0; 4],
-                    [0.0; 4],
-                ];
+                let centre = elem_centres.get(d.elem as usize).copied().flatten();
+                let on_dash = d.elem != 0 && d.elem < 16 && eye.hud_dash & (1 << d.elem) != 0;
+                if let (true, Some(p), Some(c)) = (on_dash, dash, centre) {
+                    u.vr = [1.0, 0.0, 0.0, 3.0];
+                    u.eye = eye.world;
+                    u.clip = [
+                        [p.point[0], p.point[1], p.point[2], DashPanel::M_PER_PX],
+                        [p.right[0], p.right[1], p.right[2], c[0]],
+                        [p.up[0], p.up[1], p.up[2], c[1]],
+                        [0.0; 4],
+                    ];
+                } else {
+                    let shift = centre.map_or([0.0; 2], |c| h.shift(c));
+                    u.vr = [1.0, 0.0, 0.0, 2.0];
+                    u.eye = h.eye;
+                    u.clip = [
+                        [h.rad_per_px, h.radius, shift[0], shift[1]],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                    ];
+                }
             }
             let clip = eye.clip.as_ref().filter(|_| d.view != 0);
             if let Some(c) = clip {
@@ -1978,6 +2051,52 @@ mod sphere_tests {
         // Above the centre: pitch up.
         assert!(h.place([160.0, 20.0], h.shift([160.0, 20.0]))[1] > 0.0);
     }
+
+    /// The dashboard gauge: centred on the dashboard point, facing the eye,
+    /// 2 mm per N64 pixel, level with the vehicle's right axis; banked
+    /// with the vehicle when it rolls.
+    #[test]
+    fn dash_panel_sits_on_the_dashboard() {
+        let close = |a: [f32; 3], b: [f32; 3]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5);
+        let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        // 0.6 m ahead and 0.35 m down, the vehicle level.
+        let dash = crate::Dash {
+            point: [0.0, -0.35, -0.6],
+            right: [1.0, 0.0, 0.0],
+        };
+        let p = DashPanel::new(&dash).unwrap();
+        let c = [40.0, 70.0];
+        assert!(close(p.place(c, c), dash.point));
+        // 10 px right: 2 cm to the right; 10 px up: up the panel.
+        assert!(close(p.place([50.0, 70.0], c), [0.02, -0.35, -0.6]));
+        let up = p.place([40.0, 60.0], c);
+        assert!(close(up, [0, 1, 2].map(|i| dash.point[i] + 0.02 * p.up[i])) && p.up[1] > 0.8);
+        // The panel faces the eye: its axes are square to the line of sight.
+        assert!(dot(p.right, dash.point).abs() < 1e-5 && dot(p.up, dash.point).abs() < 1e-5);
+        // Rolled 30 degrees right: the panel's up leans right too.
+        let (s, co) = (30f32.to_radians().sin(), 30f32.to_radians().cos());
+        let rolled = DashPanel::new(&crate::Dash {
+            point: [0.0, 0.0, -0.6],
+            right: [co, -s, 0.0],
+        })
+        .unwrap();
+        assert!(close(rolled.up, [s, co, 0.0]));
+        // Degenerate: at the eye, or right along the line of sight.
+        assert!(
+            DashPanel::new(&crate::Dash {
+                point: [0.0; 3],
+                right: [1.0, 0.0, 0.0]
+            })
+            .is_none()
+        );
+        assert!(
+            DashPanel::new(&crate::Dash {
+                point: [0.0, 0.0, -1.0],
+                right: [0.0, 0.0, 1.0]
+            })
+            .is_none()
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2221,6 +2340,7 @@ mod tests {
             background: None,
             hud_sphere: None,
             hud_hidden: 0,
+            hud_dash: 0,
         };
         r.render_stereo(&frame, &view, (w, h), &eye);
         let stereo = read_rgba(&device, &queue, &tex);
@@ -2313,6 +2433,7 @@ mod tests {
             chains: HashMap::new(),
             views: Vec::new(),
             diorama: None,
+            dash: None,
         }
     }
 

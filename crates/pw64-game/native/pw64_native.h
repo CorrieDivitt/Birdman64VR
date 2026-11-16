@@ -116,6 +116,17 @@ extern int pw64_vr_gyro_windscreen;
 /* Birdman64VR: the gyrocopter's first-person eye this much further back
  * than the game's (code_7CF30.c.patch gyrocopterEnterLeave), metres. */
 #define PW64_VR_GYRO_EYE_BACK_M 0.25f
+/* Birdman64VR, same file: the cockpit dashboard point of the vehicle in
+ * first person (model units, model frame), sent to the renderer each frame
+ * (VR HUD > Throttle on the dashboard); objId < 0: none. */
+void pw64_vr_dash_set(int objId, float x, float y, float z);
+/* The gyrocopter's dashboard point: this far behind (towards the pilot)
+ * and below the middle of the windscreen's lower edge, model units (cm). */
+#define PW64_VR_GYRO_DASH_BACK 15.0f
+#define PW64_VR_GYRO_DASH_DOWN 3.0f
+/* The gyrocopter's dashboard on (`on`) or off for dobj `objId` with model
+ * `modelId` (code_7CF30.c.patch, every frame). */
+void pw64_vr_gyro_dash(int objId, int modelId, int on);
 /* Birdman64VR, same file: outside a test's flight, a world view with
  * terrain is shown as a small model of the island (the "diorama": menus,
  * title fly-over, results, replays). 1 for such a channel

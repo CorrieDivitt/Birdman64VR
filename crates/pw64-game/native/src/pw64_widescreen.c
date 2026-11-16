@@ -18,6 +18,7 @@
 #include <uv_matrix.h>
 #include "app/game.h"
 #include <uv_fx.h>
+#include <uv_dobj.h>
 
 /* Output aspect w/h, 0 = 4:3 (off). Set by Rust before boot
  * (pw64_game::set_widescreen_aspect).
@@ -618,6 +619,106 @@ static int pw64_split_world_view(const UnkStruct_80204D94* c) {
  * are harmless on hardware. A fill view marks the frame: the border bars
  * stay off until the next uvGfxBegin. A left/right split world view gets
  * its view rect too (the split tag outside a HUD bracket). */
+/* Birdman64VR: the cockpit dashboard (VR HUD > Throttle on the dashboard).
+ * The vehicle names a point on its model each frame in first person
+ * (pw64_vr_dash_set, model units = cm, model frame: x right, y forward,
+ * z up); at the end of the world view it goes to the renderer in the
+ * camera's space (x right, y up, -z forward, metres) with the model's
+ * right axis, so the gauge stays on the dashboard however the camera
+ * turns. 6 floats, `G_NOOP` w0 low bits "DH" + index (pw64-gfx
+ * interp::DASH_TAG). */
+#define PW64_DASH_TAG 0x444800u /* "DH" */
+static int sPw64DashObj = -1;
+static int sPw64DashModel = -1;
+static float sPw64DashLocal[3];
+
+void pw64_vr_dash_set(int objId, float x, float y, float z) {
+    sPw64DashObj = objId;
+    sPw64DashModel = (objId >= 0 && objId < 100) ? D_80263780[objId].modelId : -1;
+    sPw64DashLocal[0] = x;
+    sPw64DashLocal[1] = y;
+    sPw64DashLocal[2] = z;
+}
+
+/* The gyrocopter's dashboard point (`on`: VR first person). The middle of
+ * the windscreen's lower edge (part 9, PW64_GYRO_WINDSCREEN_PART) in each
+ * pilot's model, from pw64-extract --models; the point is behind and
+ * below it (PW64_VR_GYRO_DASH_BACK / _DOWN). */
+void pw64_vr_gyro_dash(int objId, int modelId, int on) {
+    float y, z;
+    switch (modelId) {
+    case MODEL_GYRO_LARK:
+    case MODEL_GYRO_KIWI:
+        y = 68.0f, z = 24.0f;
+        break;
+    case MODEL_GYRO_GOOSE:
+    case MODEL_GYRO_IBIS:
+        y = 96.0f, z = 22.0f;
+        break;
+    case MODEL_GYRO_HAWK:
+    case MODEL_GYRO_ROBIN:
+        y = 84.0f, z = 27.0f;
+        break;
+    default: /* a plane variant (pw64_plane.c) or unknown: no dashboard */
+        on = 0;
+        y = z = 0.0f;
+        break;
+    }
+    if (!on) {
+        if (sPw64DashObj == objId) {
+            pw64_vr_dash_set(-1, 0.0f, 0.0f, 0.0f);
+        }
+        return;
+    }
+    pw64_vr_dash_set(objId, 0.0f, y - PW64_VR_GYRO_DASH_BACK, z - PW64_VR_GYRO_DASH_DOWN);
+}
+
+static void pw64_vr_dash_tag(const UnkStruct_80204D94* c) {
+    const Unk80263780* d;
+    const Mtx4F* m;
+    const Mtx4F* cam = &c->unk110;
+    float w[3], r[3], v[6], len;
+    int i;
+    if (sPw64DashObj < 0 || sPw64DashObj >= 100) {
+        return;
+    }
+    d = &D_80263780[sPw64DashObj];
+    /* Still that vehicle's model, drawn (a freed or reused dobj is not). */
+    if (d->modelId != sPw64DashModel || !(d->unk34 & 2)) {
+        return;
+    }
+    m = &D_80265080[d->unk2[0]]; /* part 0: rotation x 1/model scale */
+    for (i = 0; i < 3; i++) {
+        w[i] = sPw64DashLocal[0] * m->m[0][i] + sPw64DashLocal[1] * m->m[1][i] +
+               sPw64DashLocal[2] * m->m[2][i] + m->m[3][i] - cam->m[3][i];
+        r[i] = m->m[0][i];
+    }
+    len = uvSqrtF(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]);
+    if (len <= 0.0f) {
+        return;
+    }
+    for (i = 0; i < 3; i++) {
+        r[i] /= len;
+    }
+    /* Camera rows: right, forward, up. */
+    v[0] = w[0] * cam->m[0][0] + w[1] * cam->m[0][1] + w[2] * cam->m[0][2];
+    v[1] = w[0] * cam->m[2][0] + w[1] * cam->m[2][1] + w[2] * cam->m[2][2];
+    v[2] = -(w[0] * cam->m[1][0] + w[1] * cam->m[1][1] + w[2] * cam->m[1][2]);
+    v[3] = r[0] * cam->m[0][0] + r[1] * cam->m[0][1] + r[2] * cam->m[0][2];
+    v[4] = r[0] * cam->m[2][0] + r[1] * cam->m[2][1] + r[2] * cam->m[2][2];
+    v[5] = -(r[0] * cam->m[1][0] + r[1] * cam->m[1][1] + r[2] * cam->m[1][2]);
+    for (i = 0; i < 6; i++) {
+        union {
+            float f;
+            u32 u;
+        } bits;
+        bits.f = v[i];
+        gGfxDisplayListHead->words.w0 = ((u32)G_NOOP << 24) | PW64_DASH_TAG | (u32)i;
+        gGfxDisplayListHead->words.w1 = bits.u;
+        gGfxDisplayListHead++;
+    }
+}
+
 void pw64_widescreen_tag(const void* chan, int on) {
     if (pw64_split_world_view(chan)) {
         if (!on) {
@@ -638,6 +739,9 @@ void pw64_widescreen_tag(const void* chan, int on) {
      * them to sit on (they showed as black bars floating in the world). */
     if (on && (pw64_fill_view(chan) || pw64_widescreen_aspect < 0.0f)) {
         pw64_fill_frame = 1;
+    }
+    if (!on && pw64_widescreen_aspect < 0.0f && pw64_vr_flight()) {
+        pw64_vr_dash_tag(chan);
     }
     gGfxDisplayListHead->words.w0 = (u32)G_NOOP << 24;
     gGfxDisplayListHead->words.w1 = on ? PW64_WIDE_TAG_ON : PW64_WIDE_TAG_OFF;

@@ -22,7 +22,7 @@ pub mod renderer;
 pub mod shader;
 pub mod texture;
 
-pub use frame::{Anchor, Diorama, Frame, N64_HEIGHT, N64_WIDTH, Wide};
+pub use frame::{Anchor, Dash, Diorama, Frame, N64_HEIGHT, N64_WIDTH, Wide};
 pub use interp::Interpreter;
 pub use memory::{Memory, VecMemory};
 pub use renderer::{
