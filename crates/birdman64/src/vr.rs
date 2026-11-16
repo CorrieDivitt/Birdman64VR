@@ -759,7 +759,7 @@ mod real {
     /// game sends a point on the dashboard's surface for each,
     /// `pw64_vr_gyro_dash`): the throttle (`hud_edit::ELEMENTS` id 3, about
     /// 62 x 32 N64 px, 12 x 6 cm) just below the dashboard's tip, the map
-    /// (radar, id 6, 70 x 70 px, 10 cm across) below it.
+    /// (radar, id 6, 70 x 70 px, 10 cm across) lower, on the left side.
     const DASH_SLOTS: [pw64_gfx::DashSlot; 2] = [
         pw64_gfx::DashSlot {
             elem: 3,

@@ -315,9 +315,11 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   game names a point on the dashboard's surface for each gauge every frame
   (`pw64_vr_dash_set`; gyrocopter: `pw64_vr_gyro_dash`, per pilot model,
   from the ROM's models: on the dashboard's middle line, 1 cm above the
-  surface, the throttle's top about 2 degrees below the dashboard's tip
-  (the windscreen's lower edge) and the map's top 2 degrees below the
-  throttle, as seen from that pilot's eye). At the end of the world view
+  surface, the throttle on the middle line, its top about 2 degrees below
+  the dashboard's tip (the windscreen's lower edge) as seen from that
+  pilot's eye; the map a row lower on the left side, 15 cm from the middle,
+  20 cm in the Hawk's and Robin's wider cockpits: in the middle the pilots'
+  right hand covered it a lot). At the end of the world view
   `pw64_vr_dash_tag` sends them in the camera's space with the model's
   right axis (`DASH_TAG`, nine floats; `Frame::dash`), so they stay on the
   dashboard however the camera turns. The renderer draws each element in

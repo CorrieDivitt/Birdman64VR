@@ -645,17 +645,19 @@ void pw64_vr_dash_set(int objId, const float (*points)[3]) {
 }
 
 /* The gyrocopter's dashboard (`on`: VR first person): per pilot model, the
- * throttle's and the map's centres on the dashboard's surface along its
- * middle (1 cm above it), from the ROM's models (pw64-extract --models):
- * the throttle's top about 2 degrees below the dashboard's tip (the
- * windscreen's lower edge, part 9), the map's top 2 degrees below the
- * throttle, as seen from that pilot's first-person eye. */
+ * throttle's and the map's centres on the dashboard's surface (1 cm above
+ * it), from the ROM's models (pw64-extract --models). The throttle on the
+ * middle line, its top about 2 degrees below the dashboard's tip (the
+ * windscreen's lower edge, part 9) as seen from that pilot's first-person
+ * eye; the map a row lower, on the left side, clear of the pilots' right
+ * hand (the dashboard is flat across, about 21 cm to each side, 27 cm on
+ * the Hawk's and Robin's: the map's 10 cm stay on it). */
 void pw64_vr_gyro_dash(int objId, int modelId, int on) {
-    static const float lark[2][3] = {{0.0f, 64.0f, 22.0f}, {0.0f, 56.0f, 16.0f}};
-    static const float goose[2][3] = {{0.0f, 88.0f, 19.0f}, {0.0f, 77.0f, 14.0f}};
-    static const float hawk[2][3] = {{0.0f, 73.0f, 27.0f}, {0.0f, 66.0f, 19.0f}};
-    static const float kiwi[2][3] = {{0.0f, 65.0f, 22.0f}, {0.0f, 57.0f, 16.0f}};
-    static const float robin[2][3] = {{0.0f, 74.0f, 27.0f}, {0.0f, 67.0f, 19.0f}};
+    static const float lark[2][3] = {{0.0f, 64.0f, 22.0f}, {-15.0f, 56.0f, 16.0f}};
+    static const float goose[2][3] = {{0.0f, 88.0f, 19.0f}, {-15.0f, 77.0f, 14.0f}};
+    static const float hawk[2][3] = {{0.0f, 73.0f, 27.0f}, {-20.0f, 66.0f, 19.0f}};
+    static const float kiwi[2][3] = {{0.0f, 65.0f, 22.0f}, {-15.0f, 57.0f, 16.0f}};
+    static const float robin[2][3] = {{0.0f, 74.0f, 27.0f}, {-20.0f, 67.0f, 19.0f}};
     const float (*pts)[3];
     switch (modelId) {
     case MODEL_GYRO_LARK:
