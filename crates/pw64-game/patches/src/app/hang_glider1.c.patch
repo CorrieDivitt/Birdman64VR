@@ -36,7 +36,26 @@
 +            pw64_dobj_near_set(hgData->objId, hgData->unk54 == 1, 0);
              hgData->camera->unk1A4 = hgData->unk18C.y;
              hgData->camera->unk78 = hgData->unk68;
-@@ -828,3 +841,8 @@ void hangGliderLoadPilot(u8 pilot, HangGliderData* hgData) {
+@@ -400,5 +416,17 @@ void hangGliderMovementFrame(HangGliderData* hgData, u8 gameState) {
+             hgData->camera->unk68.y = hgData->unk268.y;
+             hgData->camera->unk68.z = hgData->unk268.z;
+             hgData->camera->unk74 = hgData->unk278;
++            // PW64 VR: first person from the pilot's eyes (the game's sits
++            // 1 m behind them at sail height, pitched down), level: just
++            // behind and above the control bar. The chase view 50% closer.
++            if (pw64_widescreen_aspect < 0.0f) {
++                hgData->camera->unk68.y = hgData->unk27C.y * 0.2f;
++                hgData->camera->unk68.z = hgData->unk27C.z * 0.85f;
++                hgData->camera->unk74 = 0.0f;
++                hgData->camera->unk48 = 0.35f;
++                hgData->camera->unk60 = -2.0f;
++                hgData->camera->unk64 = -0.5f;
++                hgData->camera->unk54 = 0.9f;
++                hgData->camera->unk58 = 5.0f;
++            }
+             hgData->camera->unk228 = hgData->unkF8;
+             uvMat4Copy(&hgData->camera->unk80, &hgData->unk10);
+@@ -828,3 +853,8 @@ void hangGliderLoadPilot(u8 pilot, HangGliderData* hgData) {
          break;
      }
  }

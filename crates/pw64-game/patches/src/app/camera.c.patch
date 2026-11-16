@@ -55,7 +55,21 @@
      Mtx4F sp70; // 70:AF
      f32 sp6C;
      f32 sp68;
-@@ -955,8 +965,9 @@ STATIC_FUNC void camera_802D559C(Camera* camera) {
+@@ -476,6 +486,12 @@ STATIC_FUNC void camera_802D4274(Camera* camera) {
+             D_80359A24 = camera->unk190;
+         }
+-    } else {
++        // PW64 VR: the pilot at rest after a crash: a tight shot of their
++        // body straight away, from the crash camera's side (no sweep in, no
++        // orbit). Raised only if the ground or a wall is in the way.
++        if (pw64_widescreen_aspect < 0.0f) {
++            D_80359A24 = 3.0f;
++        }
++    } else if (!(pw64_widescreen_aspect < 0.0f)) {
+         camera->unk194 += camera->unk19C * D_8034F854;
+         D_80359A24 = func_80313AF4(camera->unk190, D_80359A24, 1.0f);
+     }
+@@ -955,8 +971,9 @@ STATIC_FUNC void camera_802D559C(Camera* camera) {
      uvMat4UnkOp6(&camera->unk108, &camera->unk80, &sp48);
      temp_v0 = camera_802D472C(camera, &sp48);
      if (temp_v0 != 0) {
@@ -67,7 +81,7 @@
          uvMat4UnkOp6(&camera->unk108, &camera->unk80, &sp48);
      }
  }
-@@ -1001,3 +1012,63 @@ STATIC_FUNC void camera_802D58EC(Camera* camera, Mtx4F* arg1) {
+@@ -1001,3 +1018,63 @@ STATIC_FUNC void camera_802D58EC(Camera* camera, Mtx4F* arg1) {
      camera->unk220 = func_80313AF4(var_fa0, camera->unk220, 1.0f);
      uvMat4RotateAxis(arg1, camera->unk220 * 0.01745329f, 'x'); // almost DEG_TO_RAD(1)
  }
