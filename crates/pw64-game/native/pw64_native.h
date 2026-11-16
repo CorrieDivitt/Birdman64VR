@@ -150,10 +150,13 @@ float pw64_vr_cannon_scale(const void* pilot, const void* cam);
  * PW64_VR_TRAIL_N puffs (of the 120 effects, fx.c), so EVERY x N bounds
  * LIFE; several a frame are spread along the way. Call every frame. */
 #define PW64_VR_TRAIL_N 96
+/* Drawn up to this far from the camera (fx.c prop 19; smoke.c uses 50 x
+ * the puff size, 200 m here, short of the cinematic view). */
+#define PW64_VR_TRAIL_DRAW_M 2000.0f
 #define PW64_VR_TRAIL_GREY 40
 #define PW64_VR_TRAIL_SIZE_M 4.0f
-#define PW64_VR_TRAIL_EVERY_S 0.01f
-#define PW64_VR_TRAIL_LIFE_S 0.95f
+#define PW64_VR_TRAIL_EVERY_S 0.05f
+#define PW64_VR_TRAIL_LIFE_S 4.5f
 void pw64_vr_cannon_trail(int on, const void* pilot, float dt);
 void pw64_vr_cannon_cinematic(void* cur, const void* cannon, const void* pilot, float dt, float now);
 /* Fill screen (renderer.md "Fill screen"), same file: 0 = off (set by Rust

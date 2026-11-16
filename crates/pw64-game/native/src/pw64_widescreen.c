@@ -299,7 +299,7 @@ void pw64_vr_cannon_trail(int on, const void* pilot_, float dt) {
             fx[i] = (u8)uvFx_8021EFF0(7);
             if (fx[i] != 0xFF) {
                 uvModelGet(fx[i], 7);
-                uvFxProps(fx[i], FX_PROP_1(10000.0f), FX_PROP_19(PW64_VR_TRAIL_SIZE_M * 50.0f), FX_PROP_8(0x138),
+                uvFxProps(fx[i], FX_PROP_1(10000.0f), FX_PROP_19(PW64_VR_TRAIL_DRAW_M), FX_PROP_8(0x138),
                           FX_PROP_15((float)((i % 4) * 90)),
                           FX_PROP_5(PW64_VR_TRAIL_GREY / 255.0, PW64_VR_TRAIL_GREY / 255.0, PW64_VR_TRAIL_GREY / 255.0, 1.0),
                           FX_PROP_3(PW64_VR_TRAIL_SIZE_M, PW64_VR_TRAIL_SIZE_M, PW64_VR_TRAIL_SIZE_M), FX_PROP_7(1.0f),
