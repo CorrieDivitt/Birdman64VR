@@ -1402,7 +1402,10 @@ impl App {
         // Birdman64VR: a new game frame is shown: its world view, if it has
         // one, goes to the headset in stereo. First, before the flat
         // picture below: the headset frame it is for starts within ms.
-        if q.frames > 0
+        // Also when a VR HUD setting changed with the game paused (no new
+        // frame comes): the last frame again, so the change shows at once.
+        let hud_changed = crate::vr::take_hud_changed();
+        if (q.frames > 0 || hud_changed)
             && let Some(vr) = &mut self.vr
         {
             let shown = q.show.or(self.shown);

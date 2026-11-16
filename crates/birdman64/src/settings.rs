@@ -154,6 +154,11 @@ enum Row {
     /// VR HUD page: show or hide one flight-HUD element in the headset
     /// (`hud_edit::ELEMENTS` id).
     HudShow(u8),
+    /// VR HUD page: the HUD sphere's distance, the gauges' spread and size
+    /// (`vr::HudLayout`), stepped with left / right, cycled with confirm.
+    HudDistance,
+    HudSpread,
+    HudSize,
     /// Main: raise every test in both save files to gold, which opens every
     /// class, bonus game and Birdman (`unlock.rs`). Two confirms like Quit,
     /// then a restart (Android: close and reopen, like an import).
@@ -1870,10 +1875,8 @@ impl Overlay {
             // Performance overlay: the counter first (the simple case), then
             // the opt-in extras.
             Page::VrHud => {
-                let mut rows: Vec<Row> = crate::hud_edit::ELEMENTS
-                    .iter()
-                    .map(|e| Row::HudShow(e.0))
-                    .collect();
+                let mut rows = vec![Row::HudDistance, Row::HudSpread, Row::HudSize];
+                rows.extend(crate::hud_edit::ELEMENTS.iter().map(|e| Row::HudShow(e.0)));
                 rows.push(Row::Back);
                 rows
             }
@@ -2204,6 +2207,23 @@ impl Overlay {
                 self.text_row(ui, at(Row::Back), "\u{2039} Back");
             }
             Page::VrHud => {
+                let l = crate::vr::hud_layout();
+                self.text_row(
+                    ui,
+                    at(Row::HudDistance),
+                    &format!("HUD distance: {:.1} m", l.distance),
+                );
+                self.text_row(
+                    ui,
+                    at(Row::HudSpread),
+                    &format!("Gauge spread: {:.0}%", l.spread * 100.0),
+                );
+                self.text_row(
+                    ui,
+                    at(Row::HudSize),
+                    &format!("Gauge size: {:.0}%", l.size * 100.0),
+                );
+                ui.add_space(4.0);
                 let hidden = crate::vr::hud_hidden();
                 for &(id, _, name) in &crate::hud_edit::ELEMENTS {
                     let shown = hidden & (1 << id) == 0;
@@ -2781,6 +2801,7 @@ impl Overlay {
                 self.show = false;
             }
             Row::VrHudPage => self.enter_page(Page::VrHud, Row::VrHudPage),
+            Row::HudDistance | Row::HudSpread | Row::HudSize => self.change(1, true),
             Row::HudShow(id) => {
                 let shown = crate::vr::hud_hidden() & (1 << id) != 0;
                 crate::vr::set_hud_shown(id, shown);
@@ -3054,6 +3075,20 @@ impl Overlay {
                     );
                 }
             },
+            Row::HudDistance | Row::HudSpread | Row::HudSize => {
+                use crate::vr::HudLayout;
+                let mut l = crate::vr::hud_layout();
+                match rows[self.sel] {
+                    Row::HudDistance => {
+                        l.distance = step(&HudLayout::DISTANCE_STEPS, l.distance, d, wrap);
+                    }
+                    Row::HudSpread => {
+                        l.spread = step(&HudLayout::SPREAD_STEPS, l.spread, d, wrap);
+                    }
+                    _ => l.size = step(&HudLayout::SIZE_STEPS, l.size, d, wrap),
+                }
+                crate::vr::set_hud_layout(l);
+            }
             // Left / right flip a VR HUD row too.
             Row::HudShow(id) => {
                 let shown = crate::vr::hud_hidden() & (1 << id) != 0;
@@ -3872,7 +3907,16 @@ fn help(row: Row) -> &'static str {
             "Playing with a controller? Hide the on-screen buttons. The menu button always \
              stays."
         }
-        Row::VrHudPage => "Choose which flight gauges the headset shows.",
+        Row::VrHudPage => "Where the flight gauges sit in the headset, and which ones show.",
+        Row::HudDistance => {
+            "How far away the gauges float. They keep their apparent size; nearer feels \
+             more like a helmet display, further more like the sky."
+        }
+        Row::HudSpread => {
+            "How far apart the gauges sit around you. Wide: turn your head a little to read \
+             the outer ones; 100% is the flat game's layout."
+        }
+        Row::HudSize => "How big the gauges are.",
         Row::HudShow(_) => {
             "Show or hide this gauge in the headset. In flight the gauges sit around you, \
              each turned towards you."

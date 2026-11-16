@@ -119,8 +119,18 @@ pub struct Config {
     /// `[vr] hud_hidden`: flight-HUD elements not shown in the headset
     /// (`hud_edit::ELEMENTS` names; the settings' VR HUD page).
     pub vr_hud_hidden: Vec<String>,
+    /// `[vr] hud_distance / hud_spread / hud_size` (`vr::HudLayout`).
+    pub vr_hud: VrHud,
     /// Keys skipped at load (wrong type or invalid value; see `ignored_keys`).
     pub ignored: Vec<String>,
+}
+
+/// `[vr]` flight-HUD layout values (`vr::HudLayout`; `None` = default).
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct VrHud {
+    pub distance: Option<f32>,
+    pub spread: Option<f32>,
+    pub size: Option<f32>,
 }
 
 /// `[oled]`: OLED care (O3). The window applies it every frame; the
@@ -859,6 +869,27 @@ fn from_table(table: &toml::Table) -> Config {
     if let Some(v) = table.get("vr") {
         match v.as_table() {
             Some(t) => {
+                for (key, lo, hi) in [
+                    ("hud_distance", 0.5, 20.0),
+                    ("hud_spread", 0.5, 4.0),
+                    ("hud_size", 0.3, 3.0),
+                ] {
+                    let Some(v) = t.get(key) else { continue };
+                    let slot = match key {
+                        "hud_distance" => &mut cfg.vr_hud.distance,
+                        "hud_spread" => &mut cfg.vr_hud.spread,
+                        _ => &mut cfg.vr_hud.size,
+                    };
+                    match coerce_f32(v) {
+                        Some(f) if (lo..=hi).contains(&f) => *slot = Some(f),
+                        _ => ignore(
+                            &mut ignored,
+                            &format!("vr.{key}"),
+                            v,
+                            &format!("use a number from {lo} to {hi}"),
+                        ),
+                    }
+                }
                 if let Some(h) = t.get("hud_hidden") {
                     match h.as_array() {
                         Some(a) => {
@@ -898,6 +929,33 @@ fn from_table(table: &toml::Table) -> Config {
 pub fn save_vr_hud_hidden(names: &[&str]) -> Result<(), String> {
     let table = read_table()?;
     write_table(&with_vr_hud_hidden(table, names)?)
+}
+
+/// Writes `[vr] hud_distance`, `hud_spread` and `hud_size`.
+pub fn save_vr_hud_layout(distance: f32, spread: f32, size: f32) -> Result<(), String> {
+    let table = read_table()?;
+    write_table(&with_vr_hud_layout(table, distance, spread, size)?)
+}
+
+/// [`save_vr_hud_layout`]'s table edit (separate from the file I/O for
+/// tests).
+fn with_vr_hud_layout(
+    mut table: toml::Table,
+    distance: f32,
+    spread: f32,
+    size: f32,
+) -> Result<toml::Table, String> {
+    let vr = table
+        .entry("vr")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let toml::Value::Table(vr) = vr else {
+        return Err("[vr] is not a table in pw64.toml; not saved".to_string());
+    };
+    let round = |f: f32| toml::Value::Float((f64::from(f) * 100.0).round() / 100.0);
+    vr.insert("hud_distance".into(), round(distance));
+    vr.insert("hud_spread".into(), round(spread));
+    vr.insert("hud_size".into(), round(size));
+    Ok(table)
 }
 
 /// [`save_vr_hud_hidden`]'s table edit (separate from the file I/O for
@@ -1701,6 +1759,20 @@ mod tests {
         assert_eq!(c.hud.len(), 1, "[hud] kept");
         let t = with_vr_hud_hidden(t, &[]).unwrap();
         assert!(!t.contains_key("vr"));
+        // The layout values: round-trip, out of range ignored.
+        let t = with_vr_hud_layout(toml::Table::new(), 4.0, 2.5, 1.15).unwrap();
+        let c = from_table(&t);
+        assert_eq!(
+            c.vr_hud,
+            VrHud {
+                distance: Some(4.0),
+                spread: Some(2.5),
+                size: Some(1.15)
+            }
+        );
+        let c = parse("[vr]\nhud_distance = 99\n").unwrap();
+        assert_eq!(c.vr_hud.distance, None);
+        assert_eq!(c.ignored, vec!["vr.hud_distance"]);
     }
 
     /// "Move HUD": `[hud]` element offsets (N64 px) and `[perf] pos` parse,

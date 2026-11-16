@@ -82,6 +82,72 @@ pub(crate) fn hud_hidden() -> u16 {
     HUD_HIDDEN.load(Ordering::Relaxed)
 }
 
+/// A VR HUD setting changed: the window redraws the eye pictures from the
+/// last game frame even while the game is paused (`take_hud_changed`).
+static HUD_CHANGED: AtomicBool = AtomicBool::new(false);
+
+/// Whether a VR HUD setting changed since the last call (window.rs).
+pub(crate) fn take_hud_changed() -> bool {
+    HUD_CHANGED.swap(false, Ordering::Relaxed)
+}
+
+/// Where the flight HUD sits in the headset (the settings' VR HUD page,
+/// `[vr] hud_distance / hud_spread / hud_size`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct HudLayout {
+    /// The sphere's radius, metres.
+    pub distance: f32,
+    /// How far out from the centre the gauges sit, sideways, relative to
+    /// the flat screen (up and down a little less).
+    pub spread: f32,
+    /// Gauge size relative to the flat panel's.
+    pub size: f32,
+}
+
+impl HudLayout {
+    pub const DEFAULT: HudLayout = HudLayout {
+        distance: 3.0,
+        spread: 2.25,
+        size: 1.0,
+    };
+    pub const DISTANCE_STEPS: [f32; 8] = [1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 7.0, 10.0];
+    pub const SPREAD_STEPS: [f32; 9] = [1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0];
+    pub const SIZE_STEPS: [f32; 8] = [0.6, 0.7, 0.8, 0.9, 1.0, 1.15, 1.3, 1.5];
+
+    /// The sphere's spread factors: sideways `spread`, up and down 60% as
+    /// much beyond 1.
+    pub fn spread_xy(&self) -> [f32; 2] {
+        [self.spread, 1.0 + (self.spread - 1.0) * 0.6]
+    }
+}
+
+static HUD_LAYOUT: std::sync::Mutex<Option<HudLayout>> = std::sync::Mutex::new(None);
+
+/// The HUD layout in force (loaded from the config the first time).
+pub(crate) fn hud_layout() -> HudLayout {
+    *HUD_LAYOUT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(|| {
+            let c = &crate::config::get().vr_hud;
+            let d = HudLayout::DEFAULT;
+            HudLayout {
+                distance: c.distance.unwrap_or(d.distance),
+                spread: c.spread.unwrap_or(d.spread),
+                size: c.size.unwrap_or(d.size),
+            }
+        })
+}
+
+/// A new HUD layout: in force at once (also while paused) and saved.
+pub(crate) fn set_hud_layout(l: HudLayout) {
+    *HUD_LAYOUT.lock().unwrap_or_else(|e| e.into_inner()) = Some(l);
+    HUD_CHANGED.store(true, Ordering::Relaxed);
+    if let Err(e) = crate::config::save_vr_hud_layout(l.distance, l.spread, l.size) {
+        eprintln!("[vr] HUD layout not saved: {e}");
+    }
+}
+
 /// Shows or hides one HUD element in the headset and saves the choice.
 pub(crate) fn set_hud_shown(id: u8, shown: bool) {
     let mask = hud_hidden();
@@ -91,6 +157,7 @@ pub(crate) fn set_hud_shown(id: u8, shown: bool) {
         mask | 1 << id
     };
     HUD_HIDDEN.store(mask, Ordering::Relaxed);
+    HUD_CHANGED.store(true, Ordering::Relaxed);
     let names: Vec<&str> = crate::hud_edit::ELEMENTS
         .iter()
         .filter(|e| mask & (1 << e.0) != 0)
@@ -600,14 +667,15 @@ mod real {
         // Everything on the panel has one depth; a little of each draw's
         // own depth on top keeps 3D HUD parts sorted among themselves.
         hud[2][2] += 0.05;
+        let layout = super::hud_layout();
         let hud_sphere = pw64_gfx::HudSphere {
             eye: mul(
                 &math::view(pose.orientation, pose.position),
                 &projection(NEAR_M),
             ),
-            radius: HUD_RADIUS_M,
-            rad_per_px: HUD_RAD_PER_PX,
-            spread: HUD_SPREAD,
+            radius: layout.distance,
+            rad_per_px: HUD_RAD_PER_PX * layout.size,
+            spread: layout.spread_xy(),
         };
         pw64_gfx::StereoEye {
             world,
@@ -619,16 +687,12 @@ mod real {
         }
     }
 
-    /// The flight HUD on a sphere around the player ([`pw64_gfx::HudSphere`]):
-    /// its distance, metres...
-    const HUD_RADIUS_M: f32 = 3.0;
-    /// ...the size of an N64 pixel, radians (the flat panel's was about
-    /// 0.0036: the gauges keep about their size)...
+    /// The flight HUD on a sphere around the player ([`pw64_gfx::HudSphere`],
+    /// placed by [`super::HudLayout`]): the size of an N64 pixel at size 1,
+    /// radians (the flat panel's was about 0.0036: the gauges keep about
+    /// their size). With the default spread a gauge at the screen's left
+    /// edge ends up about 66 degrees to the left: a turn of the head.
     const HUD_RAD_PER_PX: f32 = 0.0034;
-    /// ...and how much further out from the centre the gauges sit than on
-    /// the flat screen (sideways, up and down): a gauge at the screen's left
-    /// edge ends up about 45 degrees to the left, angled towards the player.
-    const HUD_SPREAD: [f32; 2] = [1.5, 1.3];
 
     /// The island model (outside flight, [`pw64_gfx::Diorama`]): how wide
     /// it is, in metres.
@@ -982,7 +1046,9 @@ mod real {
             // change moves the cue, i.e. makes one game frame's time step
             // differ from the time it is shown for. Hitches (level loads)
             // hit the cap and fall out of the ring again.
-            if let Some(cued) = *CUED_AT.lock().unwrap_or_else(|e| e.into_inner()) {
+            // Not for a redraw while paused (a VR HUD change): no cue then.
+            let cued = *CUED_AT.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(cued) = cued.filter(|t| t.elapsed() < Duration::from_millis(100)) {
                 let us = cued.elapsed().as_micros().min(u32::MAX as u128) as u32;
                 self.cue_to_eyes[(self.eye_serial % 256) as usize] = us;
                 let worst = self.cue_to_eyes.iter().copied().max().unwrap_or(0);
