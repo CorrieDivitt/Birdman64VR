@@ -297,7 +297,11 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
 - **Gyrocopter first person** shows the gyrocopter and its pilot in VR
   (asked for on the headset). The game hides them there
   (`gyrocopterMovementFrame`: `unk5D == 0` clears dobj state bit 2); in
-  VR flight the bit stays set and `pw64_dobj_cockpit` stays 0. The pilot
+  VR flight the bit stays set and `pw64_dobj_cockpit` stays 0, and the
+  model goes on the near list (state bit 4, `uvDobj_8021771C`: own
+  frustum after a z clear) like the hang glider's and birdman's first
+  person. Drawn in the main pass only, it was invisible on the headset:
+  the first-person near plane is 3 m (camera.c). The pilot
   is part of the gyrocopter model (one model per pilot; head `unk572`,
   arms posed by the joint animation `unk590`).
 - **Open**: the cannonball landing pull-back is the game's (fine on the
