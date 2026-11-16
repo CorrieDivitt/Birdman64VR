@@ -339,11 +339,13 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   surface and too low.
 - **Rocket belt first person**: the eye 0.25 m further back than the
   game's (`PW64_VR_RB_EYE_BACK_M`, rocketBeltEnterLeave; headset).
-- **Cannonball power bar** in VR: beside the heading strip at the bottom,
-  bottoms level (`pw64_vr_cb_power_push/pop`: the HUD view matrix moved by
-  `PW64_VR_CB_POWER_DX/DY`, 65, -52 px, placed for the default spread).
-  The shots left, drawn with it before, are their own HUD element now
-  ("Shots", `cb_shots`, id 13), so they stay where they were.
+- **Cannonball gauges** in VR, around the heading strip at the bottom
+  (`pw64_vr_hud_push/pop`: the HUD view matrix moved around their uvVtx
+  draws; offsets `PW64_VR_CB_*_DX/DY` in pw64_native.h, placed for the
+  default spread): the power bar left of it and the elevation meter right
+  of it, bottoms level with the strip's; the shots left (their own HUD
+  element now, "Shots", `cb_shots`, id 13; drawn with the power bar
+  before) centred just above it.
 - **Gyrocopter fuel gauge** in VR: moved for good to between the altimeter
   and the altitude (sea level) readout on the HUD sphere
   (`PW64_VR_GYRO_FUEL_X/Y`, 207, 53 in HUD px, y up; the flat game's

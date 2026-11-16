@@ -66,7 +66,8 @@
      if (arg0->speed == 0.0f) {
 +        pw64_hud_set_anchor2('L', 'B'); // PW64: power gauge + shots (widescreen)
 +        pw64_hud_element(PW64_HUD_CB_POWER);
-+        pw64_vr_cb_power_push(); // Birdman64VR: the bar beside the heading strip
++        // Birdman64VR: the bar left of the heading strip (pw64_native.h).
++        pw64_vr_hud_push(PW64_VR_CB_POWER_DX, PW64_VR_CB_POWER_DY);
          uvGfxStatePush();
          uvGfxSetFlags(GFX_STATE_XLU);
          uvGfxClearFlags(GFX_STATE_AA | GFX_STATE_ZBUFFER);
@@ -74,14 +75,18 @@
          uvVtx(33, 181, 0, 0, 0, 0, 0, 0, 255);
          uvVtxEndPoly();
          uvGfxStatePop();
-+        pw64_vr_cb_power_pop();
++        pw64_vr_hud_pop();
 +        pw64_hud_element(PW64_HUD_CB_SHOTS); // PW64: movable HUD (shots left)
++        // Birdman64VR: the shots left centred just above the heading strip.
++        pw64_vr_hud_push(PW64_VR_CB_SHOTS_DX - 8.0f * (arg0->unk8 > 0 ? arg0->unk8 - 1 : 0),
++                         PW64_VR_CB_SHOTS_DY);
  
          for (i = 0; i < arg0->unk8; i++) {
 @@ -436,6 +465,7 @@ void hudDrawCannonball(HUDState* arg0) {
              uvVtxEndPoly();
              uvGfxStatePop();
          }
++        pw64_vr_hud_pop(); // Birdman64VR: the shots left
 +        pw64_hud_set_anchor2('C', 'B'); // PW64: heading bar
 +        pw64_hud_element(PW64_HUD_CB_HEADING);
          uvGfxStatePush();
@@ -93,10 +98,17 @@
          uvGfxStatePop();
 +        pw64_hud_set_anchor2('R', 'B'); // PW64: elevation gauge
 +        pw64_hud_element(PW64_HUD_CB_ELEVATION);
++        // Birdman64VR: right of the heading strip (pw64_native.h).
++        pw64_vr_hud_push(PW64_VR_CB_ELEVATION_DX, PW64_VR_CB_ELEVATION_DY);
          uvGfxStatePush();
          uvGfxSetFlags(GFX_STATE_XLU);
          uvGfxClearFlags(GFX_STATE_AA | GFX_STATE_ZBUFFER);
-@@ -686,6 +717,7 @@ void hudDrawBirdman(HUDState* hud) {
+@@ -634,3 +668,4 @@ void hudDrawCannonball(HUDState* arg0) {
+         uvVtxEndPoly();
+         uvGfxStatePop();
++        pw64_vr_hud_pop(); // Birdman64VR: the elevation meter
+         hudDrawRadar(215, 222, arg0->att.x, arg0->att.y, arg0->att.heading, arg0->unk20, &arg0->radar);
+@@ -686,6 +725,7 @@ void hudDrawBirdman(HUDState* hud) {
  }
  
  void hudDrawCamera(HUDState* hud) {
@@ -105,7 +117,7 @@
      s32 x;
  
      if (hud->cameraState & HUD_CAM_RENDER_RETICLE) {
-@@ -703,6 +735,7 @@ void hudDrawCamera(HUDState* hud) {
+@@ -703,6 +743,7 @@ void hudDrawCamera(HUDState* hud) {
          }
      } else if (hud->cameraState & HUD_CAM_RENDER_SHUTTER) {
          hud->cameraState = CAMERA_SHUTTER_FRAMES; // state now means # frames to render shutter
@@ -113,7 +125,7 @@
      } else if (hud->cameraState != 0) {
          // field is count down for rendering black rects for shutter
          if (hud->cameraState != 0) {
-@@ -711,9 +744,23 @@ void hudDrawCamera(HUDState* hud) {
+@@ -711,9 +752,23 @@ void hudDrawCamera(HUDState* hud) {
              x = hud->cameraState * (240 / CAMERA_SHUTTER_FRAMES);
          }
          uvGfxBindTexture(GFX_STATE_TEXTURE_NONE);
@@ -140,7 +152,7 @@
          D_8034F914 = 0;
      }
  }
-@@ -723,7 +770,13 @@ void hudDrawGyrocopter(HUDState* hud) {
+@@ -723,7 +778,13 @@ void hudDrawGyrocopter(HUDState* hud) {
      hudSeaLevel(235, 37, (s32)hud->altSeaLevel);
      hudDrawAltimeter(250, 129, (s32)hud->altitude);
      hudDrawRadar(215, 222, hud->att.x, hud->att.y, hud->att.heading, hud->att.pitch, &hud->radar);
@@ -155,7 +167,7 @@
      hudDrawThrottle(27, 82, hud->power);
      hudDrawTimer(27, 222, hud->elapsedTime);
      if (hud->renderFlags & HUD_RENDER_RETICLE) {
-@@ -918,6 +971,7 @@ void hud_8031A8E0(s32 idx) {
+@@ -918,6 +979,7 @@ void hud_8031A8E0(s32 idx) {
  }
  
  void hudDrawThrottle(s32 x, s32 y, f32 power) {
@@ -164,7 +176,7 @@
      Mtx4F rot;
      UNUSED s16* fakePtr;
      s16 y1;
-@@ -979,6 +1033,7 @@ void hudDrawThrottle(s32 x, s32 y, f32 power) {
+@@ -979,6 +1041,7 @@ void hudDrawThrottle(s32 x, s32 y, f32 power) {
  }
  
  void hudDrawRadar(s32 x, s32 y, f32 xOff, f32 yOff, f32 heading, f32 pitch, HUDRadar* radar) {
@@ -173,7 +185,7 @@
      Mtx4F sp108;
      Mtx4F spC8;
      f32 temp_fa0;
-@@ -1188,14 +1243,15 @@ void hudDrawRadar(s32 x, s32 y, f32 xOff, f32 yOff, f32 heading, f32 pitch, HUDR
+@@ -1188,14 +1251,15 @@ void hudDrawRadar(s32 x, s32 y, f32 xOff, f32 yOff, f32 heading, f32 pitch, HUDR
          }
  
          temp_fv0_3 = radar->waypoints[idx].z - heading;
@@ -191,14 +203,14 @@
              if (radar->waypoints[idx].unk18 > 0xFF) {
                  radar->waypoints[idx].unk14 = 1;
                  radar->waypoints[idx].unk18 = 0xFF;
-@@ -1233,6 +1289,7 @@ void hudDrawRadar(s32 x, s32 y, f32 xOff, f32 yOff, f32 heading, f32 pitch, HUDR
+@@ -1233,6 +1297,7 @@ void hudDrawRadar(s32 x, s32 y, f32 xOff, f32 yOff, f32 heading, f32 pitch, HUDR
          }
      }
 +    pw64_radar_peers(xOff, yOff, pitch); // PW64 split-screen: under our own icon
      uvSprtProps(0, SPRT_PROP_POS(x + 31, y - 33), SPRT_PROP_END);
      uvSprtDraw(0);
      uvGfxMtxViewPop();
-@@ -1243,6 +1299,7 @@ void hudDemoContButton(s32 spriteId, s32 x, s32 y) {
+@@ -1243,6 +1307,7 @@ void hudDemoContButton(s32 spriteId, s32 x, s32 y) {
  }
  
  void hudDemoController(void) {
@@ -207,7 +219,7 @@
      s32 screenX;
      s32 screenY;
      f32 stickX;
-@@ -1299,6 +1356,7 @@ void hudDemoController(void) {
+@@ -1299,6 +1364,7 @@ void hudDemoController(void) {
  }
  
  void hudDrawSpeed(s32 x, s32 y, s32 speed, s32 highlightLowSpeed) {
@@ -216,7 +228,7 @@
      char str[12];
      s32 numX;
  
-@@ -1327,6 +1385,7 @@ void hudDrawSpeed(s32 x, s32 y, s32 speed, s32 highlightLowSpeed) {
+@@ -1327,6 +1393,7 @@ void hudDrawSpeed(s32 x, s32 y, s32 speed, s32 highlightLowSpeed) {
  }
  
  void hudDrawFuel(s32 x, s32 y, f32 fuel) {
@@ -225,7 +237,7 @@
      s16 curX1;
      s16 curX2;
      s16 curY1;
-@@ -1415,6 +1474,7 @@ void hudDrawFuel(s32 x, s32 y, f32 fuel) {
+@@ -1415,6 +1482,7 @@ void hudDrawFuel(s32 x, s32 y, f32 fuel) {
  }
  
  void hudDrawAltimeter(s32 x, s32 y, s32 altitude) {
@@ -234,7 +246,7 @@
      s32 pad32;
      s16 sp72;
      s16 pad16;
-@@ -1534,6 +1594,7 @@ void hudDrawAltimeter(s32 x, s32 y, s32 altitude) {
+@@ -1534,6 +1602,7 @@ void hudDrawAltimeter(s32 x, s32 y, s32 altitude) {
  }
  
  void hudSeaLevel(s32 x, s32 y, s32 alt) {
@@ -243,7 +255,7 @@
      char str[12];
  
      y += 8;
-@@ -1561,6 +1622,7 @@ void hudSeaLevel(s32 x, s32 y, s32 alt) {
+@@ -1561,6 +1630,7 @@ void hudSeaLevel(s32 x, s32 y, s32 alt) {
  }
  
  void hudDrawTimer(s32 x, s32 y, f32 timeSecF) {
@@ -252,7 +264,7 @@
      static s32 D_8034F938 = 0;
      s32 timeMs;
      s32 timeSec;
-@@ -1569,6 +1631,9 @@ void hudDrawTimer(s32 x, s32 y, f32 timeSecF) {
+@@ -1569,6 +1639,9 @@ void hudDrawTimer(s32 x, s32 y, f32 timeSecF) {
      s32 adjHundth;
      char timeStr[12];
  
@@ -262,7 +274,7 @@
      if (timeSecF != 0.0f) {
          if (timeSecF < (D_8034F910 + 0.083f)) {
              timeSecF = D_8034F910;
-@@ -1613,6 +1678,7 @@ void hudDrawTimer(s32 x, s32 y, f32 timeSecF) {
+@@ -1613,6 +1686,7 @@ void hudDrawTimer(s32 x, s32 y, f32 timeSecF) {
  }
  
  void hudDrawAimReticle(s32 x, s32 y, s32 flag) {
@@ -271,7 +283,7 @@
      s16 centerX;
      s16 centerY;
  
-@@ -2055,6 +2121,7 @@ void hudDrawRect(s32 x, s32 y, s32 width, s32 height, s32 penWidth, u8 r, u8 g,
+@@ -2055,6 +2129,7 @@ void hudDrawRect(s32 x, s32 y, s32 width, s32 height, s32 penWidth, u8 r, u8 g,
  }
  
  void hudDrawPhotoCount(void) {
@@ -280,7 +292,7 @@
      char str[12];
      (void)snapGetPhotoCount();
      uvFontSet(8);
-@@ -2075,3 +2142,12 @@ void hudDrawPhotoCount(void) {
+@@ -2075,3 +2150,12 @@ void hudDrawPhotoCount(void) {
  void hudDemoControllerEn(u8 enable) {
      sHudState.showController = enable;
  }

@@ -137,15 +137,22 @@ void pw64_vr_dash_set(int objId, const float (*points)[3]);
 /* The gyrocopter's dashboard on (`on`) or off for dobj `objId` with model
  * `modelId` (code_7CF30.c.patch, every frame). */
 void pw64_vr_gyro_dash(int objId, int modelId, int on);
-/* Birdman64VR, same file: the cannonball's power bar moved in VR, by this
- * much (N64 HUD px, y up): beside the heading strip at the bottom, its
- * right edge 8 px-angles left of the strip's, their bottoms level, on the
- * HUD sphere at the default spread (275%). Push before its draws, pop
- * after. */
+/* Birdman64VR, same file: a HUD part moved in VR by (dx, dy) N64 HUD px,
+ * y up (the view matrix around its uvVtx draws); push before, pop after. */
+void pw64_vr_hud_push(float dx, float dy);
+void pw64_vr_hud_pop(void);
+/* The cannonball's gauges around the heading strip at the bottom, on the
+ * HUD sphere at the default spread (275%; the strip is x 27-285, y 23-42):
+ * the power bar left of it and the elevation meter right of it, 8
+ * px-angles away, bottoms level with the strip's; the shots left centred
+ * just above it (their row is 16 px per shot wide, so x depends on the
+ * count: PW64_VR_CB_SHOTS_DX - 8 per shot after the first). */
 #define PW64_VR_CB_POWER_DX 65.0f
 #define PW64_VR_CB_POWER_DY -52.0f
-void pw64_vr_cb_power_push(void);
-void pw64_vr_cb_power_pop(void);
+#define PW64_VR_CB_ELEVATION_DX -64.5f
+#define PW64_VR_CB_ELEVATION_DY -44.0f
+#define PW64_VR_CB_SHOTS_DX 120.5f
+#define PW64_VR_CB_SHOTS_DY -170.5f
 /* Birdman64VR, same file: outside a test's flight, a world view with
  * terrain is shown as a small model of the island (the "diorama": menus,
  * title fly-over, results, replays). 1 for such a channel

@@ -740,19 +740,20 @@ static void pw64_vr_dash_tag(const UnkStruct_80204D94* c) {
     }
 }
 
-/* Birdman64VR: the cannonball's power bar in VR, moved beside the heading
- * strip at the bottom (hud.c.patch hudDrawCannonball): a translation of
- * the HUD's view matrix around its draws. */
-void pw64_vr_cb_power_push(void) {
+/* Birdman64VR: a HUD part moved in VR (the cannonball's gauges around the
+ * heading strip, hud.c.patch hudDrawCannonball): a translation of the
+ * HUD's view matrix (N64 HUD px, y up) around its uvVtx draws. Nothing
+ * outside VR; every push is followed by a pop. */
+void pw64_vr_hud_push(float dx, float dy) {
     Mtx4F m;
     if (pw64_widescreen_aspect < 0.0f) {
         uvMat4SetIdentity(&m);
-        uvMat4LocalTranslate(&m, PW64_VR_CB_POWER_DX, PW64_VR_CB_POWER_DY, 0.0f);
+        uvMat4LocalTranslate(&m, dx, dy, 0.0f);
         uvGfxMtxViewLoad(&m, 1);
     }
 }
 
-void pw64_vr_cb_power_pop(void) {
+void pw64_vr_hud_pop(void) {
     if (pw64_widescreen_aspect < 0.0f) {
         uvGfxMtxViewPop();
     }
