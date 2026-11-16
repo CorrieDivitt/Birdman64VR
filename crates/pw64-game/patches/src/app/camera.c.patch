@@ -8,16 +8,18 @@
  
  // TODO: Unk802D472C_SP60 needs to be merged with some combination of Unk802D3658_Unk1224/8
  typedef struct {
-@@ -27,6 +28,8 @@ s32 pad_D_8034E9E8 = 0;
+@@ -27,6 +28,10 @@ s32 pad_D_8034E9E8 = 0;
  
  // .bss
  Unk803599D0 D_803599D0;
 +// PW64 split-screen: hoisted from camera_802D4274 (pw64_reg_camera).
 +static f32 D_80359A24;
++// PW64 VR: when the pilot came to rest (camera_802D4274).
++static f32 sPw64RestAt;
  
  // forward declarations
  STATIC_FUNC s32 camera_802D408C(Camera* camera);
-@@ -192,6 +195,13 @@ STATIC_FUNC void camera_802D3658(Camera* camera) {
+@@ -192,6 +197,13 @@ STATIC_FUNC void camera_802D3658(Camera* camera) {
      f32 temp_fa0;
  
      uvMat4UnkOp6(&sp30, &camera->unk80, &camera->unk108);
@@ -31,7 +33,7 @@
      uvMat4Copy(&camera->unk108, &sp30);
      temp_fa0 = uvSqrtF(SQ(camera->unk108.m[3][0] - camera->unk80.m[3][0]) + SQ(camera->unk108.m[3][1] - camera->unk80.m[3][1]) +
                         SQ(camera->unk108.m[3][2] - camera->unk80.m[3][2])) -
-@@ -245,10 +255,11 @@ STATIC_FUNC void camera_802D3790(Camera* camera) {
+@@ -245,10 +257,11 @@ STATIC_FUNC void camera_802D3790(Camera* camera) {
              var_fv0 = -camera->unk1378;
          }
          temp_fv1_2 = camera->unk1380;
@@ -47,7 +49,7 @@
          }
          camera->unk1380 = var_fv0;
          spA4.z = (-uvSinF(var_fv0 * 0.0174533f) * camera->unk1374) + spBC.z; // almost DEG_TO_RAD(1)
-@@ -452,7 +463,6 @@ STATIC_FUNC void camera_802D41D8(Camera* camera) {
+@@ -452,7 +465,6 @@ STATIC_FUNC void camera_802D41D8(Camera* camera) {
  }
  
  STATIC_FUNC void camera_802D4274(Camera* camera) {
@@ -55,7 +57,22 @@
      Mtx4F sp70; // 70:AF
      f32 sp6C;
      f32 sp68;
-@@ -476,6 +486,12 @@ STATIC_FUNC void camera_802D4274(Camera* camera) {
+@@ -460,3 +472,14 @@ STATIC_FUNC void camera_802D4274(Camera* camera) {
+     f32 var_fs0;
+ 
++    // PW64 VR: the pilot at rest: hold the crash camera still for 1 s,
++    // then the snap below. unkE 2 = waiting since sPw64RestAt.
++    if ((pw64_widescreen_aspect < 0.0f) && (camera->unkE != 0)) {
++        if (camera->unkE == 1) {
++            camera->unkE = 2;
++            sPw64RestAt = camera->unk14;
++        }
++        if ((camera->unk14 >= sPw64RestAt) && (camera->unk14 - sPw64RestAt < 1.0f)) {
++            return;
++        }
++    }
+     if (camera->unkE != 0) {
+@@ -476,6 +499,12 @@ STATIC_FUNC void camera_802D4274(Camera* camera) {
              D_80359A24 = camera->unk190;
          }
 -    } else {
@@ -69,7 +86,7 @@
          camera->unk194 += camera->unk19C * D_8034F854;
          D_80359A24 = func_80313AF4(camera->unk190, D_80359A24, 1.0f);
      }
-@@ -955,8 +971,9 @@ STATIC_FUNC void camera_802D559C(Camera* camera) {
+@@ -955,8 +984,9 @@ STATIC_FUNC void camera_802D559C(Camera* camera) {
      uvMat4UnkOp6(&camera->unk108, &camera->unk80, &sp48);
      temp_v0 = camera_802D472C(camera, &sp48);
      if (temp_v0 != 0) {
@@ -81,7 +98,7 @@
          uvMat4UnkOp6(&camera->unk108, &camera->unk80, &sp48);
      }
  }
-@@ -1001,3 +1018,63 @@ STATIC_FUNC void camera_802D58EC(Camera* camera, Mtx4F* arg1) {
+@@ -1001,3 +1031,64 @@ STATIC_FUNC void camera_802D58EC(Camera* camera, Mtx4F* arg1) {
      camera->unk220 = func_80313AF4(var_fa0, camera->unk220, 1.0f);
      uvMat4RotateAxis(arg1, camera->unk220 * 0.01745329f, 'x'); // almost DEG_TO_RAD(1)
  }
@@ -183,4 +200,5 @@
 +    PW64_REG(D_8034E9E0);
 +    PW64_REG(D_8034E9E4);
 +    PW64_REG(D_80359A24);
++    PW64_REG(sPw64RestAt);
 +}
