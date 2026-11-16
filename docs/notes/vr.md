@@ -320,8 +320,18 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   first-person camera up to 45 degrees from the nose). The renderer draws
   the elements in `StereoEye::hud_dash` there instead of on the sphere
   (`DashPanel`, shader `u.vr.w == 3`: a flat panel facing the eye, level
-  with the vehicle, 2 mm per N64 pixel, over the cockpit like the rest of
-  the HUD). The pilot
+  with the vehicle, 2 mm per N64 pixel). It is drawn with the world's last
+  pass (the cockpit's, after the near-list depth clear) and depth tested,
+  as if 15% nearer (`DashPanel::DEPTH_PULL`: the dashboard surface, which
+  the point may sit just behind, never hides it), so the pilot's hands
+  pass in front of it; drawn over everything in the HUD pass, the hand
+  went behind the gauge (headset).
+- **Gyrocopter fuel gauge** in VR: moved for good to between the altimeter
+  and the altitude (sea level) readout on the HUD sphere
+  (`PW64_VR_GYRO_FUEL_X/Y`, 207, 53 in HUD px, y up; the flat game's
+  98, 37): its centre midway between the altimeter's lower end and the
+  readout at the default spread (275%), horizontally between their
+  centres. The pilot
   is part of the gyrocopter model (one model per pilot; head `unk572`,
   arms posed by the joint animation `unk590`).
 - **Open**: the cannonball landing pull-back is the game's (fine on the

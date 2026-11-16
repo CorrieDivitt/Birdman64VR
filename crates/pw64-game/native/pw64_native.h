@@ -124,6 +124,13 @@ void pw64_vr_dash_set(int objId, float x, float y, float z);
  * and below the middle of the windscreen's lower edge, model units (cm). */
 #define PW64_VR_GYRO_DASH_BACK 15.0f
 #define PW64_VR_GYRO_DASH_DOWN 3.0f
+/* Birdman64VR: the gyrocopter's fuel gauge in VR (hud.c.patch
+ * hudDrawGyrocopter; the flat game's is at 98, 37), N64 HUD px, y up: on
+ * the HUD sphere at the default spread (275%) its centre sits midway
+ * between the altimeter's lower end and the altitude (sea level) readout
+ * below it, horizontally between their centres. */
+#define PW64_VR_GYRO_FUEL_X 207
+#define PW64_VR_GYRO_FUEL_Y 53
 /* The gyrocopter's dashboard on (`on`) or off for dobj `objId` with model
  * `modelId` (code_7CF30.c.patch, every frame). */
 void pw64_vr_gyro_dash(int objId, int modelId, int on);

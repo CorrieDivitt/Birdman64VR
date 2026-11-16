@@ -80,8 +80,12 @@ fn vs_main(v: VIn) -> VOut {
         let a = u.clip[0];
         let r = u.clip[1];
         let up = u.clip[2];
-        let q = a.xyz + r.xyz * ((p.x - r.w) * a.w) + up.xyz * ((up.w - p.y) * a.w);
-        o.pos = u.eye * vec4<f32>(q * (1.0 - 0.01 * clamp(p.z, 0.0, 1.0)), 1.0);
+        let q = (a.xyz + r.xyz * ((p.x - r.w) * a.w) + up.xyz * ((up.w - p.y) * a.w))
+            * (1.0 - 0.01 * clamp(p.z, 0.0, 1.0));
+        o.pos = u.eye * vec4<f32>(q, 1.0);
+        // Depth as if u.clip[3].x of the way from the eye (DEPTH_PULL).
+        let n = u.eye * vec4<f32>(q * u.clip[3].x, 1.0);
+        o.pos.z = n.z / n.w * o.pos.w;
     }
     o.color = v.color;
     o.st = v.st;
