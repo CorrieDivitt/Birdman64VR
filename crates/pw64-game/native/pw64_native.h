@@ -109,6 +109,13 @@ extern int pw64_vr_stereo_view;
 /* Birdman64VR, same file: the title screen's phase (its unk28, 1..8;
  * title_screen.c.patch), sent to the renderer for the log. */
 extern int pw64_vr_title_phase;
+/* Birdman64VR, same file: the results menu has appeared (results.c.patch
+ * resultInit); until then the view after landing stays full size. */
+extern int pw64_vr_results_menu;
+/* Birdman64VR, same file: turns camera matrix `cur` (Mtx4F*) towards
+ * `target`'s direction, slowly and level, keeping its position
+ * (camera.c.patch: the crash camera in VR). */
+void pw64_vr_turn_towards(void* cur, const void* target, float dt);
 /* Fill screen (renderer.md "Fill screen"), same file: 0 = off (set by Rust
  * before boot), the per-frame "a filled world view was drawn" flag (reset
  * at the top of uvGfxBegin, graphics.c.patch) and the vertical

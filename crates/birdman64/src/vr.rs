@@ -752,16 +752,19 @@ mod real {
         // The title: full size, following the game camera (which the
         // title's patch slows down in VR), level and a little behind it,
         // so the pilots flying by and the logo are seen from further back.
-        if d.title {
+        // A badge celebration: the same at full size, level, with no
+        // offset: its camera stands still while the pilots fly past.
+        if d.title || d.celebration {
+            let (back, up) = if d.title {
+                (TITLE_BACK_M, TITLE_UP_M)
+            } else {
+                (0.0, 0.0)
+            };
             let mut eye = stereo_eye(pose);
             eye.hud_sphere = None;
             let mut at = level(d.camera);
             let [fwd, pos] = [at[1], at[3]];
-            at[3] = [
-                pos[0] - fwd[0] * TITLE_BACK_M,
-                pos[1] - fwd[1] * TITLE_BACK_M,
-                pos[2] + TITLE_UP_M,
-            ];
+            at[3] = [pos[0] - fwd[0] * back, pos[1] - fwd[1] * back, pos[2] + up];
             if let Some(world_to_at) = pw64_gfx::matrix::inverse(&pw64_gfx::Diorama::to_world(&at))
             {
                 eye.world = mul(&mul(&d.camera_to_world(), &world_to_at), &eye.world);
@@ -1086,6 +1089,7 @@ mod real {
             if frame.diorama.is_some() != self.model {
                 self.model = frame.diorama.is_some();
                 let what = match &frame.diorama {
+                    Some(d) if d.celebration => "badge celebration: full size, level".into(),
                     Some(d) if d.title => {
                         format!("title: following its camera, island bounds {:?}", d.bounds)
                     }
@@ -1858,6 +1862,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 ],
                 bounds: [0.0, 0.0, -10.0, 2000.0, 2000.0, 300.0],
                 title: false,
+                celebration: false,
                 state: 0,
                 title_phase: -1,
             };
@@ -1912,6 +1917,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 ],
                 bounds: [0.0, 0.0, 0.0, 2000.0, 2000.0, 300.0],
                 title: true,
+                celebration: false,
                 state: 0,
                 title_phase: 1,
             };
@@ -1929,6 +1935,38 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             );
             assert!((0..4).all(|i| (a[i] - b[i]).abs() < 1e-3), "{a:?} {b:?}");
             assert!(eye.clip.is_none() && eye.background.is_none());
+        }
+
+        /// A badge celebration: the flight view from the game camera's own
+        /// (level) spot, no offset, flat HUD panel.
+        #[test]
+        fn celebration_view_is_the_cameras_own() {
+            let fov = std::f32::consts::FRAC_PI_4;
+            let pose = pw64_xr::EyePose {
+                orientation: [0.0, 0.0, 0.0, 1.0],
+                position: [0.0; 3],
+                fov: [-fov, fov, fov, -fov],
+            };
+            let d = pw64_gfx::Diorama {
+                camera: [
+                    [0.0, -1.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                    [100.0, 200.0, 50.0],
+                ],
+                bounds: [0.0, 0.0, 0.0, 2000.0, 2000.0, 300.0],
+                title: false,
+                celebration: true,
+                state: 14,
+                title_phase: -1,
+            };
+            let eye = super::diorama_eye(&pose, &d);
+            let flight = super::stereo_eye(&pose).world;
+            let near = |a: &super::Mat4, b: &super::Mat4| {
+                (0..4).all(|i| (0..4).all(|j| (a[i][j] - b[i][j]).abs() < 1e-4))
+            };
+            assert!(near(&eye.world, &flight));
+            assert!(eye.clip.is_none() && eye.hud_sphere.is_none());
         }
 
         /// Every shader parses and validates (no GPU needed).

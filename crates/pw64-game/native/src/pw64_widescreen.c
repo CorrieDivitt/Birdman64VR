@@ -14,6 +14,7 @@
  */
 #include <ultra64.h>
 #include <uv_graphics.h>
+#include <uv_math.h>
 #include "app/game.h"
 
 /* Output aspect w/h, 0 = 4:3 (off). Set by Rust before boot
@@ -31,9 +32,60 @@ float pw64_widescreen_aspect = 0.0f;
  * 3D background, results, replays) the camera moves on its own, swooping
  * and cutting, which is disorienting when it is the player's head: those
  * stay a flat picture on the VR panel, untagged and culled as usual. */
+int pw64_vr_results_menu = 0;
+
 int pw64_vr_flight(void) {
-    return pw64_widescreen_aspect < 0.0f && D_80362690 != NULL &&
-           D_80362690->state == GAME_STATE_TEST_UPDATE;
+    if (pw64_widescreen_aspect >= 0.0f || D_80362690 == NULL) {
+        return 0;
+    }
+    if (D_80362690->state == GAME_STATE_TEST_UPDATE) {
+        pw64_vr_results_menu = 0;
+        return 1;
+    }
+    /* Birdman64VR: after landing the view stays full size around the
+     * player until the results menu appears (the player sees how they
+     * did; the cannonball waits there between shots). */
+    return D_80362690->state == GAME_STATE_RESULTS && !pw64_vr_results_menu;
+}
+
+void pw64_vr_turn_towards(void* cur_, const void* target_, float dt) {
+    Mtx4F* cur = cur_;
+    const Mtx4F* target = target_;
+    float k = dt * 1.5f; /* about two thirds of the way in a second */
+    float f[3], r[3], len;
+    int i;
+
+    if (k > 1.0f) {
+        k = 1.0f;
+    }
+    for (i = 0; i < 3; i++) {
+        f[i] = cur->m[1][i] + (target->m[1][i] - cur->m[1][i]) * k;
+    }
+    len = uvSqrtF(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
+    if (len < 1e-4f) {
+        return;
+    }
+    for (i = 0; i < 3; i++) {
+        f[i] /= len;
+    }
+    /* Level: right is horizontal (up = world z), no roll. Straight up or
+     * down keeps the last right. */
+    r[0] = f[1];
+    r[1] = -f[0];
+    r[2] = 0.0f;
+    len = uvSqrtF(r[0] * r[0] + r[1] * r[1]);
+    if (len < 1e-4f) {
+        return;
+    }
+    r[0] /= len;
+    r[1] /= len;
+    for (i = 0; i < 3; i++) {
+        cur->m[0][i] = r[i];
+        cur->m[1][i] = f[i];
+    }
+    cur->m[2][0] = r[1] * f[2] - r[2] * f[1];
+    cur->m[2][1] = r[2] * f[0] - r[0] * f[2];
+    cur->m[2][2] = r[0] * f[1] - r[1] * f[0];
 }
 
 /* VR outside a test's flight: a full-width world view of an island is
@@ -107,9 +159,8 @@ static int pw64_diorama_bounds(const UnkStruct_80204D94* c, float out[6]) {
 int pw64_vr_diorama(const void* chan) {
     const UnkStruct_80204D94* c = chan;
     float b[6];
-    return pw64_widescreen_aspect < 0.0f &&
-           (D_80362690 == NULL || D_80362690->state != GAME_STATE_TEST_UPDATE) &&
-           c->viewX0 <= 16 && c->viewX1 >= SCREEN_WIDTH - 16 && pw64_diorama_bounds(c, b);
+    return pw64_widescreen_aspect < 0.0f && !pw64_vr_flight() && c->viewX0 <= 16 &&
+           c->viewX1 >= SCREEN_WIDTH - 16 && pw64_diorama_bounds(c, b);
 }
 
 int pw64_vr_stereo_view = 0;
@@ -136,8 +187,12 @@ static void pw64_diorama_tag(const UnkStruct_80204D94* c) {
     if (!pw64_diorama_bounds(c, &v[12])) {
         return;
     }
+    /* 1: the title (followed, behind and below); 2: a badge celebration
+     * (its camera stands still: followed, full size, level). */
     title = D_80362690 != NULL && D_80362690->state == GAME_STATE_TITLE;
-    v[18] = title ? 1.0f : 0.0f;
+    v[18] = title ? 1.0f
+            : (D_80362690 != NULL && D_80362690->state == GAME_STATE_CONGRATULATIONS) ? 2.0f
+                                                                                    : 0.0f;
     v[19] = D_80362690 != NULL ? (float)D_80362690->state : -1.0f;
     v[20] = title ? (float)pw64_vr_title_phase : -1.0f;
     for (i = 0; i < 21; i++) {

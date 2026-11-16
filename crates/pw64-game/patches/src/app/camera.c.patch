@@ -17,7 +17,21 @@
  
  // forward declarations
  STATIC_FUNC s32 camera_802D408C(Camera* camera);
-@@ -245,10 +248,11 @@ STATIC_FUNC void camera_802D3790(Camera* camera) {
+@@ -192,6 +195,13 @@ STATIC_FUNC void camera_802D3658(Camera* camera) {
+     f32 temp_fa0;
+ 
+     uvMat4UnkOp6(&sp30, &camera->unk80, &camera->unk108);
++    // PW64 VR: the crash camera stays where it is and turns towards the
++    // pilot slowly and level (pw64_vr_turn_towards), instead of snapping
++    // onto them every frame and jumping back when they come close.
++    if (pw64_widescreen_aspect < 0.0f) {
++        pw64_vr_turn_towards(&camera->unk108, &sp30, D_8034F854);
++        return;
++    }
+     uvMat4Copy(&camera->unk108, &sp30);
+     temp_fa0 = uvSqrtF(SQ(camera->unk108.m[3][0] - camera->unk80.m[3][0]) + SQ(camera->unk108.m[3][1] - camera->unk80.m[3][1]) +
+                        SQ(camera->unk108.m[3][2] - camera->unk80.m[3][2])) -
+@@ -245,10 +255,11 @@ STATIC_FUNC void camera_802D3790(Camera* camera) {
              var_fv0 = -camera->unk1378;
          }
          temp_fv1_2 = camera->unk1380;
@@ -33,7 +47,7 @@
          }
          camera->unk1380 = var_fv0;
          spA4.z = (-uvSinF(var_fv0 * 0.0174533f) * camera->unk1374) + spBC.z; // almost DEG_TO_RAD(1)
-@@ -452,7 +456,6 @@ STATIC_FUNC void camera_802D41D8(Camera* camera) {
+@@ -452,7 +463,6 @@ STATIC_FUNC void camera_802D41D8(Camera* camera) {
  }
  
  STATIC_FUNC void camera_802D4274(Camera* camera) {
@@ -41,7 +55,7 @@
      Mtx4F sp70; // 70:AF
      f32 sp6C;
      f32 sp68;
-@@ -955,8 +958,9 @@ STATIC_FUNC void camera_802D559C(Camera* camera) {
+@@ -955,8 +965,9 @@ STATIC_FUNC void camera_802D559C(Camera* camera) {
      uvMat4UnkOp6(&camera->unk108, &camera->unk80, &sp48);
      temp_v0 = camera_802D472C(camera, &sp48);
      if (temp_v0 != 0) {
@@ -53,7 +67,7 @@
          uvMat4UnkOp6(&camera->unk108, &camera->unk80, &sp48);
      }
  }
-@@ -1001,3 +1005,63 @@ STATIC_FUNC void camera_802D58EC(Camera* camera, Mtx4F* arg1) {
+@@ -1001,3 +1012,63 @@ STATIC_FUNC void camera_802D58EC(Camera* camera, Mtx4F* arg1) {
      camera->unk220 = func_80313AF4(var_fa0, camera->unk220, 1.0f);
      uvMat4RotateAxis(arg1, camera->unk220 * 0.01745329f, 'x'); // almost DEG_TO_RAD(1)
  }

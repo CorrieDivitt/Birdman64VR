@@ -288,6 +288,9 @@ pub struct Diorama {
     /// a little behind it) at full size instead of showing a model; the
     /// game's title moves that camera slower in VR.
     pub title: bool,
+    /// A badge celebration: followed at full size too (its camera stands
+    /// still), without the title's offset.
+    pub celebration: bool,
     /// The game state and, on the title, its phase (-1 otherwise): for
     /// the log.
     pub state: i32,
@@ -301,7 +304,8 @@ impl Diorama {
         Self {
             camera: [r(0), r(1), r(2), r(3)],
             bounds: [v[12], v[13], v[14], v[15], v[16], v[17]],
-            title: v[18] != 0.0,
+            title: v[18] == 1.0,
+            celebration: v[18] == 2.0,
             state: v[19] as i32,
             title_phase: v[20] as i32,
         }
