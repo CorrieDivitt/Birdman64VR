@@ -871,7 +871,7 @@ fn from_table(table: &toml::Table) -> Config {
             Some(t) => {
                 for (key, lo, hi) in [
                     ("hud_distance", 0.5, 20.0),
-                    ("hud_spread", 0.5, 4.0),
+                    ("hud_spread", 0.5, 5.0),
                     ("hud_size", 0.3, 3.0),
                 ] {
                     let Some(v) = t.get(key) else { continue };

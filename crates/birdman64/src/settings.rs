@@ -3913,8 +3913,8 @@ fn help(row: Row) -> &'static str {
              more like a helmet display, further more like the sky."
         }
         Row::HudSpread => {
-            "How far apart the gauges sit around you. Wide: turn your head a little to read \
-             the outer ones; 100% is the flat game's layout."
+            "How far apart the gauges sit around you. Wide: turn your head to read the outer \
+             ones; 100% is the flat game's layout."
         }
         Row::HudSize => "How big the gauges are.",
         Row::HudShow(_) => {

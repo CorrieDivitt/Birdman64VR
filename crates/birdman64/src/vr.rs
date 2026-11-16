@@ -105,14 +105,19 @@ pub(crate) struct HudLayout {
 }
 
 impl HudLayout {
+    /// Chosen by the user in the headset (2026-11-15).
     pub const DEFAULT: HudLayout = HudLayout {
-        distance: 3.0,
-        spread: 2.25,
-        size: 1.0,
+        distance: 10.0,
+        spread: 2.75,
+        size: 0.9,
     };
-    pub const DISTANCE_STEPS: [f32; 8] = [1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 7.0, 10.0];
-    pub const SPREAD_STEPS: [f32; 9] = [1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0];
-    pub const SIZE_STEPS: [f32; 8] = [0.6, 0.7, 0.8, 0.9, 1.0, 1.15, 1.3, 1.5];
+    pub const DISTANCE_STEPS: [f32; 10] = [1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 7.0, 10.0, 15.0, 20.0];
+    pub const SPREAD_STEPS: [f32; 17] = [
+        1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75, 4.0, 4.25, 4.5, 4.75, 5.0,
+    ];
+    pub const SIZE_STEPS: [f32; 14] = [
+        0.6, 0.7, 0.8, 0.9, 1.0, 1.15, 1.3, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0,
+    ];
 
     /// The sphere's spread factors: sideways `spread`, up and down 60% as
     /// much beyond 1.
@@ -691,7 +696,7 @@ mod real {
     /// placed by [`super::HudLayout`]): the size of an N64 pixel at size 1,
     /// radians (the flat panel's was about 0.0036: the gauges keep about
     /// their size). With the default spread a gauge at the screen's left
-    /// edge ends up about 66 degrees to the left: a turn of the head.
+    /// edge ends up about 72 degrees to the left: a turn of the head.
     const HUD_RAD_PER_PX: f32 = 0.0034;
 
     /// The island model (outside flight, [`pw64_gfx::Diorama`]): how wide
