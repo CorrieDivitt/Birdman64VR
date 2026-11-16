@@ -254,27 +254,36 @@ float pw64_vr_cannon_scale(const void* pilot_, const void* cam_) {
     return s;
 }
 
-void pw64_vr_cannon_trail(int on, const void* pilot_) {
-    static s32 trail = -1;
+void pw64_vr_cannon_trail(int on, const void* pilot_, float dt) {
+    /* A smoke has at most 10 puffs, one every tenth of its life: a few of
+     * them started a little apart make a denser, longer trail. */
+    static s32 trail[PW64_VR_TRAIL_N] = { -1, -1, -1 };
+    static float flown = 0.0f;
     const Mtx4F* pilot = pilot_;
+    int i;
 
-    if (on) {
-        if (trail < 0) {
-            trail = smokeCreate();
-            if (trail < 0) {
-                return;
+    for (i = 0; i < PW64_VR_TRAIL_N; i++) {
+        if (on) {
+            if ((trail[i] < 0) && (flown >= i * (PW64_VR_TRAIL_LIFE_S / 10.0f / PW64_VR_TRAIL_N))) {
+                trail[i] = smokeCreate();
+                if (trail[i] < 0) {
+                    continue;
+                }
+                smokeProps(trail[i], SMOKE_PROP_1(PW64_VR_TRAIL_GREY, PW64_VR_TRAIL_GREY, PW64_VR_TRAIL_GREY),
+                           SMOKE_PROP_2(PW64_VR_TRAIL_SIZE_M), SMOKE_PROP_3(PW64_VR_TRAIL_LIFE_S),
+                           SMOKE_PROP_5(0.0f, 0.0f, 0.0f), SMOKE_PROP_END);
             }
-            smokeProps(trail, SMOKE_PROP_1(PW64_VR_TRAIL_GREY, PW64_VR_TRAIL_GREY, PW64_VR_TRAIL_GREY),
-                       SMOKE_PROP_2(PW64_VR_TRAIL_SIZE_M), SMOKE_PROP_3(PW64_VR_TRAIL_LIFE_S),
-                       SMOKE_PROP_5(0.0f, 0.0f, 0.0f), SMOKE_PROP_END);
+            if (trail[i] >= 0) {
+                smokeProps(trail[i], SMOKE_PROP_6(pilot->m[3][0], pilot->m[3][1], pilot->m[3][2]), SMOKE_PROP_END);
+            }
+        } else if (trail[i] >= 0) {
+            /* Landed: no more puffs; the ones out there fade on their own
+             * and the smoke frees itself after the last. */
+            smokeProps(trail[i], SMOKE_PROP_4(0.0f), SMOKE_PROP_END);
+            trail[i] = -1;
         }
-        smokeProps(trail, SMOKE_PROP_6(pilot->m[3][0], pilot->m[3][1], pilot->m[3][2]), SMOKE_PROP_END);
-    } else if (trail >= 0) {
-        /* Landed: no more puffs; the ones out there fade on their own and
-         * the smoke frees itself after the last. */
-        smokeProps(trail, SMOKE_PROP_4(0.0f), SMOKE_PROP_END);
-        trail = -1;
     }
+    flown = on ? flown + dt : 0.0f;
 }
 
 /* VR outside a test's flight: a full-width world view of an island is
