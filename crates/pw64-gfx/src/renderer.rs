@@ -165,6 +165,50 @@ pub struct StereoEye {
     /// The picture's background (linear RGB); `None` = the colour the game
     /// cleared the screen with.
     pub background: Option<[f64; 3]>,
+    /// Birdman64VR, in flight: the 2D draws on a sphere around the player
+    /// instead of the flat panel `hud`.
+    pub hud_sphere: Option<HudSphere>,
+    /// Movable HUD element ids (`DrawCall::elem`, bit per id) not drawn.
+    pub hud_hidden: u16,
+}
+
+/// The flight HUD on the inside of a sphere around the player
+/// ([`StereoEye::hud_sphere`]): an N64 screen point `(x, y)` is seen at
+/// yaw `(x - 160)·rad_per_px`, pitch `(120 - y)·rad_per_px`, `radius`
+/// metres away, so every part faces the player. Each movable element's
+/// centre is further spread out by `spread` (x, y) from the screen's
+/// centre, its size unchanged: the gauges sit around the player rather
+/// than in a frame straight ahead.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HudSphere {
+    /// Seated space (metres) → eye clip.
+    pub eye: Mat4,
+    pub radius: f32,
+    pub rad_per_px: f32,
+    pub spread: [f32; 2],
+}
+
+impl HudSphere {
+    /// The angles (yaw, pitch; radians) a movable element centred at `c`
+    /// (N64 px) is moved by.
+    pub fn shift(&self, c: [f32; 2]) -> [f32; 2] {
+        [
+            (c[0] - 160.0) * (self.spread[0] - 1.0) * self.rad_per_px,
+            (120.0 - c[1]) * (self.spread[1] - 1.0) * self.rad_per_px,
+        ]
+    }
+
+    /// Where the shader puts N64 screen point `p` of an element moved by
+    /// `shift` (seated space, metres; depth bias left out).
+    pub fn place(&self, p: [f32; 2], shift: [f32; 2]) -> [f32; 3] {
+        let yaw = (p[0] - 160.0) * self.rad_per_px + shift[0];
+        let pitch = (120.0 - p[1]) * self.rad_per_px + shift[1];
+        [
+            yaw.sin() * pitch.cos() * self.radius,
+            pitch.sin() * self.radius,
+            -yaw.cos() * pitch.cos() * self.radius,
+        ]
+    }
 }
 
 /// The cylinder an island model is cut to ([`StereoEye::clip`]): the sea
@@ -1455,6 +1499,29 @@ impl Renderer {
             .iter()
             .map(|v| crate::matrix::mul(v, &eye.world))
             .collect();
+        // Sphere HUD: each movable element's centre (N64 px), from the
+        // bounds of all its draws after the world starts.
+        let mut elem_centres = [None::<[f32; 2]>; crate::hud::HUD_ELEMS];
+        if eye.hud_sphere.is_some() {
+            let mut bounds = [None::<[f32; 4]>; crate::hud::HUD_ELEMS];
+            for d in &frame.draws[first_world..] {
+                let e = d.elem as usize;
+                if d.view != 0 || e == 0 || e >= crate::hud::HUD_ELEMS {
+                    continue;
+                }
+                let first = d.first_vertex as usize;
+                for v in &frame.vertices[first..first + d.vertex_count as usize] {
+                    if v.pos[3].abs() < 1e-6 {
+                        continue;
+                    }
+                    let (x, y) = (v.pos[0] / v.pos[3], v.pos[1] / v.pos[3]);
+                    bounds[e] = Some(crate::hud::union(bounds[e], [x, y, x, y]));
+                }
+            }
+            for (c, b) in elem_centres.iter_mut().zip(bounds) {
+                *c = b.map(|b| [0.5 * (b[0] + b[2]), 0.5 * (b[1] + b[3])]);
+            }
+        }
         let clip_views: Vec<Mat4> = match &eye.clip {
             Some(c) => frame
                 .views
@@ -1485,6 +1552,7 @@ impl Renderer {
             } else if i > first_world
                 && !matches!(d.wide, Wide::Stretch(_))
                 && d.pipeline.shader.mode != ShaderMode::DepthClear
+                && (d.elem == 0 || d.elem >= 16 || eye.hud_hidden & (1 << d.elem) == 0)
             {
                 Some(&eye.hud)
             } else {
@@ -1502,6 +1570,21 @@ impl Renderer {
             let mut u = d.uniforms;
             u.vr = [1.0, 0.0, 0.0, 0.0];
             u.eye = *m;
+            if let Some(h) = eye.hud_sphere.as_ref().filter(|_| d.view == 0) {
+                let shift = elem_centres
+                    .get(d.elem as usize)
+                    .copied()
+                    .flatten()
+                    .map_or([0.0; 2], |c| h.shift(c));
+                u.vr = [1.0, 0.0, 0.0, 2.0];
+                u.eye = h.eye;
+                u.clip = [
+                    [h.rad_per_px, h.radius, shift[0], shift[1]],
+                    [0.0; 4],
+                    [0.0; 4],
+                    [0.0; 4],
+                ];
+            }
             let clip = eye.clip.as_ref().filter(|_| d.view != 0);
             if let Some(c) = clip {
                 u.vr = [1.0, c.radius, c.top, 0.0];
@@ -1864,6 +1947,40 @@ fn fs_box_main(v: VOut) -> @location(0) vec4<f32> {
 "#;
 
 #[cfg(test)]
+mod sphere_tests {
+    use super::*;
+
+    /// The sphere HUD: the screen's centre straight ahead at the radius; a
+    /// gauge at the left edge spread out to about 45 degrees left; its own
+    /// size unchanged (the same angle per pixel around its centre).
+    #[test]
+    fn sphere_hud_places_gauges_around_the_player() {
+        let h = HudSphere {
+            eye: crate::matrix::IDENTITY,
+            radius: 3.0,
+            rad_per_px: 0.0034,
+            spread: [1.5, 1.3],
+        };
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
+        let c = h.place([160.0, 120.0], [0.0; 2]);
+        assert!(close(c[0], 0.0) && close(c[1], 0.0) && close(c[2], -3.0));
+        // A gauge centred 10 px from the left edge.
+        let shift = h.shift([10.0, 120.0]);
+        let centre = h.place([10.0, 120.0], shift);
+        let yaw = centre[0].atan2(-centre[2]).to_degrees();
+        assert!((-46.0..-42.0).contains(&yaw), "{yaw}");
+        let r = centre.iter().map(|v| v * v).sum::<f32>().sqrt();
+        assert!(close(r, 3.0), "on the sphere");
+        // 20 px to its right: 20 px worth of angle further right.
+        let next = h.place([30.0, 120.0], shift);
+        let yaw2 = next[0].atan2(-next[2]);
+        assert!(close(yaw2 - yaw.to_radians(), 20.0 * 0.0034));
+        // Above the centre: pitch up.
+        assert!(h.place([160.0, 20.0], h.shift([160.0, 20.0]))[1] > 0.0);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::Interpreter;
@@ -2102,6 +2219,8 @@ mod tests {
             hud: matrix::IDENTITY,
             clip: None,
             background: None,
+            hud_sphere: None,
+            hud_hidden: 0,
         };
         r.render_stereo(&frame, &view, (w, h), &eye);
         let stereo = read_rgba(&device, &queue, &tex);

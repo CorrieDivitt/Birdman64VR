@@ -17,7 +17,7 @@
 //! Only on Windows, Linux and Android; other targets get a stub that is
 //! never requested.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, Ordering};
 
 static REQUESTED: AtomicBool = AtomicBool::new(false);
 /// The headset's refresh rate in mHz once frames flow (0: not known).
@@ -63,6 +63,43 @@ pub(crate) fn headless() -> bool {
 /// what the headset shows beside, above and below the monitor picture is
 /// there when the player looks at it (about 70 degrees to each side).
 pub(crate) const CULL_SCALE: f32 = 6.0;
+
+/// Flight-HUD elements not shown in the headset (bit per element id,
+/// `hud_edit::ELEMENTS`; `[vr] hud_hidden`, the settings' VR HUD page).
+static HUD_HIDDEN: AtomicU16 = AtomicU16::new(0);
+static HUD_HIDDEN_LOADED: std::sync::Once = std::sync::Once::new();
+
+/// The HUD elements hidden in the headset (bit per element id).
+pub(crate) fn hud_hidden() -> u16 {
+    HUD_HIDDEN_LOADED.call_once(|| {
+        let mask = crate::config::get()
+            .vr_hud_hidden
+            .iter()
+            .filter_map(|n| crate::hud_edit::element_id(n))
+            .fold(0u16, |m, id| m | 1 << id);
+        HUD_HIDDEN.store(mask, Ordering::Relaxed);
+    });
+    HUD_HIDDEN.load(Ordering::Relaxed)
+}
+
+/// Shows or hides one HUD element in the headset and saves the choice.
+pub(crate) fn set_hud_shown(id: u8, shown: bool) {
+    let mask = hud_hidden();
+    let mask = if shown {
+        mask & !(1 << id)
+    } else {
+        mask | 1 << id
+    };
+    HUD_HIDDEN.store(mask, Ordering::Relaxed);
+    let names: Vec<&str> = crate::hud_edit::ELEMENTS
+        .iter()
+        .filter(|e| mask & (1 << e.0) != 0)
+        .map(|e| e.1)
+        .collect();
+    if let Err(e) = crate::config::save_vr_hud_hidden(&names) {
+        eprintln!("[vr] HUD choice not saved: {e}");
+    }
+}
 
 /// A recentre was asked for (`request_recentre`); the headset thread does
 /// it at its next frame.
@@ -563,13 +600,35 @@ mod real {
         // Everything on the panel has one depth; a little of each draw's
         // own depth on top keeps 3D HUD parts sorted among themselves.
         hud[2][2] += 0.05;
+        let hud_sphere = pw64_gfx::HudSphere {
+            eye: mul(
+                &math::view(pose.orientation, pose.position),
+                &projection(NEAR_M),
+            ),
+            radius: HUD_RADIUS_M,
+            rad_per_px: HUD_RAD_PER_PX,
+            spread: HUD_SPREAD,
+        };
         pw64_gfx::StereoEye {
             world,
             hud,
             clip: None,
             background: None,
+            hud_sphere: Some(hud_sphere),
+            hud_hidden: super::hud_hidden(),
         }
     }
+
+    /// The flight HUD on a sphere around the player ([`pw64_gfx::HudSphere`]):
+    /// its distance, metres...
+    const HUD_RADIUS_M: f32 = 3.0;
+    /// ...the size of an N64 pixel, radians (the flat panel's was about
+    /// 0.0036: the gauges keep about their size)...
+    const HUD_RAD_PER_PX: f32 = 0.0034;
+    /// ...and how much further out from the centre the gauges sit than on
+    /// the flat screen (sideways, up and down): a gauge at the screen's left
+    /// edge ends up about 45 degrees to the left, angled towards the player.
+    const HUD_SPREAD: [f32; 2] = [1.5, 1.3];
 
     /// The island model (outside flight, [`pw64_gfx::Diorama`]): how wide
     /// it is, in metres.
@@ -626,6 +685,7 @@ mod real {
         // so the pilots flying by and the logo are seen from further back.
         if d.title {
             let mut eye = stereo_eye(pose);
+            eye.hud_sphere = None;
             let mut at = level(d.camera);
             let [fwd, pos] = [at[1], at[3]];
             at[3] = [
@@ -640,6 +700,7 @@ mod real {
             return eye;
         }
         let mut eye = stereo_eye_panel_at(pose, MODEL_PANEL_UP_M);
+        eye.hud_sphere = None;
         let [x0, y0, _, x1, y1, z1] = d.bounds;
         let radius = 0.5 * (x1 - x0).max(y1 - y0).max(1.0);
         let top = z1.max(0.0) + 0.15 * radius;

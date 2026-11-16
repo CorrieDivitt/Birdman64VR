@@ -149,6 +149,11 @@ enum Row {
     /// Main: drag the flight-HUD elements and the performance overlay
     /// (`hud_edit.rs`).
     HudLayout,
+    /// Main (in VR only): open the VR HUD page.
+    VrHudPage,
+    /// VR HUD page: show or hide one flight-HUD element in the headset
+    /// (`hud_edit::ELEMENTS` id).
+    HudShow(u8),
     /// Main: raise every test in both save files to gold, which opens every
     /// class, bonus game and Birdman (`unlock.rs`). Two confirms like Quit,
     /// then a restart (Android: close and reopen, like an import).
@@ -185,6 +190,8 @@ enum Page {
     Split,
     /// The performance overlay (`perf.rs`): what it shows and where.
     Perf,
+    /// Birdman64VR: which flight-HUD elements the headset shows.
+    VrHud,
 }
 
 impl Page {
@@ -196,12 +203,13 @@ impl Page {
             Page::Controls => 2,
             Page::Split => 3,
             Page::Perf => 4,
+            Page::VrHud => 5,
         }
     }
 }
 
 /// How many pages (`Page::index` is the slot).
-const N_PAGES: usize = 5;
+const N_PAGES: usize = 6;
 
 /// The conditions a panel height was measured at: the safe egui screen
 /// (points) and the zoom. A change of either re-measures (text wraps and
@@ -1618,6 +1626,7 @@ impl Overlay {
             Page::Graphics => "Display & graphics",
             Page::Split => "Split-screen",
             Page::Perf => "Performance overlay",
+            Page::VrHud => "VR HUD",
         };
         // The wide Controls page (U9): with room for both, the binding list
         // scrolls on the left and the controller drawing sits fixed on the
@@ -1783,6 +1792,10 @@ impl Overlay {
                     .position(|r| *r == Row::SplitScreen)
                     .unwrap_or(2);
                 rows.insert(at, Row::HudLayout);
+                // Birdman64VR: the headset's HUD choices, under Move HUD.
+                if crate::vr::active() {
+                    rows.insert(at + 1, Row::VrHudPage);
+                }
                 rows
             }
             Page::Graphics => {
@@ -1856,6 +1869,14 @@ impl Overlay {
             ],
             // Performance overlay: the counter first (the simple case), then
             // the opt-in extras.
+            Page::VrHud => {
+                let mut rows: Vec<Row> = crate::hud_edit::ELEMENTS
+                    .iter()
+                    .map(|e| Row::HudShow(e.0))
+                    .collect();
+                rows.push(Row::Back);
+                rows
+            }
             Page::Perf => vec![
                 Row::Opt(Opt::ShowFps),
                 Row::Opt(Opt::PerfFrametime),
@@ -1943,6 +1964,9 @@ impl Overlay {
                     self.text_row(ui, at(Row::TouchHidden), shown);
                 }
                 self.text_row(ui, at(Row::HudLayout), "Move HUD");
+                if rows.contains(&Row::VrHudPage) {
+                    self.text_row(ui, at(Row::VrHudPage), "VR HUD \u{203a}");
+                }
                 self.text_row(ui, at(Row::SplitScreen), "Split-screen \u{203a}");
                 self.text_row(ui, at(Row::Graphics), "Display & graphics \u{203a}");
                 self.text_row(ui, at(Row::PerfPage), "Performance overlay \u{203a}");
@@ -2175,6 +2199,16 @@ impl Overlay {
                     if let Row::Opt(o) = row {
                         self.opt_row(ui, at(row), o);
                     }
+                }
+                ui.add_space(4.0);
+                self.text_row(ui, at(Row::Back), "\u{2039} Back");
+            }
+            Page::VrHud => {
+                let hidden = crate::vr::hud_hidden();
+                for &(id, _, name) in &crate::hud_edit::ELEMENTS {
+                    let shown = hidden & (1 << id) == 0;
+                    let text = format!("{name}: {}", if shown { "shown" } else { "hidden" });
+                    self.text_row(ui, at(Row::HudShow(id)), &text);
                 }
                 ui.add_space(4.0);
                 self.text_row(ui, at(Row::Back), "\u{2039} Back");
@@ -2746,6 +2780,11 @@ impl Overlay {
                 self.hud_edit_requested = true;
                 self.show = false;
             }
+            Row::VrHudPage => self.enter_page(Page::VrHud, Row::VrHudPage),
+            Row::HudShow(id) => {
+                let shown = crate::vr::hud_hidden() & (1 << id) != 0;
+                crate::vr::set_hud_shown(id, shown);
+            }
             Row::TouchHidden => {
                 let hidden = !crate::touch::hidden_setting();
                 crate::touch::set_hidden_setting(hidden);
@@ -3015,6 +3054,11 @@ impl Overlay {
                     );
                 }
             },
+            // Left / right flip a VR HUD row too.
+            Row::HudShow(id) => {
+                let shown = crate::vr::hud_hidden() & (1 << id) != 0;
+                crate::vr::set_hud_shown(id, shown);
+            }
             // The Controls / Back / Quit / "Open save folder" /
             // "Assign player 2" rows have nothing to cycle.
             Row::Controls
@@ -3027,6 +3071,7 @@ impl Overlay {
             | Row::TouchLayout
             | Row::TouchHidden
             | Row::HudLayout
+            | Row::VrHudPage
             | Row::ExportSave
             | Row::ImportSave
             | Row::CloseApp
@@ -3826,6 +3871,11 @@ fn help(row: Row) -> &'static str {
         Row::TouchHidden => {
             "Playing with a controller? Hide the on-screen buttons. The menu button always \
              stays."
+        }
+        Row::VrHudPage => "Choose which flight gauges the headset shows.",
+        Row::HudShow(_) => {
+            "Show or hide this gauge in the headset. In flight the gauges sit around you, \
+             each turned towards you."
         }
     }
 }

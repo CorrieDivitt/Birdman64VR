@@ -58,6 +58,19 @@ fn vs_main(v: VIn) -> VOut {
     }
     let d = u.clip * v.pos;
     o.dpos = d.xyz / select(d.w, 1.0, d.w == 0.0);
+    // Birdman64VR, flight HUD on a sphere (`HudSphere`): u.clip[0] = (rad
+    // per N64 px, radius m, yaw and pitch shift of the element); a nearer
+    // N64 depth sits a little nearer, so 3D HUD parts keep their order.
+    if (u.vr.w == 2.0) {
+        let k = u.clip[0];
+        let w = select(v.pos.w, 1.0, v.pos.w == 0.0);
+        let p = v.pos.xyz / w;
+        let yaw = (p.x - 160.0) * k.x + k.z;
+        let pitch = (120.0 - p.y) * k.x + k.w;
+        let r = k.y * (1.0 - 0.02 * clamp(p.z, 0.0, 1.0));
+        let s = vec3<f32>(sin(yaw) * cos(pitch), sin(pitch), -cos(yaw) * cos(pitch)) * r;
+        o.pos = u.eye * vec4<f32>(s, 1.0);
+    }
     o.color = v.color;
     o.st = v.st;
     o.st_clamp = v.st_clamp;

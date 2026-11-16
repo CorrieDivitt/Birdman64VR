@@ -25,7 +25,9 @@ pub mod texture;
 pub use frame::{Anchor, Diorama, Frame, N64_HEIGHT, N64_WIDTH, Wide};
 pub use interp::Interpreter;
 pub use memory::{Memory, VecMemory};
-pub use renderer::{FbOp, RenderOptions, Renderer, StereoClip, StereoEye, TexFilter, Widescreen};
+pub use renderer::{
+    FbOp, HudSphere, RenderOptions, Renderer, StereoClip, StereoEye, TexFilter, Widescreen,
+};
 
 /// Device descriptor for a [`Renderer`] device. Optional features, each
 /// requested only when the adapter has it (requiring a missing feature

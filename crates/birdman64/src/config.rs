@@ -116,6 +116,9 @@ pub struct Config {
     /// `[hud]`: flight-HUD elements moved by the player ("Move HUD"),
     /// element name → (dx, dy) in N64 px (`hud_edit::offsets_from`).
     pub hud: Vec<(String, (f32, f32))>,
+    /// `[vr] hud_hidden`: flight-HUD elements not shown in the headset
+    /// (`hud_edit::ELEMENTS` names; the settings' VR HUD page).
+    pub vr_hud_hidden: Vec<String>,
     /// Keys skipped at load (wrong type or invalid value; see `ignored_keys`).
     pub ignored: Vec<String>,
 }
@@ -853,8 +856,69 @@ fn from_table(table: &toml::Table) -> Config {
         }
     }
 
+    if let Some(v) = table.get("vr") {
+        match v.as_table() {
+            Some(t) => {
+                if let Some(h) = t.get("hud_hidden") {
+                    match h.as_array() {
+                        Some(a) => {
+                            for n in a {
+                                match n.as_str() {
+                                    Some(n) if crate::hud_edit::element_id(n).is_some() => {
+                                        cfg.vr_hud_hidden.push(n.to_string());
+                                    }
+                                    _ => ignore(
+                                        &mut ignored,
+                                        "vr.hud_hidden",
+                                        n,
+                                        "unknown HUD element",
+                                    ),
+                                }
+                            }
+                        }
+                        None => ignore(
+                            &mut ignored,
+                            "vr.hud_hidden",
+                            h,
+                            "use a list of HUD element names",
+                        ),
+                    }
+                }
+            }
+            None => ignore(&mut ignored, "vr", v, "must be a [vr] table"),
+        }
+    }
+
     cfg.ignored = ignored;
     cfg
+}
+
+/// Writes `[vr] hud_hidden` (the flight-HUD elements hidden in the headset;
+/// empty removes the key, and `[vr]` when nothing else is in it).
+pub fn save_vr_hud_hidden(names: &[&str]) -> Result<(), String> {
+    let table = read_table()?;
+    write_table(&with_vr_hud_hidden(table, names)?)
+}
+
+/// [`save_vr_hud_hidden`]'s table edit (separate from the file I/O for
+/// tests).
+fn with_vr_hud_hidden(mut table: toml::Table, names: &[&str]) -> Result<toml::Table, String> {
+    let vr = table
+        .entry("vr")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let toml::Value::Table(vr) = vr else {
+        return Err("[vr] is not a table in pw64.toml; not saved".to_string());
+    };
+    if names.is_empty() {
+        vr.remove("hud_hidden");
+    } else {
+        let list = names.iter().map(|n| toml::Value::String(n.to_string()));
+        vr.insert("hud_hidden".into(), toml::Value::Array(list.collect()));
+    }
+    if vr.is_empty() {
+        table.remove("vr");
+    }
+    Ok(table)
 }
 
 /// `[hud]` offsets beyond this (N64 px, the whole screen width) are invalid.
@@ -1618,6 +1682,25 @@ mod tests {
         let c = from_table(&t);
         assert!(c.touch_hidden && c.ignored.is_empty());
         assert_eq!(c.touch, vec![("a".to_string(), (0.1, 0.1))]);
+    }
+
+    /// `[vr] hud_hidden`: element names parse (unknown ones skipped and
+    /// reported) and round-trip; an empty list removes the key and `[vr]`.
+    #[test]
+    fn vr_hud_hidden_round_trip() {
+        let c = parse("[vr]\nhud_hidden = [\"timer\", \"bogus\"]\n").unwrap();
+        assert_eq!(c.vr_hud_hidden, vec!["timer".to_string()]);
+        assert_eq!(c.ignored, vec!["vr.hud_hidden"]);
+        let t: toml::Table = toml::from_str("[hud]\nspeed = [1, 2]\n").unwrap();
+        let t = with_vr_hud_hidden(t, &["radar", "fuel"]).unwrap();
+        let c = from_table(&t);
+        assert_eq!(
+            c.vr_hud_hidden,
+            vec!["radar".to_string(), "fuel".to_string()]
+        );
+        assert_eq!(c.hud.len(), 1, "[hud] kept");
+        let t = with_vr_hud_hidden(t, &[]).unwrap();
+        assert!(!t.contains_key("vr"));
     }
 
     /// "Move HUD": `[hud]` element offsets (N64 px) and `[perf] pos` parse,
