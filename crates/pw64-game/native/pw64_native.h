@@ -106,6 +106,11 @@ extern float pw64_vr_hud_rad_per_px;
  * `down` radians below the view's centre, the direction the missiles fly;
  * otherwise `flat`, the game's value. */
 float pw64_vr_aim_reticle_y(float flat, float down);
+/* Birdman64VR debug, same file (temporary): the gyrocopter's first-person
+ * dobj state (code_7CF30.c.patch) and its near-list draw (dobj.c.patch
+ * uvDobj_8021771C), logged about twice a second. */
+void pw64_vr_dbg_state(int objId);
+void pw64_vr_dbg_near(int objId, const void* chan);
 /* Birdman64VR, same file: outside a test's flight, a world view with
  * terrain is shown as a small model of the island (the "diorama": menus,
  * title fly-over, results, replays). 1 for such a channel

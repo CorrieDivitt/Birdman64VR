@@ -42,7 +42,7 @@
          uvDobjPosm(gcData->objId, 0, &gcData->unk10);
 +        pw64_plane_posm(gcData); // PW64 plane variant: the model's origin offset
          if (gameState != GAME_STATE_RESULTS) {
-@@ -438,9 +452,24 @@ void gyrocopterMovementFrame(GyrocopterData* gcData, u8 gameState) {
+@@ -438,9 +452,25 @@ void gyrocopterMovementFrame(GyrocopterData* gcData, u8 gameState) {
          if (gcData->unk5D != 0) {
              gcData->unk2 |= 2;
 +            gcData->unk2 &= ~4; // Birdman64VR: off the near list (below)
@@ -67,8 +67,9 @@
 +            // (dobj.c.patch _uvDobjsDraw still draws it in the other views).
 +            pw64_dobj_cockpit[gcData->objId] = pw64_vr_flight() ? 0 : (u8)(pw64_player_cur + 1);
 +            pw64_dobj_near_set(gcData->objId, pw64_vr_flight(), 0);
++            pw64_vr_dbg_state(gcData->objId); // Birdman64VR debug
          }
-@@ -484,12 +505,14 @@ void gyrocopterMovementFrame(GyrocopterData* gcData, u8 gameState) {
+@@ -484,12 +506,14 @@ void gyrocopterMovementFrame(GyrocopterData* gcData, u8 gameState) {
                  hud->power = 0.0f;
              }
              if (gcData->unkC1 != 0) {
@@ -83,7 +84,7 @@
              } else {
                  if ((gcData->fuel <= 0.0f) && !gcData->fuelEmpty) {
                      hudWarningText(TEXT_FUEL_OUT, 1.5f, 8.0f);
-@@ -537,3 +562,8 @@ void func_802F6DC8(GyrocopterData* gcData, u8 unkFlag) {
+@@ -537,3 +563,8 @@ void func_802F6DC8(GyrocopterData* gcData, u8 unkFlag) {
          temp_fv1 = gcData->camera->clipNear * -0.105104235;
          temp_fa0 = (-gcData->camera->clipNear * gcData->camera->clipY0) / gcData->camera->unk20;
 -        gcData->reticleY = (107.0f * temp_fv1) / temp_fa0;
@@ -93,20 +94,20 @@
 +        // Birdman64VR: on the HUD sphere 6 degrees below the view's centre,
 +        // where the missiles fly (func_802F7178), at any VR HUD size.
 +        gcData->reticleY = pw64_vr_aim_reticle_y(gcData->reticleY, 0.10471974f);
-@@ -734,4 +760,5 @@ void func_802F764C(GyrocopterData* gcData) {
+@@ -734,4 +761,5 @@ void func_802F764C(GyrocopterData* gcData) {
      if (gcData->unkD0 != 0) {
          gcData->camera->unk6 = 0;
          gcData->unk2 = gcData->camera->unk6;
          uvDobjState(gcData->objId, gcData->unk2);
 +        pw64_dobj_cockpit[gcData->objId] = 0; // PW64 split-screen: sunk, hidden in every view
-@@ -769,5 +796,6 @@ void func_802F764C(GyrocopterData* gcData) {
+@@ -769,5 +797,6 @@ void func_802F764C(GyrocopterData* gcData) {
              uvDobjModel(gcData->objId, gcData->crashModelId);
              uvDobjPosm(gcData->objId, 0, &gcData->unk10);
          }
 +        pw64_plane_posm(gcData); // PW64 plane variant: the model's origin offset
      }
      shadow_803343D8(0);
-@@ -1188,3 +1216,11 @@ void gyrocopterLoadPilot(u8 pilot, GyrocopterData* gcData) {
+@@ -1188,3 +1217,11 @@ void gyrocopterLoadPilot(u8 pilot, GyrocopterData* gcData) {
          break;
      }
  }

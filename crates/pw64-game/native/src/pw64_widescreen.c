@@ -18,6 +18,7 @@
 #include <uv_matrix.h>
 #include "app/game.h"
 #include <uv_fx.h>
+#include <uv_dobj.h>
 
 /* Output aspect w/h, 0 = 4:3 (off). Set by Rust before boot
  * (pw64_game::set_widescreen_aspect).
@@ -65,6 +66,51 @@ float pw64_vr_aim_reticle_y(float flat, float down) {
      * sphere shows row 120 + down / r at `down` radians below its centre. */
     y = -5.0f - down / r;
     return (float)(int)(y < 0.0f ? y - 0.5f : y + 0.5f);
+}
+
+/* Birdman64VR debug (temporary): why the gyrocopter isn't seen in first
+ * person. State: obj | dobj state << 8 | near-list length << 16 | its
+ * place in the near list + 1 << 24 (0 = not listed). Near draw: one line
+ * per field (camera to model origin cm, model radius cm, LOD, part count
+ * hidden mask). */
+static int sPw64DbgObj = -1;
+static int sPw64DbgStateN;
+static int sPw64DbgNearN;
+
+void pw64_vr_dbg_state(int objId) {
+    int i, at = 0;
+    if (!pw64_vr_flight() || (sPw64DbgStateN++ % 30) != 0) {
+        return;
+    }
+    sPw64DbgObj = objId;
+    for (i = 0; i < D_80269F0A; i++) {
+        if (D_80269CB0[i] == objId) {
+            at = i + 1;
+        }
+    }
+    PW64_LOGF("vr dbg gyro fp: obj | state<<8 | nearlen<<16 | at<<24",
+              (objId & 0xFF) | ((D_80263780[objId].unk34 & 0xFF) << 8) |
+                  ((D_80269F0A & 0xFF) << 16) | ((at & 0xFF) << 24));
+}
+
+void pw64_vr_dbg_near(int objId, const void* chan) {
+    const UnkStruct_80204D94* c = chan;
+    Unk80263780* d;
+    ParsedUVMD* m;
+    f32 x, y, z, dist;
+    if (objId != sPw64DbgObj || (sPw64DbgNearN++ % 30) != 0) {
+        return;
+    }
+    d = &D_80263780[objId];
+    m = gGfxUnkPtrs->models[d->modelId];
+    x = D_80265080[d->unk2[0]].m[3][0] - c->unk110.m[3][0];
+    y = D_80265080[d->unk2[0]].m[3][1] - c->unk110.m[3][1];
+    z = D_80265080[d->unk2[0]].m[3][2] - c->unk110.m[3][2];
+    dist = uvSqrtF(x * x + y * y + z * z);
+    PW64_LOGF("vr dbg gyro near draw: dist cm", (int)(dist * 100.0f));
+    PW64_LOGF("vr dbg gyro near draw: radius cm", (int)(d->unk38 * 100.0f));
+    PW64_LOGF("vr dbg gyro near draw: lod (255 = none)", m ? uvDobjGetLODIndex(m, dist) : 254);
+    PW64_LOGF("vr dbg gyro near draw: hidden parts mask", d->unk3C);
 }
 
 void pw64_vr_crash_camera(void* cur_, const void* target_, const void* pilot_, float dt, float now) {
