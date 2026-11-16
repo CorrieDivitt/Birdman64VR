@@ -213,6 +213,39 @@ menus and everything else stay on the panel.
   picture), effects that assume the game camera (w9), cost of the extra
   passes on the Quest, chase-camera tuning.
 
+## Menus, title and results: the island model (c10)
+
+Outside a test's flight the game's camera swoops and cuts on its own,
+which is dizzying as the player's head. Confirmed on the headset
+(2026-11-15): "the opening scene looks awesome, the menus work".
+
+- **Island model** (file and level select, results, replays): a full-width
+  world view with terrain is drawn as a 2.2 m model of the whole island on
+  a table below the menus (0.3 to 2.5 m ahead, 0.65 m down; the menus
+  float 0.5 m higher meanwhile), game north away, fixed whatever the camera
+  does. Its sea is kept, cut to a cylinder around the terrain and a little
+  above its highest point, which also drops the far sea and the sky dome
+  (a separate shader variant with a `discard`, so other draws keep early
+  depth testing). Dim blue-grey room around it. Tries before: 3 m behind
+  the panel (hidden by the level select's large menus), 1.6 m (too far).
+- **Title**: no terrain; its island is one model at the origin
+  (`MODEL_CRESCENT_ISLAND_LOW_POLY`, bounds measured from its vertices).
+  In VR the camera does not drop (it starts at the drop's end) and the
+  scene turns around the island at a quarter of the speed
+  (title_screen.c.patch); the headset follows that camera at full size,
+  level, 5 m behind and 3 m below it, so the logo floats above the menu.
+  The view recentres as the title starts. Tries before: a view fixed at
+  the drop's end (still turned with the scene), a slowed drop from 12 m
+  behind (still a big motion, the logo behind the menu).
+- **Data**: after the world tag, 21 G_NOOP words (`PW64_DIORAMA_TAG`):
+  the camera's world matrix, the island's bounds, a title flag, the game
+  state and the title's phase (logged: `[vr] game state N, title phase P`).
+- **VR is single-player.** The title menu ignored the pad: the title's
+  Players item had been switched to 2 Players and saved, and with
+  split-screen on a lone pad is player 2's (player 1 is the keyboard on a
+  PC), so nothing drove player 1. Found with `[input] game pad 1` lines (VR
+  only). Split-screen now stays off in VR and a switch to it is undone.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`
