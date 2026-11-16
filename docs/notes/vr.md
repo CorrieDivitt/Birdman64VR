@@ -309,8 +309,8 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   part, `PW64_GYRO_WINDSCREEN_PART`); VR HUD > Gyrocopter windscreen
   (`[vr] gyro_windscreen`, `pw64_vr_gyro_windscreen`) hides it in first
   person, never from outside.
-- **Dashboard gauge** (gyrocopter first person, VR HUD > Throttle: on the
-  dashboard / with the gauges, `[vr] dash_throttle`, default on): the
+- **Dashboard gauges** (gyrocopter first person, VR HUD > Throttle and map:
+  on the dashboard / with the gauges, `[vr] dash_gauges`, default on): the
   vehicle names a point on its model each frame (`pw64_vr_dash_set`;
   gyrocopter: `pw64_vr_gyro_dash`, 15 cm behind and 3 cm below the middle
   of the windscreen's lower edge, per pilot model). At the end of the world
@@ -325,7 +325,12 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   as if 15% nearer (`DashPanel::DEPTH_PULL`: the dashboard surface, which
   the point may sit just behind, never hides it), so the pilot's hands
   pass in front of it; drawn over everything in the HUD pass, the hand
-  went behind the gauge (headset).
+  went behind the gauge (headset). Each gauge has a `DashSlot` (vr.rs
+  `DASH_SLOTS`: offset on the panel and size): the throttle 5 cm up the
+  panel towards the dashboard's tip at 2 mm per N64 px, the map (radar,
+  70 x 70 px) 4.5 cm below the point at 1.4 mm per px (10 cm across).
+  `DEPTH_PULL` 0.8: the panel faces the eye rather than lying on the
+  sloping dashboard, so its lower part can sit behind the surface.
 - **Gyrocopter fuel gauge** in VR: moved for good to between the altimeter
   and the altitude (sea level) readout on the HUD sphere
   (`PW64_VR_GYRO_FUEL_X/Y`, 207, 53 in HUD px, y up; the flat game's

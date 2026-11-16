@@ -124,9 +124,9 @@ pub struct Config {
     /// `[vr] gyro_windscreen`: the gyrocopter's windscreen in VR first
     /// person (`None` = default, shown).
     pub vr_gyro_windscreen: Option<bool>,
-    /// `[vr] dash_throttle`: the throttle gauge on the cockpit's dashboard
-    /// in first person (`None` = default, on).
-    pub vr_dash_throttle: Option<bool>,
+    /// `[vr] dash_gauges`: the throttle and the map on the cockpit's
+    /// dashboard in first person (`None` = default, on).
+    pub vr_dash_gauges: Option<bool>,
     /// Keys skipped at load (wrong type or invalid value; see `ignored_keys`).
     pub ignored: Vec<String>,
 }
@@ -898,7 +898,7 @@ fn from_table(table: &toml::Table) -> Config {
                 }
                 for (key, slot) in [
                     ("gyro_windscreen", &mut cfg.vr_gyro_windscreen),
-                    ("dash_throttle", &mut cfg.vr_dash_throttle),
+                    ("dash_gauges", &mut cfg.vr_dash_gauges),
                 ] {
                     let Some(v) = t.get(key) else { continue };
                     match coerce_bool(v) {
@@ -948,7 +948,7 @@ pub fn save_vr_hud_hidden(names: &[&str]) -> Result<(), String> {
 }
 
 /// Writes a `[vr]` on/off key whose default is on (`gyro_windscreen`,
-/// `dash_throttle`): on removes the key, and `[vr]` when nothing else is
+/// `dash_gauges`): on removes the key, and `[vr]` when nothing else is
 /// in it.
 pub fn save_vr_bool(key: &str, on: bool) -> Result<(), String> {
     let table = read_table()?;
@@ -1818,7 +1818,7 @@ mod tests {
         assert_eq!(c.ignored, vec!["vr.hud_distance"]);
     }
 
-    /// `[vr] gyro_windscreen` / `dash_throttle`: parse (junk reported),
+    /// `[vr] gyro_windscreen` / `dash_gauges`: parse (junk reported),
     /// round-trip, and on (the default) removes the key and an empty `[vr]`.
     #[test]
     fn vr_bools_round_trip() {
@@ -1828,14 +1828,14 @@ mod tests {
         assert_eq!(c.ignored, vec!["vr.gyro_windscreen"]);
         let t = with_vr_bool(toml::Table::new(), "gyro_windscreen", false).unwrap();
         assert_eq!(from_table(&t).vr_gyro_windscreen, Some(false));
-        let t = with_vr_bool(t, "dash_throttle", false).unwrap();
+        let t = with_vr_bool(t, "dash_gauges", false).unwrap();
         let c = from_table(&t);
         assert_eq!(
-            (c.vr_gyro_windscreen, c.vr_dash_throttle),
+            (c.vr_gyro_windscreen, c.vr_dash_gauges),
             (Some(false), Some(false))
         );
         let t = with_vr_bool(t, "gyro_windscreen", true).unwrap();
-        let t = with_vr_bool(t, "dash_throttle", true).unwrap();
+        let t = with_vr_bool(t, "dash_gauges", true).unwrap();
         assert!(!t.contains_key("vr"));
         let t: toml::Table = toml::from_str("[vr]\nhud_size = 1.0\n").unwrap();
         let t = with_vr_bool(t, "gyro_windscreen", true).unwrap();

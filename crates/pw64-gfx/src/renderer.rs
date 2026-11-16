@@ -170,16 +170,29 @@ pub struct StereoEye {
     pub hud_sphere: Option<HudSphere>,
     /// Movable HUD element ids (`DrawCall::elem`, bit per id) not drawn.
     pub hud_hidden: u16,
-    /// Birdman64VR: movable HUD element ids (bit per id) drawn on the
-    /// cockpit's dashboard instead of the sphere while the frame has one
-    /// ([`crate::Frame::dash`], [`DashPanel`]).
-    pub hud_dash: u16,
+    /// Birdman64VR: movable HUD elements drawn on the cockpit's dashboard
+    /// instead of the sphere while the frame has one
+    /// ([`crate::Frame::dash`], [`DashPanel`]), each where its slot says.
+    pub hud_dash: &'static [DashSlot],
 }
 
-/// Birdman64VR: a flight gauge on the cockpit's dashboard
-/// ([`StereoEye::hud_dash`]): a small flat panel at the frame's
+/// Birdman64VR: where one HUD element sits on the dashboard
+/// ([`StereoEye::hud_dash`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DashSlot {
+    /// Movable HUD element id (`DrawCall::elem`).
+    pub elem: u8,
+    /// Its centre from the dashboard point along the panel's right and up
+    /// axes, metres.
+    pub offset: [f32; 2],
+    /// Size of an N64 pixel there, metres.
+    pub m_per_px: f32,
+}
+
+/// Birdman64VR: flight gauges on the cockpit's dashboard
+/// ([`StereoEye::hud_dash`]): a flat panel through the frame's
 /// [`crate::Dash`] point, facing the eye, level with the vehicle's right
-/// axis, [`DashPanel::M_PER_PX`] metres per N64 pixel, centred on the
+/// axis; each gauge at its [`DashSlot`] offset and size, centred on the
 /// element's centre. In camera space (game units), so it moves with the
 /// vehicle however the camera turns.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -190,16 +203,13 @@ pub struct DashPanel {
 }
 
 impl DashPanel {
-    /// Size of an N64 pixel on the dashboard, metres: the throttle gauge
-    /// (about 62 x 32 px) is about 12 cm wide.
-    pub const M_PER_PX: f32 = 0.002;
-
-    /// Depth of the gauge, as a fraction of its distance from the eye: it
-    /// is tested against the cockpit as if this much nearer (about 10 cm
-    /// at the dashboard), so the dashboard's own surface, which the point
-    /// may sit just behind, never hides it, while the pilot's hands, much
-    /// nearer, still pass in front.
-    pub const DEPTH_PULL: f32 = 0.85;
+    /// Depth of a gauge, as a fraction of its distance from the eye: it is
+    /// tested against the cockpit as if this much nearer (about 14 cm at
+    /// the dashboard), so the dashboard's own surface, which the panel
+    /// (facing the eye, not lying on the sloping dashboard) may sit just
+    /// behind, never hides it, while the pilot's hands, much nearer, still
+    /// pass in front.
+    pub const DEPTH_PULL: f32 = 0.8;
 
     /// The panel's axes for `dash`: facing the camera (the eye is within
     /// centimetres of it), its right as close to the vehicle's right as
@@ -231,14 +241,18 @@ impl DashPanel {
         })
     }
 
-    /// Where the shader puts N64 screen point `q` of an element centred at
-    /// `c` (camera space; depth bias left out).
-    pub fn place(&self, q: [f32; 2], c: [f32; 2]) -> [f32; 3] {
-        let (x, y) = (
-            (q[0] - c[0]) * Self::M_PER_PX,
-            (c[1] - q[1]) * Self::M_PER_PX,
-        );
+    /// The centre of a gauge in `slot` (camera space).
+    pub fn centre(&self, slot: &DashSlot) -> [f32; 3] {
+        let [x, y] = slot.offset;
         [0, 1, 2].map(|i| self.point[i] + x * self.right[i] + y * self.up[i])
+    }
+
+    /// Where the shader puts N64 screen point `q` of an element centred at
+    /// `c` in `slot` (camera space; depth bias left out).
+    pub fn place(&self, slot: &DashSlot, q: [f32; 2], c: [f32; 2]) -> [f32; 3] {
+        let o = self.centre(slot);
+        let (x, y) = ((q[0] - c[0]) * slot.m_per_px, (c[1] - q[1]) * slot.m_per_px);
+        [0, 1, 2].map(|i| o[i] + x * self.right[i] + y * self.up[i])
     }
 }
 
@@ -1640,12 +1654,10 @@ impl Renderer {
             // pass (the cockpit's, after the game's near-list depth clear)
             // and depth tested, so the pilot's hands pass in front of it.
             let centre = elem_centres.get(d.elem as usize).copied().flatten();
-            let on_dash = d.view == 0
-                && eye.hud_sphere.is_some()
-                && d.elem != 0
-                && d.elem < 16
-                && eye.hud_dash & (1 << d.elem) != 0;
-            let dash_at = dash.filter(|_| on_dash).zip(centre);
+            let slot = eye.hud_dash.iter().find(|s| {
+                d.view == 0 && eye.hud_sphere.is_some() && d.elem != 0 && s.elem == d.elem
+            });
+            let dash_at = dash.zip(slot).zip(centre);
             if d.view != 0 || dash_at.is_some() {
                 passes.last_mut().unwrap().push(i);
             } else {
@@ -1662,11 +1674,12 @@ impl Renderer {
             u.vr = [1.0, 0.0, 0.0, 0.0];
             u.eye = *m;
             if let Some(h) = eye.hud_sphere.as_ref().filter(|_| d.view == 0) {
-                if let Some((p, c)) = dash_at {
+                if let Some(((p, s), c)) = dash_at {
+                    let o = p.centre(s);
                     u.vr = [1.0, 0.0, 0.0, 3.0];
                     u.eye = eye.world;
                     u.clip = [
-                        [p.point[0], p.point[1], p.point[2], DashPanel::M_PER_PX],
+                        [o[0], o[1], o[2], s.m_per_px],
                         [p.right[0], p.right[1], p.right[2], c[0]],
                         [p.up[0], p.up[1], p.up[2], c[1]],
                         [DashPanel::DEPTH_PULL, 0.0, 0.0, 0.0],
@@ -2090,12 +2103,31 @@ mod sphere_tests {
             right: [1.0, 0.0, 0.0],
         };
         let p = DashPanel::new(&dash).unwrap();
+        let at = DashSlot {
+            elem: 3,
+            offset: [0.0; 2],
+            m_per_px: 0.002,
+        };
         let c = [40.0, 70.0];
-        assert!(close(p.place(c, c), dash.point));
+        assert!(close(p.place(&at, c, c), dash.point));
         // 10 px right: 2 cm to the right; 10 px up: up the panel.
-        assert!(close(p.place([50.0, 70.0], c), [0.02, -0.35, -0.6]));
-        let up = p.place([40.0, 60.0], c);
+        assert!(close(p.place(&at, [50.0, 70.0], c), [0.02, -0.35, -0.6]));
+        let up = p.place(&at, [40.0, 60.0], c);
         assert!(close(up, [0, 1, 2].map(|i| dash.point[i] + 0.02 * p.up[i])) && p.up[1] > 0.8);
+        // A slot 5 cm up the panel, half size: its centre there, its pixels
+        // half as far apart.
+        let higher = DashSlot {
+            elem: 6,
+            offset: [0.0, 0.05],
+            m_per_px: 0.001,
+        };
+        let o = p.centre(&higher);
+        assert!(close(o, [0, 1, 2].map(|i| dash.point[i] + 0.05 * p.up[i])));
+        assert!(close(p.place(&higher, c, c), o));
+        assert!(close(
+            p.place(&higher, [50.0, 70.0], c),
+            [0, 1, 2].map(|i| o[i] + 0.01 * p.right[i])
+        ));
         // The panel faces the eye: its axes are square to the line of sight.
         assert!(dot(p.right, dash.point).abs() < 1e-5 && dot(p.up, dash.point).abs() < 1e-5);
         // Rolled 30 degrees right: the panel's up leans right too.
@@ -2365,7 +2397,7 @@ mod tests {
             background: None,
             hud_sphere: None,
             hud_hidden: 0,
-            hud_dash: 0,
+            hud_dash: &[],
         };
         r.render_stereo(&frame, &view, (w, h), &eye);
         let stereo = read_rgba(&device, &queue, &tex);
@@ -2400,7 +2432,11 @@ mod tests {
             rad_per_px: 0.0034,
             spread: [1.0, 1.0],
         });
-        eye.hud_dash = 1 << 3;
+        eye.hud_dash = &[DashSlot {
+            elem: 3,
+            offset: [0.0; 2],
+            m_per_px: 0.002,
+        }];
         let mut dashed = frame.clone();
         let base = red_green_frame();
         let first = dashed.vertices.len() as u32;
