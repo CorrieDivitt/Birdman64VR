@@ -17,7 +17,7 @@
 #include <uv_math.h>
 #include <uv_matrix.h>
 #include "app/game.h"
-#include "app/smoke.h"
+#include <uv_fx.h>
 
 /* Output aspect w/h, 0 = 4:3 (off). Set by Rust before boot
  * (pw64_game::set_widescreen_aspect).
@@ -255,35 +255,70 @@ float pw64_vr_cannon_scale(const void* pilot_, const void* cam_) {
 }
 
 void pw64_vr_cannon_trail(int on, const void* pilot_, float dt) {
-    /* A smoke has at most 10 puffs, one every tenth of its life: a few of
-     * them started a little apart make a denser, longer trail. */
-    static s32 trail[PW64_VR_TRAIL_N] = { -1, -1, -1, -1, -1, -1 };
-    static float flown = 0.0f;
+    /* Own puffs (the game's smoke grows each from nothing and fades it all
+     * along, too faint from afar): full size and opaque from the start,
+     * fading out over the last 30% of their life. Same effect and texture
+     * as smoke.c's puffs. */
+    static u8 fx[PW64_VR_TRAIL_N];
+    static float age[PW64_VR_TRAIL_N];
+    static int ready = 0;
+    static int head = 0;
+    static float next = 0.0f;
     const Mtx4F* pilot = pilot_;
+    Mtx4F m;
+    float a;
     int i;
 
-    for (i = 0; i < PW64_VR_TRAIL_N; i++) {
-        if (on) {
-            if ((trail[i] < 0) && (flown >= i * (PW64_VR_TRAIL_LIFE_S / 10.0f / PW64_VR_TRAIL_N))) {
-                trail[i] = smokeCreate();
-                if (trail[i] < 0) {
-                    continue;
-                }
-                smokeProps(trail[i], SMOKE_PROP_1(PW64_VR_TRAIL_GREY, PW64_VR_TRAIL_GREY, PW64_VR_TRAIL_GREY),
-                           SMOKE_PROP_2(PW64_VR_TRAIL_SIZE_M), SMOKE_PROP_3(PW64_VR_TRAIL_LIFE_S),
-                           SMOKE_PROP_5(0.0f, 0.0f, 0.0f), SMOKE_PROP_END);
-            }
-            if (trail[i] >= 0) {
-                smokeProps(trail[i], SMOKE_PROP_6(pilot->m[3][0], pilot->m[3][1], pilot->m[3][2]), SMOKE_PROP_END);
-            }
-        } else if (trail[i] >= 0) {
-            /* Landed: no more puffs; the ones out there fade on their own
-             * and the smoke frees itself after the last. */
-            smokeProps(trail[i], SMOKE_PROP_4(0.0f), SMOKE_PROP_END);
-            trail[i] = -1;
+    if (!ready) {
+        for (i = 0; i < PW64_VR_TRAIL_N; i++) {
+            fx[i] = 0xFF;
         }
+        ready = 1;
     }
-    flown = on ? flown + dt : 0.0f;
+    if (on) {
+        next -= dt;
+        if (next <= 0.0f) {
+            next += PW64_VR_TRAIL_EVERY_S;
+            if (next < 0.0f) {
+                next = 0.0f;
+            }
+            i = head;
+            head = (head + 1) % PW64_VR_TRAIL_N;
+            if (fx[i] != 0xFF) {
+                uvFxProps(fx[i], FX_PROP_11(0), FX_PROP_END);
+            }
+            fx[i] = (u8)uvFx_8021EFF0(7);
+            if (fx[i] != 0xFF) {
+                uvModelGet(fx[i], 7);
+                uvFxProps(fx[i], FX_PROP_1(10000.0f), FX_PROP_19(PW64_VR_TRAIL_SIZE_M * 50.0f), FX_PROP_8(0x138),
+                          FX_PROP_15((float)((i % 4) * 90)),
+                          FX_PROP_5(PW64_VR_TRAIL_GREY / 255.0, PW64_VR_TRAIL_GREY / 255.0, PW64_VR_TRAIL_GREY / 255.0, 1.0),
+                          FX_PROP_3(PW64_VR_TRAIL_SIZE_M, PW64_VR_TRAIL_SIZE_M, PW64_VR_TRAIL_SIZE_M), FX_PROP_7(1.0f),
+                          FX_PROP_END);
+                uvMat4SetIdentity(&m);
+                m.m[3][0] = pilot->m[3][0];
+                m.m[3][1] = pilot->m[3][1];
+                m.m[3][2] = pilot->m[3][2];
+                uvFx_8021A4D8(fx[i], &m);
+                age[i] = 0.0f;
+            }
+        }
+    } else {
+        next = 0.0f;
+    }
+    for (i = 0; i < PW64_VR_TRAIL_N; i++) {
+        if (fx[i] == 0xFF) {
+            continue;
+        }
+        age[i] += dt;
+        if (age[i] >= PW64_VR_TRAIL_LIFE_S) {
+            uvFxProps(fx[i], FX_PROP_11(0), FX_PROP_END);
+            fx[i] = 0xFF;
+            continue;
+        }
+        a = (PW64_VR_TRAIL_LIFE_S - age[i]) / (0.3f * PW64_VR_TRAIL_LIFE_S);
+        uvFxProps(fx[i], FX_PROP_7(a > 1.0f ? 1.0f : a), FX_PROP_END);
+    }
 }
 
 /* VR outside a test's flight: a full-width world view of an island is

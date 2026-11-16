@@ -144,14 +144,15 @@ int pw64_cannon_target(float* out);
 #define PW64_VR_CINE_SCALE_MAX 4.0f
 float pw64_vr_cannon_scale(const void* pilot, const void* cam);
 /* Birdman64VR, same file: the cannonball's smoke trail in VR: while `on`
- * (in flight), PW64_VR_TRAIL_N smokes (smoke.c, 10 puffs each, one every
- * tenth of PW64_VR_TRAIL_LIFE_S) started evenly apart leave dark grey
- * puffs at the pilot (Mtx4F*), each growing to PW64_VR_TRAIL_SIZE_M and
- * fading over that life; off stops new puffs. 120 effects in all (fx.c). */
-#define PW64_VR_TRAIL_N 6
-#define PW64_VR_TRAIL_GREY 70
-#define PW64_VR_TRAIL_SIZE_M 6.0f
-#define PW64_VR_TRAIL_LIFE_S 3.0f
+ * (in flight), a dark grey puff left at the pilot (Mtx4F*) every
+ * PW64_VR_TRAIL_EVERY_S, PW64_VR_TRAIL_SIZE_M across and opaque from the
+ * start, fading out over the last 30% of PW64_VR_TRAIL_LIFE_S. At most
+ * PW64_VR_TRAIL_N puffs (of the 120 effects, fx.c); call every frame. */
+#define PW64_VR_TRAIL_N 48
+#define PW64_VR_TRAIL_GREY 40
+#define PW64_VR_TRAIL_SIZE_M 4.0f
+#define PW64_VR_TRAIL_EVERY_S 0.1f
+#define PW64_VR_TRAIL_LIFE_S 4.5f
 void pw64_vr_cannon_trail(int on, const void* pilot, float dt);
 void pw64_vr_cannon_cinematic(void* cur, const void* cannon, const void* pilot, float dt, float now);
 /* Fill screen (renderer.md "Fill screen"), same file: 0 = off (set by Rust
