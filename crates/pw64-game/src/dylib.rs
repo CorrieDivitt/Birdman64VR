@@ -61,6 +61,9 @@ pub struct Game {
     pub plane: *mut i32,
     /// `pw64_vr_hud_rad_per_px` (pw64_widescreen.c): VR HUD sphere scale.
     pub vr_hud_rad_per_px: *mut f32,
+    /// `pw64_vr_gyro_windscreen` (pw64_widescreen.c): 0 = hidden in VR
+    /// first person.
+    pub vr_gyro_windscreen: *mut i32,
     /// `D_802B892C` (memory.c): the sample global memmap checks.
     pub sample_global: *const u32,
     /// `[start, end)` of the module image.
@@ -192,6 +195,7 @@ fn bind_module(h: *mut c_void, path: &Path) -> Result<(), String> {
             infinite_view_distance: sym(c"pw64_infinite_view_distance")?.cast(),
             plane: sym(c"pw64_plane")?.cast(),
             vr_hud_rad_per_px: sym(c"pw64_vr_hud_rad_per_px")?.cast(),
+            vr_gyro_windscreen: sym(c"pw64_vr_gyro_windscreen")?.cast(),
             sample_global: sym(c"D_802B892C")?.cast(),
             range,
         };

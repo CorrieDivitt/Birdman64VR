@@ -159,6 +159,9 @@ enum Row {
     HudDistance,
     HudSpread,
     HudSize,
+    /// VR HUD page: the gyrocopter's windscreen in first person, shown /
+    /// hidden (`vr::gyro_windscreen`).
+    GyroWindscreen,
     /// Main: raise every test in both save files to gold, which opens every
     /// class, bonus game and Birdman (`unlock.rs`). Two confirms like Quit,
     /// then a restart (Android: close and reopen, like an import).
@@ -1875,7 +1878,12 @@ impl Overlay {
             // Performance overlay: the counter first (the simple case), then
             // the opt-in extras.
             Page::VrHud => {
-                let mut rows = vec![Row::HudDistance, Row::HudSpread, Row::HudSize];
+                let mut rows = vec![
+                    Row::HudDistance,
+                    Row::HudSpread,
+                    Row::HudSize,
+                    Row::GyroWindscreen,
+                ];
                 rows.extend(crate::hud_edit::ELEMENTS.iter().map(|e| Row::HudShow(e.0)));
                 rows.push(Row::Back);
                 rows
@@ -2222,6 +2230,16 @@ impl Overlay {
                     ui,
                     at(Row::HudSize),
                     &format!("Gauge size: {:.0}%", l.size * 100.0),
+                );
+                let ws = if crate::vr::gyro_windscreen() {
+                    "shown"
+                } else {
+                    "hidden"
+                };
+                self.text_row(
+                    ui,
+                    at(Row::GyroWindscreen),
+                    &format!("Gyrocopter windscreen: {ws}"),
                 );
                 ui.add_space(4.0);
                 let hidden = crate::vr::hud_hidden();
@@ -2802,6 +2820,7 @@ impl Overlay {
             }
             Row::VrHudPage => self.enter_page(Page::VrHud, Row::VrHudPage),
             Row::HudDistance | Row::HudSpread | Row::HudSize => self.change(1, true),
+            Row::GyroWindscreen => crate::vr::set_gyro_windscreen(!crate::vr::gyro_windscreen()),
             Row::HudShow(id) => {
                 let shown = crate::vr::hud_hidden() & (1 << id) != 0;
                 crate::vr::set_hud_shown(id, shown);
@@ -3090,6 +3109,7 @@ impl Overlay {
                 crate::vr::set_hud_layout(l);
             }
             // Left / right flip a VR HUD row too.
+            Row::GyroWindscreen => crate::vr::set_gyro_windscreen(!crate::vr::gyro_windscreen()),
             Row::HudShow(id) => {
                 let shown = crate::vr::hud_hidden() & (1 << id) != 0;
                 crate::vr::set_hud_shown(id, shown);
@@ -3917,6 +3937,10 @@ fn help(row: Row) -> &'static str {
              ones; 100% is the flat game's layout."
         }
         Row::HudSize => "How big the gauges are.",
+        Row::GyroWindscreen => {
+            "The gyrocopter's windscreen in the first-person view. It always shows from \
+             outside."
+        }
         Row::HudShow(_) => {
             "Show or hide this gauge in the headset. In flight the gauges sit around you, \
              each turned towards you."

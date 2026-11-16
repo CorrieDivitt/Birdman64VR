@@ -301,7 +301,14 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   model goes on the near list (state bit 4, `uvDobj_8021771C`: own
   frustum after a z clear) like the hang glider's and birdman's first
   person. Drawn in the main pass only, it was invisible on the headset:
-  the first-person near plane is 3 m (camera.c). The pilot
+  the first-person near plane is 3 m (camera.c).
+  Headset: "really helped with immersion and not feeling nauseous". The
+  eye is 0.25 m further back than the game's (`PW64_VR_GYRO_EYE_BACK_M`,
+  gyrocopterEnterLeave; it was too close to the windscreen). The
+  windscreen is part 9 of all six pilots' models (the only translucent
+  part, `PW64_GYRO_WINDSCREEN_PART`); VR HUD > Gyrocopter windscreen
+  (`[vr] gyro_windscreen`, `pw64_vr_gyro_windscreen`) hides it in first
+  person, never from outside. The pilot
   is part of the gyrocopter model (one model per pilot; head `unk572`,
   arms posed by the joint animation `unk590`).
 - **Open**: the cannonball landing pull-back is the game's (fine on the

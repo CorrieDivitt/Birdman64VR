@@ -121,6 +121,9 @@ pub struct Config {
     pub vr_hud_hidden: Vec<String>,
     /// `[vr] hud_distance / hud_spread / hud_size` (`vr::HudLayout`).
     pub vr_hud: VrHud,
+    /// `[vr] gyro_windscreen`: the gyrocopter's windscreen in VR first
+    /// person (`None` = default, shown).
+    pub vr_gyro_windscreen: Option<bool>,
     /// Keys skipped at load (wrong type or invalid value; see `ignored_keys`).
     pub ignored: Vec<String>,
 }
@@ -890,6 +893,12 @@ fn from_table(table: &toml::Table) -> Config {
                         ),
                     }
                 }
+                if let Some(v) = t.get("gyro_windscreen") {
+                    match coerce_bool(v) {
+                        Some(b) => cfg.vr_gyro_windscreen = Some(b),
+                        None => ignore(&mut ignored, "vr.gyro_windscreen", v, "use true or false"),
+                    }
+                }
                 if let Some(h) = t.get("hud_hidden") {
                     match h.as_array() {
                         Some(a) => {
@@ -929,6 +938,33 @@ fn from_table(table: &toml::Table) -> Config {
 pub fn save_vr_hud_hidden(names: &[&str]) -> Result<(), String> {
     let table = read_table()?;
     write_table(&with_vr_hud_hidden(table, names)?)
+}
+
+/// Writes `[vr] gyro_windscreen` (shown, the default, removes the key, and
+/// `[vr]` when nothing else is in it).
+pub fn save_vr_gyro_windscreen(on: bool) -> Result<(), String> {
+    let table = read_table()?;
+    write_table(&with_vr_gyro_windscreen(table, on)?)
+}
+
+/// [`save_vr_gyro_windscreen`]'s table edit (separate from the file I/O for
+/// tests).
+fn with_vr_gyro_windscreen(mut table: toml::Table, on: bool) -> Result<toml::Table, String> {
+    let vr = table
+        .entry("vr")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let toml::Value::Table(vr) = vr else {
+        return Err("[vr] is not a table in pw64.toml; not saved".to_string());
+    };
+    if on {
+        vr.remove("gyro_windscreen");
+    } else {
+        vr.insert("gyro_windscreen".into(), toml::Value::Boolean(false));
+    }
+    if vr.is_empty() {
+        table.remove("vr");
+    }
+    Ok(table)
 }
 
 /// Writes `[vr] hud_distance`, `hud_spread` and `hud_size`.
@@ -1773,6 +1809,23 @@ mod tests {
         let c = parse("[vr]\nhud_distance = 99\n").unwrap();
         assert_eq!(c.vr_hud.distance, None);
         assert_eq!(c.ignored, vec!["vr.hud_distance"]);
+    }
+
+    /// `[vr] gyro_windscreen`: parses (junk reported), round-trips, and
+    /// shown (the default) removes the key and an empty `[vr]`.
+    #[test]
+    fn vr_gyro_windscreen_round_trip() {
+        assert_eq!(parse("").unwrap().vr_gyro_windscreen, None);
+        let c = parse("[vr]\ngyro_windscreen = \"maybe\"\n").unwrap();
+        assert_eq!(c.vr_gyro_windscreen, None);
+        assert_eq!(c.ignored, vec!["vr.gyro_windscreen"]);
+        let t = with_vr_gyro_windscreen(toml::Table::new(), false).unwrap();
+        assert_eq!(from_table(&t).vr_gyro_windscreen, Some(false));
+        let t = with_vr_gyro_windscreen(t, true).unwrap();
+        assert!(!t.contains_key("vr"));
+        let t: toml::Table = toml::from_str("[vr]\nhud_size = 1.0\n").unwrap();
+        let t = with_vr_gyro_windscreen(t, true).unwrap();
+        assert!(t.contains_key("vr"), "other [vr] keys kept");
     }
 
     /// "Move HUD": `[hud]` element offsets (N64 px) and `[perf] pos` parse,

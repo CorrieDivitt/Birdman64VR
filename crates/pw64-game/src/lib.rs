@@ -62,6 +62,9 @@ unsafe extern "C" {
     /// native/src/pw64_widescreen.c: the VR HUD sphere's radians per N64
     /// pixel, 0 = not known.
     static mut pw64_vr_hud_rad_per_px: f32;
+    /// native/src/pw64_widescreen.c: the gyrocopter's windscreen in VR
+    /// first person, 0 = hidden.
+    static mut pw64_vr_gyro_windscreen: i32;
 }
 
 /// Infinite LOD (models always at their most detailed level) and infinite
@@ -288,6 +291,21 @@ pub fn set_vr_hud_rad_per_px(rad: f32) {
     #[cfg(feature = "dylib")]
     if let Some(g) = dylib::try_game() {
         unsafe { *g.vr_hud_rad_per_px = rad };
+    }
+}
+
+/// Birdman64VR: whether the gyrocopter's windscreen shows in VR first
+/// person (the settings' VR HUD page). May be called any time.
+pub fn set_vr_gyro_windscreen(on: bool) {
+    // SAFETY: plain C flag; the game reads it on its own thread.
+    #[cfg(feature = "static")]
+    unsafe {
+        pw64_vr_gyro_windscreen = on as i32
+    };
+    // SAFETY: same global, exported by the loaded game module.
+    #[cfg(feature = "dylib")]
+    if let Some(g) = dylib::try_game() {
+        unsafe { *g.vr_gyro_windscreen = on as i32 };
     }
 }
 

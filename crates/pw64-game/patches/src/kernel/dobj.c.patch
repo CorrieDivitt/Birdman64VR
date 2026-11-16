@@ -108,7 +108,7 @@
          uvmd = gGfxUnkPtrs->models[var_s2->modelId];
          if (uvmd == NULL) {
              _uvDebugPrintf("_uvDobjsDraw: model %d not in level\n", var_s2->modelId);
-@@ -433,6 +487,10 @@ void uvDobj_8021771C(UnkStruct_80204D94* arg0) {
+@@ -433,6 +487,9 @@ void uvDobj_8021771C(UnkStruct_80204D94* arg0) {
          if (!(temp_s1->unk34 & 2)) {
              continue;
          }
@@ -118,11 +118,10 @@
 +        if (PW64_DOBJ_NEAR_OTHER(D_80269CB0[i])) { // PW64 split-screen: drawn by _uvDobjsDraw here
 +            continue;
 +        }
-+        pw64_vr_dbg_near(D_80269CB0[i], arg0); // Birdman64VR debug (gyrocopter first person)
          uvmd = gGfxUnkPtrs->models[temp_s1->modelId];
 
          temp_fs3 = D_80265080[temp_s1->unk2[0]].m[3][0] - arg0->unk110.m[3][0];
-@@ -483,8 +541,15 @@ u8 uvDobjGetLODIndex(ParsedUVMD* uvmd, f32 dist) {
+@@ -483,8 +540,15 @@ u8 uvDobjGetLODIndex(ParsedUVMD* uvmd, f32 dist) {
      lodRadius = uvmd->lodRadius;
      lodCount = uvmd->lodCount;
      if (lodRadius[lodCount - 1] <= dist) {
@@ -139,7 +138,7 @@
 
      for (i = lodCount; i > 0; i--) {
          if (lodRadius[i - 1] < dist) {
-@@ -510,7 +568,7 @@ void uvDobj_80217B4C(Unk80263780* arg0, ParsedUVMD* uvmd, u8 lodId) {
+@@ -510,7 +567,7 @@ void uvDobj_80217B4C(Unk80263780* arg0, ParsedUVMD* uvmd, u8 lodId) {
      s32 temp_v1;
      Mtx4F sp50;
  
@@ -148,7 +147,7 @@
      D_80269F08++;
      if (arg0->unk34 & 8) {
          uvGfx_80223C00();
-@@ -527,7 +585,9 @@ void uvDobj_80217B4C(Unk80263780* arg0, ParsedUVMD* uvmd, u8 lodId) {
+@@ -527,7 +584,9 @@ void uvDobj_80217B4C(Unk80263780* arg0, ParsedUVMD* uvmd, u8 lodId) {
          if (currPart->lighting != FALSE) {
              uvGfxLookAt(&D_80265080[arg0->unk2[i]]);
          }
@@ -159,7 +158,7 @@
              for (j = 0; j < currPart->stateCount; j++) {
                  if (arg0->unk34 & 0x20) {
                      temp_s3 = currPart->stateTable[j].state;
-@@ -575,7 +633,7 @@ void uvDobj_80217E24(Unk80263780* arg0, ParsedUVMD* uvmd, u8 lodId, f32 arg3, f3
+@@ -575,7 +632,7 @@ void uvDobj_80217E24(Unk80263780* arg0, ParsedUVMD* uvmd, u8 lodId, f32 arg3, f3
      f32 var_fv1;
  
      sp54 = uvmd->unk20;

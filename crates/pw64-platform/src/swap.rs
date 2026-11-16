@@ -126,19 +126,17 @@ pub unsafe extern "C-unwind" fn pw64_fatal(msg: *const c_char, value: u32) -> ! 
 
 /// `pw64_log(msg, value)`: a one-line trace from patched C code, replacing the
 /// RCP register pokes and `_uvDebugPrintf` calls that are compiled out.
-/// Prints only under `PW64_TRACE_OS` (lines starting "vr dbg": always).
+/// Prints only under `PW64_TRACE_OS`.
 ///
 /// # Safety
 /// `msg` must point at a NUL-terminated string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C-unwind" fn pw64_log(msg: *const c_char, value: u32) {
-    // SAFETY: the C passes a NUL-terminated literal.
-    let msg = unsafe { CStr::from_ptr(msg) }.to_string_lossy();
-    // Birdman64VR: "vr dbg" lines always print (headset diagnostics; on
-    // Android stderr goes to logcat).
-    if !crate::os::trace_enabled() && !msg.starts_with("vr dbg") {
+    if !crate::os::trace_enabled() {
         return;
     }
+    // SAFETY: the C passes a NUL-terminated literal.
+    let msg = unsafe { CStr::from_ptr(msg) }.to_string_lossy();
     eprintln!("[c] {msg} (0x{value:x})");
 }
 
