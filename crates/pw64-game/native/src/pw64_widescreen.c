@@ -15,7 +15,9 @@
 #include <ultra64.h>
 #include <uv_graphics.h>
 #include <uv_math.h>
+#include <uv_matrix.h>
 #include "app/game.h"
+#include <uv_fx.h>
 
 /* Output aspect w/h, 0 = 4:3 (off). Set by Rust before boot
  * (pw64_game::set_widescreen_aspect).
@@ -108,6 +110,229 @@ void pw64_vr_crash_camera(void* cur_, const void* target_, const void* pilot_, f
     cur->m[2][0] = r[1] * f[2] - r[2] * f[1];
     cur->m[2][1] = r[2] * f[0] - r[0] * f[2];
     cur->m[2][2] = r[0] * f[1] - r[1] * f[0];
+}
+
+/* Camera matrix `cur` (position kept) looking along `f` (normalised in
+ * place), level: right horizontal, no roll. 0 when `f` is too short or
+ * straight up or down (nothing changed). */
+static int pw64_vr_look_level(Mtx4F* cur, float f[3]) {
+    float r[3], len;
+    int i;
+
+    len = uvSqrtF(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
+    if (len < 1e-4f) {
+        return 0;
+    }
+    for (i = 0; i < 3; i++) {
+        f[i] /= len;
+    }
+    r[0] = f[1];
+    r[1] = -f[0];
+    r[2] = 0.0f;
+    len = uvSqrtF(r[0] * r[0] + r[1] * r[1]);
+    if (len < 1e-4f) {
+        return 0;
+    }
+    r[0] /= len;
+    r[1] /= len;
+    for (i = 0; i < 3; i++) {
+        cur->m[0][i] = r[i];
+        cur->m[1][i] = f[i];
+        cur->m[i][3] = 0.0f;
+    }
+    cur->m[2][0] = r[1] * f[2] - r[2] * f[1];
+    cur->m[2][1] = r[2] * f[0] - r[0] * f[2];
+    cur->m[2][2] = r[0] * f[1] - r[1] * f[0];
+    cur->m[3][3] = 1.0f;
+    return 1;
+}
+
+void pw64_vr_heading_frame(void* out_, const void* at_, float vx, float vy) {
+    Mtx4F* out = out_;
+    const Mtx4F* at = at_;
+    float f[3];
+    int i;
+
+    f[0] = vx;
+    f[1] = vy;
+    f[2] = 0.0f;
+    if (!pw64_vr_look_level(out, f)) {
+        f[0] = at->m[1][0];
+        f[1] = at->m[1][1];
+        f[2] = 0.0f;
+        if (!pw64_vr_look_level(out, f)) {
+            uvMat4SetIdentity(out);
+        }
+    }
+    for (i = 0; i < 3; i++) {
+        out->m[3][i] = at->m[3][i];
+    }
+}
+
+void pw64_vr_cannon_cinematic(void* cur_, const void* cannon_, const void* pilot_, float dt, float now) {
+    static float last = -1.0f;
+    static Mtx4F view;
+    Mtx4F* cur = cur_;
+    const Mtx4F* cannon = cannon_;
+    const Mtx4F* pilot = pilot_;
+    float t[3], f[3], d[2], len, side, back;
+    int i;
+
+    (void)dt;
+    /* A new shot or the view turned back on: place it once. Off to the
+     * right of the line from the cannon to the target and a little short of
+     * the target, at the bullseye's height, looking at the point that far
+     * along the line: the target on one side of the view, the last part of
+     * the flight towards it on the other. */
+    if (last < 0.0f || now - last > 0.25f || now < last) {
+        if (!pw64_cannon_target(t)) {
+            for (i = 0; i < 3; i++) {
+                t[i] = pilot->m[3][i] + pilot->m[1][i] * 100.0f;
+            }
+        }
+        d[0] = t[0] - cannon->m[3][0];
+        d[1] = t[1] - cannon->m[3][1];
+        len = uvSqrtF(d[0] * d[0] + d[1] * d[1]);
+        if (len < 1.0f) {
+            d[0] = 0.0f;
+            d[1] = 1.0f;
+            len = 100.0f;
+        } else {
+            d[0] /= len;
+            d[1] /= len;
+        }
+        side = len * PW64_VR_CINE_SIDE;
+        if (side < PW64_VR_CINE_SIDE_MIN_M) {
+            side = PW64_VR_CINE_SIDE_MIN_M;
+        } else if (side > PW64_VR_CINE_SIDE_MAX_M) {
+            side = PW64_VR_CINE_SIDE_MAX_M;
+        }
+        back = side * (PW64_VR_CINE_BACK / PW64_VR_CINE_SIDE);
+        uvMat4SetIdentity(&view);
+        view.m[3][0] = t[0] - d[0] * back + d[1] * side;
+        view.m[3][1] = t[1] - d[1] * back - d[0] * side;
+        view.m[3][2] = t[2] + PW64_VR_CINE_UP_M;
+        f[0] = (t[0] - d[0] * back) - view.m[3][0];
+        f[1] = (t[1] - d[1] * back) - view.m[3][1];
+        f[2] = t[2] - view.m[3][2];
+        if (!pw64_vr_look_level(&view, f)) {
+            uvMat4Copy(&view, cur);
+        }
+    }
+    last = now;
+    uvMat4Copy(cur, &view);
+}
+
+float pw64_vr_cannon_scale(const void* pilot_, const void* cam_) {
+    const Mtx4F* pilot = pilot_;
+    const Mtx4F* cam = cam_;
+    float t[3], d[3], s, w;
+    int i;
+
+    for (i = 0; i < 3; i++) {
+        d[i] = pilot->m[3][i] - cam->m[3][i];
+    }
+    s = uvSqrtF(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) / PW64_VR_CINE_SCALE_REF_M;
+    if (s < 1.0f) {
+        s = 1.0f;
+    } else if (s > PW64_VR_CINE_SCALE_MAX) {
+        s = PW64_VR_CINE_SCALE_MAX;
+    }
+    if (pw64_cannon_target(t)) {
+        for (i = 0; i < 3; i++) {
+            d[i] = pilot->m[3][i] - t[i];
+        }
+        /* Back to normal over the last 120 m to 30 m before the target. */
+        w = (uvSqrtF(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) - 30.0f) / 90.0f;
+        if (w < 0.0f) {
+            w = 0.0f;
+        } else if (w > 1.0f) {
+            w = 1.0f;
+        }
+        s = 1.0f + (s - 1.0f) * w;
+    }
+    return s;
+}
+
+void pw64_vr_cannon_trail(int on, const void* pilot_, float dt) {
+    /* Own puffs (the game's smoke grows each from nothing and fades it all
+     * along, too faint from afar): full size and opaque from the start,
+     * fading out over the last 30% of their life. Same effect and texture
+     * as smoke.c's puffs. */
+    static u8 fx[PW64_VR_TRAIL_N];
+    static float age[PW64_VR_TRAIL_N];
+    static int ready = 0;
+    static int head = 0;
+    static float next = 0.0f;
+    static float prev[3];
+    static int had = 0;
+    const Mtx4F* pilot = pilot_;
+    Mtx4F m;
+    float a;
+    int i;
+
+    if (!ready) {
+        for (i = 0; i < PW64_VR_TRAIL_N; i++) {
+            fx[i] = 0xFF;
+        }
+        ready = 1;
+    }
+    if (on) {
+        /* Possibly several a frame: spread along the way since the last. */
+        if (!had) {
+            for (i = 0; i < 3; i++) {
+                prev[i] = pilot->m[3][i];
+            }
+        }
+        next -= dt;
+        while (next <= 0.0f) {
+            float u = (dt > 0.0f) ? 1.0f + next / dt : 1.0f;
+            next += PW64_VR_TRAIL_EVERY_S;
+            if (u < 0.0f) {
+                u = 0.0f;
+            }
+            i = head;
+            head = (head + 1) % PW64_VR_TRAIL_N;
+            if (fx[i] != 0xFF) {
+                uvFxProps(fx[i], FX_PROP_11(0), FX_PROP_END);
+            }
+            fx[i] = (u8)uvFx_8021EFF0(7);
+            if (fx[i] != 0xFF) {
+                uvModelGet(fx[i], 7);
+                uvFxProps(fx[i], FX_PROP_1(10000.0f), FX_PROP_19(PW64_VR_TRAIL_DRAW_M), FX_PROP_8(0x138),
+                          FX_PROP_15((float)((i % 4) * 90)),
+                          FX_PROP_5(PW64_VR_TRAIL_GREY / 255.0, PW64_VR_TRAIL_GREY / 255.0, PW64_VR_TRAIL_GREY / 255.0, 1.0),
+                          FX_PROP_3(PW64_VR_TRAIL_SIZE_M, PW64_VR_TRAIL_SIZE_M, PW64_VR_TRAIL_SIZE_M), FX_PROP_7(1.0f),
+                          FX_PROP_END);
+                uvMat4SetIdentity(&m);
+                m.m[3][0] = prev[0] + (pilot->m[3][0] - prev[0]) * u;
+                m.m[3][1] = prev[1] + (pilot->m[3][1] - prev[1]) * u;
+                m.m[3][2] = prev[2] + (pilot->m[3][2] - prev[2]) * u;
+                uvFx_8021A4D8(fx[i], &m);
+                age[i] = 0.0f;
+            }
+        }
+        for (i = 0; i < 3; i++) {
+            prev[i] = pilot->m[3][i];
+        }
+        had = 1;
+    } else {
+        next = 0.0f;
+        had = 0;
+    }
+    for (i = 0; i < PW64_VR_TRAIL_N; i++) {
+        if (fx[i] == 0xFF) {
+            continue;
+        }
+        age[i] += dt;
+        if (age[i] >= PW64_VR_TRAIL_LIFE_S) {
+            uvFxProps(fx[i], FX_PROP_11(0), FX_PROP_END);
+            fx[i] = 0xFF;
+            continue;
+        }
+        a = (PW64_VR_TRAIL_LIFE_S - age[i]) / (0.3f * PW64_VR_TRAIL_LIFE_S);
+        uvFxProps(fx[i], FX_PROP_7(a > 1.0f ? 1.0f : a), FX_PROP_END);
+    }
 }
 
 /* VR outside a test's flight: a full-width world view of an island is

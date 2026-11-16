@@ -118,6 +118,47 @@ extern int pw64_vr_results_menu;
  * `cur` towards `target`'s direction slowly and level. `now`: the
  * camera's running time (a gap = a new crash). */
 void pw64_vr_crash_camera(void* cur, const void* target, const void* pilot, float dt, float now);
+/* Birdman64VR, same file: `out` (Mtx4F*) = a level frame at `at`'s
+ * position facing heading (vx, vy) (`at`'s own forward when that is 0). */
+void pw64_vr_heading_frame(void* out, const void* at, float vx, float vy);
+/* Birdman64VR, same file: the cannonball's cinematic view in VR
+ * (cannonball.c.patch): a fixed spot beside the line from the cannon
+ * (Mtx4F* `cannon`) to the target (pw64_cannon_target), a little short of
+ * the target, showing the target and the pilot (`pilot`) coming in. Side
+ * offset = PW64_VR_CINE_SIDE x the cannon-target distance (clamped), short
+ * of the target by PW64_VR_CINE_BACK x it. A gap in `now` = a new shot
+ * (or the view switched back on). */
+#define PW64_VR_CINE_SIDE 0.25f
+#define PW64_VR_CINE_BACK 0.2f
+#define PW64_VR_CINE_SIDE_MIN_M 20.0f
+#define PW64_VR_CINE_SIDE_MAX_M 70.0f
+#define PW64_VR_CINE_UP_M 5.0f
+/* pads.c.patch: the cannon target's bullseye (world xyz) in `out`; 0 when
+ * the level has none. */
+int pw64_cannon_target(float* out);
+/* Birdman64VR, same file: the pilot's drawing scale in the cinematic
+ * view: their distance from the camera / PW64_VR_CINE_SCALE_REF_M (at
+ * least 1, at most PW64_VR_CINE_SCALE_MAX), back to 1 over the last 120 m
+ * to 30 m before the target. `pilot`, `cam`: Mtx4F*. */
+#define PW64_VR_CINE_SCALE_REF_M 20.0f
+#define PW64_VR_CINE_SCALE_MAX 4.0f
+float pw64_vr_cannon_scale(const void* pilot, const void* cam);
+/* Birdman64VR, same file: the cannonball's smoke trail in VR: while `on`
+ * (in flight), a dark grey puff left at the pilot (Mtx4F*) every
+ * PW64_VR_TRAIL_EVERY_S, PW64_VR_TRAIL_SIZE_M across and opaque from the
+ * start, fading out over the last 30% of PW64_VR_TRAIL_LIFE_S. At most
+ * PW64_VR_TRAIL_N puffs (of the 120 effects, fx.c), so EVERY x N bounds
+ * LIFE; several a frame are spread along the way. Call every frame. */
+#define PW64_VR_TRAIL_N 96
+/* Drawn up to this far from the camera (fx.c prop 19; smoke.c uses 50 x
+ * the puff size, 200 m here, short of the cinematic view). */
+#define PW64_VR_TRAIL_DRAW_M 2000.0f
+#define PW64_VR_TRAIL_GREY 40
+#define PW64_VR_TRAIL_SIZE_M 4.0f
+#define PW64_VR_TRAIL_EVERY_S 0.05f
+#define PW64_VR_TRAIL_LIFE_S 4.5f
+void pw64_vr_cannon_trail(int on, const void* pilot, float dt);
+void pw64_vr_cannon_cinematic(void* cur, const void* cannon, const void* pilot, float dt, float now);
 /* Fill screen (renderer.md "Fill screen"), same file: 0 = off (set by Rust
  * before boot), the per-frame "a filled world view was drawn" flag (reset
  * at the top of uvGfxBegin, graphics.c.patch) and the vertical

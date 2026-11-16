@@ -26,3 +26,22 @@
 +        gLandingStripCount = 0;
 +    }
 
+@@ -433,3 +442,18 @@ f32 padsStripAlignment(f32 x, f32 y, f32 z, LandingStrip* lstrip) {
+     ret = uvSqrtF(SQ(tx) + SQ(ty) + SQ(tz));
+     return ret;
+ }
++
++// PW64 VR: the cannon target's bullseye in world space (the hit test's
++// centre: deltaZ up the target's own z), for the cinematic camera.
++int pw64_cannon_target(float* out) {
++    CannonTarget* t;
++    s32 i;
++    if (sCannonTargetCount == 0) {
++        return 0;
++    }
++    t = &sCannonTargets[0];
++    for (i = 0; i < 3; i++) {
++        out[i] = t->pose.m[3][i] + t->pose.m[2][i] * t->deltaZ;
++    }
++    return 1;
++}
