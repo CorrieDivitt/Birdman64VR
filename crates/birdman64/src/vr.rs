@@ -673,6 +673,9 @@ mod real {
         // own depth on top keeps 3D HUD parts sorted among themselves.
         hud[2][2] += 0.05;
         let layout = super::hud_layout();
+        // The gyrocopter's aim reticle is placed on this sphere by the C
+        // side, in its pixels (pw64_vr_aim_reticle_y).
+        pw64_game::set_vr_hud_rad_per_px(HUD_RAD_PER_PX * layout.size);
         let hud_sphere = pw64_gfx::HudSphere {
             eye: mul(
                 &math::view(pose.orientation, pose.position),

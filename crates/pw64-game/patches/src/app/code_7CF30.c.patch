@@ -71,27 +71,30 @@
              } else {
                  if ((gcData->fuel <= 0.0f) && !gcData->fuelEmpty) {
                      hudWarningText(TEXT_FUEL_OUT, 1.5f, 8.0f);
-@@ -537,3 +550,5 @@ void func_802F6DC8(GyrocopterData* gcData, u8 unkFlag) {
+@@ -537,3 +550,8 @@ void func_802F6DC8(GyrocopterData* gcData, u8 unkFlag) {
          temp_fv1 = gcData->camera->clipNear * -0.105104235;
          temp_fa0 = (-gcData->camera->clipNear * gcData->camera->clipY0) / gcData->camera->unk20;
 -        gcData->reticleY = (107.0f * temp_fv1) / temp_fa0;
 +        // PW64 split-screen: 107 = the full view's half height (exactly 107
 +        // there); a split view's guard half height / HUD scale (camera.c.patch).
 +        gcData->reticleY = (pw64_split_reticle_half(gcData->camera) * temp_fv1) / temp_fa0;
-@@ -734,4 +745,5 @@ void func_802F764C(GyrocopterData* gcData) {
++        // Birdman64VR: on the HUD sphere 6 degrees below the view's centre,
++        // where the missiles fly (func_802F7178), at any VR HUD size.
++        gcData->reticleY = pw64_vr_aim_reticle_y(gcData->reticleY, 0.10471974f);
+@@ -734,4 +748,5 @@ void func_802F764C(GyrocopterData* gcData) {
      if (gcData->unkD0 != 0) {
          gcData->camera->unk6 = 0;
          gcData->unk2 = gcData->camera->unk6;
          uvDobjState(gcData->objId, gcData->unk2);
 +        pw64_dobj_cockpit[gcData->objId] = 0; // PW64 split-screen: sunk, hidden in every view
-@@ -769,5 +781,6 @@ void func_802F764C(GyrocopterData* gcData) {
+@@ -769,5 +784,6 @@ void func_802F764C(GyrocopterData* gcData) {
              uvDobjModel(gcData->objId, gcData->crashModelId);
              uvDobjPosm(gcData->objId, 0, &gcData->unk10);
          }
 +        pw64_plane_posm(gcData); // PW64 plane variant: the model's origin offset
      }
      shadow_803343D8(0);
-@@ -1188,3 +1201,11 @@ void gyrocopterLoadPilot(u8 pilot, GyrocopterData* gcData) {
+@@ -1188,3 +1204,11 @@ void gyrocopterLoadPilot(u8 pilot, GyrocopterData* gcData) {
          break;
      }
  }

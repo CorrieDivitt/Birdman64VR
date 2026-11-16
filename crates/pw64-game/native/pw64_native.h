@@ -98,6 +98,14 @@ void pw64_widescreen_tag(const void* chan, int on);
 /* Birdman64VR (same file; VR = pw64_widescreen_aspect < 0): 1 while the
  * world is shown in stereo, i.e. in VR during a test's flight. */
 int pw64_vr_flight(void);
+/* Birdman64VR, same file: the HUD sphere's radians per N64 pixel (set by
+ * Rust from the VR HUD size; 0 = not known). */
+extern float pw64_vr_hud_rad_per_px;
+/* Birdman64VR, same file: the gyrocopter's aim reticle row offset
+ * (code_7CF30.c.patch func_802F6DC8). In VR it is placed on the HUD sphere
+ * `down` radians below the view's centre, the direction the missiles fly;
+ * otherwise `flat`, the game's value. */
+float pw64_vr_aim_reticle_y(float flat, float down);
 /* Birdman64VR, same file: outside a test's flight, a world view with
  * terrain is shown as a small model of the island (the "diorama": menus,
  * title fly-over, results, replays). 1 for such a channel
