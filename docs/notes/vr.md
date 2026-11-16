@@ -246,7 +246,7 @@ which is dizzying as the player's head. Confirmed on the headset
   PC), so nothing drove player 1. Found with `[input] game pad 1` lines (VR
   only). Split-screen now stays off in VR and a switch to it is undone.
 
-## Cameras per vehicle (c1-c3, batches 1-3)
+## Cameras per vehicle (c1-c3, batches 1-4)
 
 Tuned on the headset 2026-11-15/16. The rule that came out of it: never
 let the game's camera fly the player around; snap, then hold still or
@@ -282,9 +282,20 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   fades it all along (invisible from afar), and its draw distance is 50 x
   the puff size (prop 19, 200 m): the trail was culled from the cinematic
   view until it was raised to 2 km.
-- **Open**: gyrocopter first-person missile aim lands low in VR
-  (parallax, batch 4); the cannonball landing pull-back is the game's
-  (fine on the headset).
+- **Gyrocopter aim** (batch 4): the missiles leave from the camera
+  itself (`camera->unk108`), 6 degrees below its forward line
+  (`func_802F7178`), and the game draws the reticle where that line
+  crosses the flat screen (`func_802F6DC8`: 25.7 px below the view's
+  centre, row 115, at the gyrocopter's zoom 0.8). The HUD sphere maps rows
+  with its own scale, `(120 - y) x 0.0034 x size`, so the reticle showed
+  about 3.5 degrees down (size 90%) and the missiles landed about 2.5
+  degrees below it, more metres the further the target. Not parallax:
+  the missile line and the sphere both start at the camera point. In VR
+  the reticle row is now set from the sphere's scale
+  (`pw64_vr_aim_reticle_y`, `pw64_vr_hud_rad_per_px` set by vr.rs each
+  frame): its centre 6 degrees below the sphere's, at any HUD size.
+- **Open**: the cannonball landing pull-back is the game's (fine on the
+  headset).
 
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.

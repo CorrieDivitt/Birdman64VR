@@ -50,6 +50,23 @@ int pw64_vr_flight(void) {
     return D_80362690->state == GAME_STATE_RESULTS && !pw64_vr_results_menu;
 }
 
+/* Birdman64VR: the HUD sphere's angle per N64 pixel (radians; Rust sets it
+ * from the VR HUD size, pw64_game::set_vr_hud_rad_per_px; 0 = not known).
+ * The sphere puts screen row y at pitch (120 - y) * this. */
+float pw64_vr_hud_rad_per_px = 0.0f;
+
+float pw64_vr_aim_reticle_y(float flat, float down) {
+    float r = pw64_vr_hud_rad_per_px;
+    float y;
+    if (pw64_widescreen_aspect >= 0.0f || r <= 0.0f) {
+        return flat;
+    }
+    /* hudDrawAimReticle: sprite centre row 115 - reticleY (y down); the
+     * sphere shows row 120 + down / r at `down` radians below its centre. */
+    y = -5.0f - down / r;
+    return (float)(int)(y < 0.0f ? y - 0.5f : y + 0.5f);
+}
+
 void pw64_vr_crash_camera(void* cur_, const void* target_, const void* pilot_, float dt, float now) {
     static float last = -1.0f;
     Mtx4F* cur = cur_;

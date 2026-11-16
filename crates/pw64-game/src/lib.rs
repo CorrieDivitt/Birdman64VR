@@ -59,6 +59,9 @@ unsafe extern "C" {
     /// native/src/pw64_plane.c: the plane the gyrocopter slot flies,
     /// `PLANE_*` (0 = off).
     static mut pw64_plane: i32;
+    /// native/src/pw64_widescreen.c: the VR HUD sphere's radians per N64
+    /// pixel, 0 = not known.
+    static mut pw64_vr_hud_rad_per_px: f32;
 }
 
 /// Infinite LOD (models always at their most detailed level) and infinite
@@ -268,6 +271,23 @@ pub fn set_plane(mode: i32) {
     #[cfg(feature = "dylib")]
     if let Some(g) = dylib::try_game() {
         unsafe { *g.plane = mode };
+    }
+}
+
+/// Birdman64VR: the HUD sphere's angle per N64 pixel (radians), so the C
+/// side can place the gyrocopter's aim reticle where the missiles fly
+/// (pw64_widescreen.c `pw64_vr_aim_reticle_y`). 0 = not known. May be
+/// called any time (each headset frame).
+pub fn set_vr_hud_rad_per_px(rad: f32) {
+    // SAFETY: plain C float; the game reads it on its own thread.
+    #[cfg(feature = "static")]
+    unsafe {
+        pw64_vr_hud_rad_per_px = rad
+    };
+    // SAFETY: same global, exported by the loaded game module.
+    #[cfg(feature = "dylib")]
+    if let Some(g) = dylib::try_game() {
+        unsafe { *g.vr_hud_rad_per_px = rad };
     }
 }
 
