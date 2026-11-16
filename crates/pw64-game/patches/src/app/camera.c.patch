@@ -21,11 +21,11 @@
      f32 temp_fa0;
  
      uvMat4UnkOp6(&sp30, &camera->unk80, &camera->unk108);
-+    // PW64 VR: the crash camera stays where it is and turns towards the
-+    // pilot slowly and level (pw64_vr_turn_towards), instead of snapping
-+    // onto them every frame and jumping back when they come close.
++    // PW64 VR: the crash camera backs off 10 m once, then stays there and
++    // turns towards the pilot slowly and level (pw64_vr_crash_camera).
++    // The game snaps onto them every frame and jumps back when close.
 +    if (pw64_widescreen_aspect < 0.0f) {
-+        pw64_vr_turn_towards(&camera->unk108, &sp30, D_8034F854);
++        pw64_vr_crash_camera(&camera->unk108, &sp30, &camera->unk80, D_8034F854, camera->unk14);
 +        return;
 +    }
      uvMat4Copy(&camera->unk108, &sp30);

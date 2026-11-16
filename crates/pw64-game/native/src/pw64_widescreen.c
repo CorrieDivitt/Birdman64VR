@@ -48,12 +48,34 @@ int pw64_vr_flight(void) {
     return D_80362690->state == GAME_STATE_RESULTS && !pw64_vr_results_menu;
 }
 
-void pw64_vr_turn_towards(void* cur_, const void* target_, float dt) {
+void pw64_vr_crash_camera(void* cur_, const void* target_, const void* pilot_, float dt, float now) {
+    static float last = -1.0f;
     Mtx4F* cur = cur_;
     const Mtx4F* target = target_;
-    float k = dt * 1.5f; /* about two thirds of the way in a second */
-    float f[3], r[3], len;
+    const Mtx4F* pilot = pilot_;
+    float k = dt * 0.75f; /* about half of the way in a second */
+    float f[3], r[3], d[3], len;
     int i;
+
+    /* A new crash (this camera was not running last frame): back off 10 m
+     * along the line from the pilot, never below them, and look at them
+     * straight away. */
+    if (last < 0.0f || now - last > 0.25f || now < last) {
+        for (i = 0; i < 3; i++) {
+            d[i] = cur->m[3][i] - pilot->m[3][i];
+        }
+        len = uvSqrtF(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        if (len > 1e-3f) {
+            for (i = 0; i < 3; i++) {
+                cur->m[3][i] += d[i] / len * 10.0f;
+            }
+            if (cur->m[3][2] < pilot->m[3][2]) {
+                cur->m[3][2] = pilot->m[3][2];
+            }
+        }
+        k = 1.0f;
+    }
+    last = now;
 
     if (k > 1.0f) {
         k = 1.0f;
@@ -170,14 +192,14 @@ int pw64_vr_title_phase = -1;
  * 24 bits (+ the value's index in the low byte) and an f32's bits in w1. */
 #define PW64_DIORAMA_TAG 0x445200u /* "DR" */
 
-/* The diorama's data for the renderer, right after the world tag, 21
- * values: the game camera's world matrix (rows right, forward, up,
+/* The diorama's data for the renderer, right after the world tag, 22
+ * values (the last: the vehicle): the game camera's world matrix (rows right, forward, up,
  * position; xyz), the island's bounds (min xyz, max xyz), 1 on the title
  * screen (the headset follows its camera, slowed down by the title's
  * patch, instead of showing a model), the game state and the title's
  * phase (for the log). */
 static void pw64_diorama_tag(const UnkStruct_80204D94* c) {
-    float v[21];
+    float v[22];
     int i, k, title;
     for (i = 0; i < 4; i++) {
         for (k = 0; k < 3; k++) {
@@ -195,7 +217,8 @@ static void pw64_diorama_tag(const UnkStruct_80204D94* c) {
                                                                                     : 0.0f;
     v[19] = D_80362690 != NULL ? (float)D_80362690->state : -1.0f;
     v[20] = title ? (float)pw64_vr_title_phase : -1.0f;
-    for (i = 0; i < 21; i++) {
+    v[21] = D_80362690 != NULL ? (float)D_80362690->unkC[D_80362690->unk9C].veh : -1.0f;
+    for (i = 0; i < 22; i++) {
         union {
             float f;
             u32 u;

@@ -757,6 +757,10 @@ mod real {
         if d.title || d.celebration {
             let (back, up) = if d.title {
                 (TITLE_BACK_M, TITLE_UP_M)
+            } else if matches!(d.vehicle, 1 | 2) {
+                // Rocket belt, gyrocopter: their celebration camera sits a
+                // little high (the user, in the headset).
+                (0.0, -1.0)
             } else {
                 (0.0, 0.0)
             };
@@ -1865,6 +1869,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 celebration: false,
                 state: 0,
                 title_phase: -1,
+                vehicle: -1,
             };
             let eye = super::diorama_eye(&pose, &d);
             let apply = |m: &super::Mat4, p: [f32; 4]| -> [f32; 4] {
@@ -1920,6 +1925,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 celebration: false,
                 state: 0,
                 title_phase: 1,
+                vehicle: -1,
             };
             let eye = super::diorama_eye(&pose, &d);
             let flight = super::stereo_eye(&pose).world;
@@ -1959,6 +1965,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 celebration: true,
                 state: 14,
                 title_phase: -1,
+                vehicle: 0,
             };
             let eye = super::diorama_eye(&pose, &d);
             let flight = super::stereo_eye(&pose).world;

@@ -295,11 +295,15 @@ pub struct Diorama {
     /// the log.
     pub state: i32,
     pub title_phase: i32,
+    /// The vehicle (`VEHICLE_*`: 0 hang glider, 1 rocket belt, 2
+    /// gyrocopter, 3 cannonball, 4 sky diving, 5 jumble hopper, 6
+    /// birdman; -1 none).
+    pub vehicle: i32,
 }
 
 impl Diorama {
-    /// From the 21 values in tag order.
-    pub fn from_values(v: &[f32; 21]) -> Self {
+    /// From the 22 values in tag order.
+    pub fn from_values(v: &[f32; 22]) -> Self {
         let r = |i: usize| [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
         Self {
             camera: [r(0), r(1), r(2), r(3)],
@@ -308,6 +312,7 @@ impl Diorama {
             celebration: v[18] == 2.0,
             state: v[19] as i32,
             title_phase: v[20] as i32,
+            vehicle: v[21] as i32,
         }
     }
 

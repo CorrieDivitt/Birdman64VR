@@ -164,7 +164,7 @@ pub struct Interpreter {
     /// an 'X' marker and the active rect; reset per run.
     split_x: [f32; 2],
     /// Birdman64VR: the island model's values as their tags arrive.
-    diorama_in: [f32; 21],
+    diorama_in: [f32; 22],
     split: Option<[f32; 4]>,
     /// Current movable HUD element (`HUD_ELEM_TAG` markers, 0 = none);
     /// reset per run.
@@ -329,7 +329,7 @@ impl Interpreter {
             vanchor: VAnchor::Middle,
             hud: false,
             split_x: [0.0; 2],
-            diorama_in: [0.0; 21],
+            diorama_in: [0.0; 22],
             split: None,
             elem: 0,
             commands: 0,
