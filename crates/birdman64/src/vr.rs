@@ -588,8 +588,9 @@ mod real {
 
     /// The title view: how far behind and above the game camera, in game
     /// metres.
-    const TITLE_BACK_M: f32 = 12.0;
-    const TITLE_UP_M: f32 = 2.0;
+    /// 12 m behind hid the logo behind the menu; 5 m.
+    const TITLE_BACK_M: f32 = 5.0;
+    const TITLE_UP_M: f32 = 1.0;
 
     /// A camera world matrix (rows right, forward, up, position; z up)
     /// turned level: facing the same way, no pitch or roll.

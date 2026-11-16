@@ -1735,6 +1735,7 @@ fn publish(s: &mut Sources) {
     let p2 = p2_setting();
     reassign(s, p2.as_ref());
     let [p, p2_pad] = route(s, p2.as_ref(), FOCUSED.load(Ordering::Relaxed));
+    log_game_pad(s, &p, p2.is_some());
     // Always kept current: the first-run setup screen (firstrun.rs, U13)
     // polls it too, before the game or the overlay exist.
     *OVERLAY_PAD.lock().unwrap() = s.nav();
@@ -1759,6 +1760,34 @@ fn publish(s: &mut Sources) {
         if let Some(r) = RECORD.lock().unwrap().as_mut() {
             r.pad = Pad { button, ..p };
         }
+    }
+}
+
+/// Birdman64VR: in VR, one `[input] game pad` line whenever the buttons
+/// reaching player 1 or what holds them back change (the title menu ignored
+/// the pad in a headset test while the settings overlay worked).
+fn log_game_pad(s: &Sources, p: &Pad, p2: bool) {
+    /// Buttons, focused, overlay open, blocked, player 2 routed, pads.
+    type Seen = (u16, bool, bool, bool, bool, usize);
+    static LAST: Mutex<Option<Seen>> = Mutex::new(None);
+    if !crate::vr::active() {
+        return;
+    }
+    let now = (
+        p.button,
+        FOCUSED.load(Ordering::Relaxed),
+        crate::settings::is_open(),
+        GAME_BLOCKED.load(Ordering::Relaxed),
+        p2,
+        s.gamepads.len(),
+    );
+    let mut last = LAST.lock().unwrap();
+    if *last != Some(now) {
+        *last = Some(now);
+        eprintln!(
+            "[input] game pad 1: buttons {:04x} (suppressed {:04x}); focused {}, overlay {}, blocked {}, player 2 {}, pads {}",
+            now.0, s.suppressed[0], now.1, now.2, now.3, now.4, now.5
+        );
     }
 }
 

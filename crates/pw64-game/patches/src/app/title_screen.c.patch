@@ -97,11 +97,12 @@
 @@ -487,1 +501,2 @@
          menuRender();
 +        pw64_title_hint();
-@@ -498,1 +515,7 @@
+@@ -498,1 +515,8 @@
      f0 = ((1.0 - ((4.65f - D_80378CE0->unk22C) / 4.65f)) * 100.0);
-+    // PW64 VR: in the headset only the last 30% of the drop, in the same
-+    // time (about three times slower), and the title's phase for the log.
++    // PW64 VR: no drop in the headset: the camera starts low, where the
++    // slow sweep starts (big motions are uncomfortable). And the title's
++    // phase for the log.
 +    if (pw64_widescreen_aspect < 0.0f) {
-+        f0 = 100.0f - (100.0f - f0) * 0.3f;
++        f0 = 100.0f;
 +    }
 +    pw64_vr_title_phase = D_80378CE0->unk28;
