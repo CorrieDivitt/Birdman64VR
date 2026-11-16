@@ -246,6 +246,46 @@ which is dizzying as the player's head. Confirmed on the headset
   PC), so nothing drove player 1. Found with `[input] game pad 1` lines (VR
   only). Split-screen now stays off in VR and a switch to it is undone.
 
+## Cameras per vehicle (c1-c3, batches 1-3)
+
+Tuned on the headset 2026-11-15/16. The rule that came out of it: never
+let the game's camera fly the player around; snap, then hold still or
+turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
+
+- **After landing** the flight view lingers until the results menu
+  (`pw64_vr_flight()`, `pw64_vr_results_menu` set in results.c.patch).
+- **Badge celebrations**: full size, 1 m lower for rocket belt and
+  gyrocopter.
+- **Crash** (camera mode 6, `pw64_vr_crash_camera`): backs off 10 m once,
+  then turns slowly (dt x 0.75) and level. **At rest** (mode 3, the
+  game's sweep in and orbit): held still 1 s, then a snap to a fixed 3 m
+  shot from the crash camera's side; raised only when occluded.
+- **Hang glider**: first person from the eyes, (0, bar.y x 0.2 + 0.3,
+  bar.z x 0.85 + 0.5) in the glider frame (bar = the control bar corner
+  `unk27C`), level; tries before: 1 m behind at sail height (the game's),
+  0.5 m lower and further back. Chase 50% closer (offset, 0.35 s delay,
+  0.9-5 m clamps).
+- **Sky diving**: first person once the chute is open (`unk70 == 1`), from
+  the eyes facing the heading, level.
+- **Cannonball**: aiming view as the game (+5 m was tried and undone). In
+  flight first person from the head, a level heading frame from the
+  velocity (`pw64_vr_heading_frame`), offset (0, 0.6, 0.3). The cinematic
+  view (R) is a fixed spot beside the line from the cannon to the target
+  (`pw64_cannon_target`, pads.c.patch): 0.25 x their distance to the side
+  (20-70 m), 0.2 x it short of the target, 5 m above the bullseye. Tries
+  before: behind the cannon panning after the pilot (30 m, then 8 m back).
+  While in that view the pilot is drawn up to 4x bigger (distance / 20 m),
+  back to normal 120-30 m before the target (drawing only), and in flight
+  a trail of near-black puffs (`pw64_vr_cannon_trail`: smoke.c's effect,
+  4 m, every 0.05 s, 4.5 s life, opaque until the last 30%, up to 96 of
+  the 120 effects). Lessons: smoke.c grows each puff from nothing and
+  fades it all along (invisible from afar), and its draw distance is 50 x
+  the puff size (prop 19, 200 m): the trail was culled from the cinematic
+  view until it was raised to 2 km.
+- **Open**: gyrocopter first-person missile aim lands low in VR
+  (parallax, batch 4); the cannonball landing pull-back is the game's
+  (fine on the headset).
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`
