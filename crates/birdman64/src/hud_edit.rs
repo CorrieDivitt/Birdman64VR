@@ -20,7 +20,7 @@ use pw64_gfx::hud::{HUD_ELEMS, HudBounds, HudOffsets, clamp_offset};
 
 /// The movable elements: id (must match `PW64_HUD_*` in the native game's
 /// `pw64_native.h`), `[hud]` key, label.
-pub const ELEMENTS: [(u8, &str, &str); 12] = [
+pub const ELEMENTS: [(u8, &str, &str); 13] = [
     (1, "speed", "Speed"),
     (2, "timer", "Timer"),
     (3, "throttle", "Throttle"),
@@ -33,6 +33,8 @@ pub const ELEMENTS: [(u8, &str, &str); 12] = [
     (10, "cb_power", "Power"),
     (11, "cb_heading", "Heading"),
     (12, "cb_elevation", "Elevation"),
+    // Birdman64VR: the cannonball's shots left, part of "Power" before.
+    (13, "cb_shots", "Shots"),
 ];
 
 /// The id of a `[hud]` key.

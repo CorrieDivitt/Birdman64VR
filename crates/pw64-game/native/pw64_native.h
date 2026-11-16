@@ -119,6 +119,9 @@ extern int pw64_vr_gyro_windscreen;
  * 0.1 m forward again (headset). Centred across the cockpit too (the
  * game's is up to 1.3 cm to the right). */
 #define PW64_VR_GYRO_EYE_BACK_M 0.15f
+/* Birdman64VR: the rocket belt's first-person eye this much further back
+ * than the game's (code_AC1A0.c.patch rocketBeltEnterLeave), metres. */
+#define PW64_VR_RB_EYE_BACK_M 0.25f
 /* Birdman64VR: the gyrocopter's fuel gauge in VR (hud.c.patch
  * hudDrawGyrocopter; the flat game's is at 98, 37), N64 HUD px, y up: on
  * the HUD sphere at the default spread (275%) its centre sits midway
@@ -134,6 +137,15 @@ void pw64_vr_dash_set(int objId, const float (*points)[3]);
 /* The gyrocopter's dashboard on (`on`) or off for dobj `objId` with model
  * `modelId` (code_7CF30.c.patch, every frame). */
 void pw64_vr_gyro_dash(int objId, int modelId, int on);
+/* Birdman64VR, same file: the cannonball's power bar moved in VR, by this
+ * much (N64 HUD px, y up): beside the heading strip at the bottom, its
+ * right edge 8 px-angles left of the strip's, their bottoms level, on the
+ * HUD sphere at the default spread (275%). Push before its draws, pop
+ * after. */
+#define PW64_VR_CB_POWER_DX 65.0f
+#define PW64_VR_CB_POWER_DY -52.0f
+void pw64_vr_cb_power_push(void);
+void pw64_vr_cb_power_pop(void);
 /* Birdman64VR, same file: outside a test's flight, a world view with
  * terrain is shown as a small model of the island (the "diorama": menus,
  * title fly-over, results, replays). 1 for such a channel
@@ -232,6 +244,7 @@ void pw64_hud_tag(int on);
 #define PW64_HUD_CB_POWER 10
 #define PW64_HUD_CB_HEADING 11
 #define PW64_HUD_CB_ELEVATION 12
+#define PW64_HUD_CB_SHOTS 13
 extern int pw64_hud_elem;
 void pw64_hud_element(int id);
 void pw64_hud_emit_element(int id);

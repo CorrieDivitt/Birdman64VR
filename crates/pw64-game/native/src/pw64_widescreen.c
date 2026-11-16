@@ -654,7 +654,9 @@ void pw64_vr_dash_set(int objId, const float (*points)[3]) {
  * the Hawk's and Robin's: the map's 10 cm stay on it). */
 void pw64_vr_gyro_dash(int objId, int modelId, int on) {
     static const float lark[2][3] = {{0.0f, 64.0f, 22.0f}, {-15.0f, 56.0f, 16.0f}};
-    static const float goose[2][3] = {{0.0f, 88.0f, 19.0f}, {-15.0f, 77.0f, 14.0f}};
+    /* The Goose's and Ibis's knees come up there: their map 8 cm further
+     * forward (headset). */
+    static const float goose[2][3] = {{0.0f, 88.0f, 19.0f}, {-15.0f, 85.0f, 18.0f}};
     static const float hawk[2][3] = {{0.0f, 73.0f, 27.0f}, {-20.0f, 66.0f, 19.0f}};
     static const float kiwi[2][3] = {{0.0f, 65.0f, 22.0f}, {-15.0f, 57.0f, 16.0f}};
     static const float robin[2][3] = {{0.0f, 74.0f, 27.0f}, {-20.0f, 67.0f, 19.0f}};
@@ -735,6 +737,24 @@ static void pw64_vr_dash_tag(const UnkStruct_80204D94* c) {
         gGfxDisplayListHead->words.w0 = ((u32)G_NOOP << 24) | PW64_DASH_TAG | (u32)i;
         gGfxDisplayListHead->words.w1 = bits.u;
         gGfxDisplayListHead++;
+    }
+}
+
+/* Birdman64VR: the cannonball's power bar in VR, moved beside the heading
+ * strip at the bottom (hud.c.patch hudDrawCannonball): a translation of
+ * the HUD's view matrix around its draws. */
+void pw64_vr_cb_power_push(void) {
+    Mtx4F m;
+    if (pw64_widescreen_aspect < 0.0f) {
+        uvMat4SetIdentity(&m);
+        uvMat4LocalTranslate(&m, PW64_VR_CB_POWER_DX, PW64_VR_CB_POWER_DY, 0.0f);
+        uvGfxMtxViewLoad(&m, 1);
+    }
+}
+
+void pw64_vr_cb_power_pop(void) {
+    if (pw64_widescreen_aspect < 0.0f) {
+        uvGfxMtxViewPop();
     }
 }
 

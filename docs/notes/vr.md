@@ -260,8 +260,9 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   then turns slowly (dt x 0.75) and level. **At rest** (mode 3, the
   game's sweep in and orbit): held still 1 s, then a snap to a fixed 3 m
   shot from the crash camera's side; raised only when occluded.
-- **Hang glider**: first person from the eyes, (0, bar.y x 0.2 + 0.3,
-  bar.z x 0.85 + 0.5) in the glider frame (bar = the control bar corner
+- **Hang glider**: first person from the eyes, (0, bar.y x 0.2 + 0.2,
+  bar.z x 0.85 + 0.4) in the glider frame (0.1 m back and down from the
+  first tuning, headset) (bar = the control bar corner
   `unk27C`), level; tries before: 1 m behind at sail height (the game's),
   0.5 m lower and further back. Chase 50% closer (offset, 0.35 s delay,
   0.9-5 m clamps).
@@ -319,7 +320,8 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   the dashboard's tip (the windscreen's lower edge) as seen from that
   pilot's eye; the map a row lower on the left side, 15 cm from the middle,
   20 cm in the Hawk's and Robin's wider cockpits: in the middle the pilots'
-  right hand covered it a lot). At the end of the world view
+  right hand covered it a lot; 8 cm further forward in the Goose's and
+  Ibis's, whose knees came up there). At the end of the world view
   `pw64_vr_dash_tag` sends them in the camera's space with the model's
   right axis (`DASH_TAG`, nine floats; `Frame::dash`), so they stay on the
   dashboard however the camera turns. The renderer draws each element in
@@ -335,6 +337,13 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   the gauges along one panel through a single point (5 cm up, map below):
   up the panel is not along the sloping dashboard, so they sat off its
   surface and too low.
+- **Rocket belt first person**: the eye 0.25 m further back than the
+  game's (`PW64_VR_RB_EYE_BACK_M`, rocketBeltEnterLeave; headset).
+- **Cannonball power bar** in VR: beside the heading strip at the bottom,
+  bottoms level (`pw64_vr_cb_power_push/pop`: the HUD view matrix moved by
+  `PW64_VR_CB_POWER_DX/DY`, 65, -52 px, placed for the default spread).
+  The shots left, drawn with it before, are their own HUD element now
+  ("Shots", `cb_shots`, id 13), so they stay where they were.
 - **Gyrocopter fuel gauge** in VR: moved for good to between the altimeter
   and the altitude (sea level) readout on the HUD sphere
   (`PW64_VR_GYRO_FUEL_X/Y`, 207, 53 in HUD px, y up; the flat game's
