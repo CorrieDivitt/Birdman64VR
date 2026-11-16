@@ -170,57 +170,56 @@ void pw64_vr_heading_frame(void* out_, const void* at_, float vx, float vy) {
 
 void pw64_vr_cannon_cinematic(void* cur_, const void* cannon_, const void* pilot_, float dt, float now) {
     static float last = -1.0f;
+    static Mtx4F view;
     Mtx4F* cur = cur_;
     const Mtx4F* cannon = cannon_;
     const Mtx4F* pilot = pilot_;
-    float k = dt * 0.6f; /* a slow pan: a little under half the way a second */
-    float f[3], d[2], len;
+    float t[3], f[3], d[2], len, side, back;
     int i;
 
-    /* A new shot or the view turned back on: behind the cannon (opposite
-     * the pilot's way from it) and to its right, above it, looking at it. */
+    (void)dt;
+    /* A new shot or the view turned back on: place it once. Off to the
+     * right of the line from the cannon to the target and a little short of
+     * the target, at the bullseye's height, looking at the point that far
+     * along the line: the target on one side of the view, the last part of
+     * the flight towards it on the other. */
     if (last < 0.0f || now - last > 0.25f || now < last) {
-        d[0] = pilot->m[3][0] - cannon->m[3][0];
-        d[1] = pilot->m[3][1] - cannon->m[3][1];
-        len = uvSqrtF(d[0] * d[0] + d[1] * d[1]);
-        if (len < 1e-3f) {
-            d[0] = pilot->m[1][0];
-            d[1] = pilot->m[1][1];
-            len = uvSqrtF(d[0] * d[0] + d[1] * d[1]);
+        if (!pw64_cannon_target(t)) {
+            for (i = 0; i < 3; i++) {
+                t[i] = pilot->m[3][i] + pilot->m[1][i] * 100.0f;
+            }
         }
-        if (len < 1e-3f) {
+        d[0] = t[0] - cannon->m[3][0];
+        d[1] = t[1] - cannon->m[3][1];
+        len = uvSqrtF(d[0] * d[0] + d[1] * d[1]);
+        if (len < 1.0f) {
             d[0] = 0.0f;
             d[1] = 1.0f;
-            len = 1.0f;
+            len = 100.0f;
+        } else {
+            d[0] /= len;
+            d[1] /= len;
         }
-        d[0] /= len;
-        d[1] /= len;
-        cur->m[3][0] = cannon->m[3][0] - d[0] * PW64_VR_CINE_BACK_M + d[1] * PW64_VR_CINE_SIDE_M;
-        cur->m[3][1] = cannon->m[3][1] - d[1] * PW64_VR_CINE_BACK_M - d[0] * PW64_VR_CINE_SIDE_M;
-        cur->m[3][2] = cannon->m[3][2] + PW64_VR_CINE_UP_M;
-        for (i = 0; i < 3; i++) {
-            f[i] = cannon->m[3][i] - cur->m[3][i];
+        side = len * PW64_VR_CINE_SIDE;
+        if (side < PW64_VR_CINE_SIDE_MIN_M) {
+            side = PW64_VR_CINE_SIDE_MIN_M;
+        } else if (side > PW64_VR_CINE_SIDE_MAX_M) {
+            side = PW64_VR_CINE_SIDE_MAX_M;
         }
-        pw64_vr_look_level(cur, f);
-        k = 0.0f;
+        back = side * (PW64_VR_CINE_BACK / PW64_VR_CINE_SIDE);
+        uvMat4SetIdentity(&view);
+        view.m[3][0] = t[0] - d[0] * back + d[1] * side;
+        view.m[3][1] = t[1] - d[1] * back - d[0] * side;
+        view.m[3][2] = t[2] + PW64_VR_CINE_UP_M;
+        f[0] = (t[0] - d[0] * back) - view.m[3][0];
+        f[1] = (t[1] - d[1] * back) - view.m[3][1];
+        f[2] = t[2] - view.m[3][2];
+        if (!pw64_vr_look_level(&view, f)) {
+            uvMat4Copy(&view, cur);
+        }
     }
     last = now;
-
-    if (k > 1.0f) {
-        k = 1.0f;
-    }
-    for (i = 0; i < 3; i++) {
-        d[0] = pilot->m[3][i] - cur->m[3][i];
-        f[i] = d[0];
-    }
-    len = uvSqrtF(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
-    if (len < 1e-3f) {
-        return;
-    }
-    for (i = 0; i < 3; i++) {
-        f[i] = cur->m[1][i] + (f[i] / len - cur->m[1][i]) * k;
-    }
-    pw64_vr_look_level(cur, f);
+    uvMat4Copy(cur, &view);
 }
 
 /* VR outside a test's flight: a full-width world view of an island is

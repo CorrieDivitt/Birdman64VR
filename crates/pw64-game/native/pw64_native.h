@@ -122,13 +122,20 @@ void pw64_vr_crash_camera(void* cur, const void* target, const void* pilot, floa
  * position facing heading (vx, vy) (`at`'s own forward when that is 0). */
 void pw64_vr_heading_frame(void* out, const void* at, float vx, float vy);
 /* Birdman64VR, same file: the cannonball's cinematic view in VR
- * (cannonball.c.patch): a fixed spot behind the cannon (Mtx4F* `cannon`)
- * and to one side, first looking at the cannon, then turning slowly and
- * level after the pilot (`pilot`) towards the target. A gap in `now` = a
- * new shot (or the view switched back on). */
-#define PW64_VR_CINE_BACK_M 8.0f
-#define PW64_VR_CINE_SIDE_M 5.0f
-#define PW64_VR_CINE_UP_M 3.0f
+ * (cannonball.c.patch): a fixed spot beside the line from the cannon
+ * (Mtx4F* `cannon`) to the target (pw64_cannon_target), a little short of
+ * the target, showing the target and the pilot (`pilot`) coming in. Side
+ * offset = PW64_VR_CINE_SIDE x the cannon-target distance (clamped), short
+ * of the target by PW64_VR_CINE_BACK x it. A gap in `now` = a new shot
+ * (or the view switched back on). */
+#define PW64_VR_CINE_SIDE 0.4f
+#define PW64_VR_CINE_BACK 0.3f
+#define PW64_VR_CINE_SIDE_MIN_M 30.0f
+#define PW64_VR_CINE_SIDE_MAX_M 120.0f
+#define PW64_VR_CINE_UP_M 5.0f
+/* pads.c.patch: the cannon target's bullseye (world xyz) in `out`; 0 when
+ * the level has none. */
+int pw64_cannon_target(float* out);
 void pw64_vr_cannon_cinematic(void* cur, const void* cannon, const void* pilot, float dt, float now);
 /* Fill screen (renderer.md "Fill screen"), same file: 0 = off (set by Rust
  * before boot), the per-frame "a filled world view was drawn" flag (reset

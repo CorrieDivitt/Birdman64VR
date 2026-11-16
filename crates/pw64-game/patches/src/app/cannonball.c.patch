@@ -32,11 +32,11 @@
 -        camera_802D45C4(cbData->camera, cbData->unkB8);
 +        // PW64 VR, in flight: first person from the pilot's head, level and
 +        // facing their way, instead of the chase view; the cinematic view
-+        // (R) is a fixed spot behind the cannon panning slowly after them.
++        // (R) is a fixed spot beside the target showing them come in.
 +        if ((pw64_widescreen_aspect < 0.0f) && (cbData->unkD4 == 1) && (cbData->unkB4 == 0)) {
 +            pw64_vr_heading_frame(&cbData->camera->unk80, sp2C, cbData->unk1C4.x, cbData->unk1C4.y);
 +            cbData->camera->unk68.x = 0.0f;
-+            cbData->camera->unk68.y = 0.45f;
++            cbData->camera->unk68.y = 0.6f;
 +            cbData->camera->unk68.z = 0.3f;
 +            cbData->camera->unk74 = 0.0f;
 +            cbData->camera->unk78 = 0.0f;
