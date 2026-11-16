@@ -128,14 +128,21 @@ void pw64_vr_heading_frame(void* out, const void* at, float vx, float vy);
  * offset = PW64_VR_CINE_SIDE x the cannon-target distance (clamped), short
  * of the target by PW64_VR_CINE_BACK x it. A gap in `now` = a new shot
  * (or the view switched back on). */
-#define PW64_VR_CINE_SIDE 0.4f
-#define PW64_VR_CINE_BACK 0.3f
-#define PW64_VR_CINE_SIDE_MIN_M 30.0f
-#define PW64_VR_CINE_SIDE_MAX_M 120.0f
+#define PW64_VR_CINE_SIDE 0.25f
+#define PW64_VR_CINE_BACK 0.2f
+#define PW64_VR_CINE_SIDE_MIN_M 20.0f
+#define PW64_VR_CINE_SIDE_MAX_M 70.0f
 #define PW64_VR_CINE_UP_M 5.0f
 /* pads.c.patch: the cannon target's bullseye (world xyz) in `out`; 0 when
  * the level has none. */
 int pw64_cannon_target(float* out);
+/* Birdman64VR, same file: the pilot's drawing scale in the cinematic
+ * view: their distance from the camera / PW64_VR_CINE_SCALE_REF_M (at
+ * least 1, at most PW64_VR_CINE_SCALE_MAX), back to 1 over the last 50 m
+ * to 10 m before the target. `pilot`, `cam`: Mtx4F*. */
+#define PW64_VR_CINE_SCALE_REF_M 20.0f
+#define PW64_VR_CINE_SCALE_MAX 4.0f
+float pw64_vr_cannon_scale(const void* pilot, const void* cam);
 void pw64_vr_cannon_cinematic(void* cur, const void* cannon, const void* pilot, float dt, float now);
 /* Fill screen (renderer.md "Fill screen"), same file: 0 = off (set by Rust
  * before boot), the per-frame "a filled world view was drawn" flag (reset

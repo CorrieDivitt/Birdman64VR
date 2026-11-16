@@ -222,6 +222,37 @@ void pw64_vr_cannon_cinematic(void* cur_, const void* cannon_, const void* pilot
     uvMat4Copy(cur, &view);
 }
 
+float pw64_vr_cannon_scale(const void* pilot_, const void* cam_) {
+    const Mtx4F* pilot = pilot_;
+    const Mtx4F* cam = cam_;
+    float t[3], d[3], s, w;
+    int i;
+
+    for (i = 0; i < 3; i++) {
+        d[i] = pilot->m[3][i] - cam->m[3][i];
+    }
+    s = uvSqrtF(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) / PW64_VR_CINE_SCALE_REF_M;
+    if (s < 1.0f) {
+        s = 1.0f;
+    } else if (s > PW64_VR_CINE_SCALE_MAX) {
+        s = PW64_VR_CINE_SCALE_MAX;
+    }
+    if (pw64_cannon_target(t)) {
+        for (i = 0; i < 3; i++) {
+            d[i] = pilot->m[3][i] - t[i];
+        }
+        /* Back to normal over the last 50 m to 10 m before the target. */
+        w = (uvSqrtF(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) - 10.0f) / 40.0f;
+        if (w < 0.0f) {
+            w = 0.0f;
+        } else if (w > 1.0f) {
+            w = 1.0f;
+        }
+        s = 1.0f + (s - 1.0f) * w;
+    }
+    return s;
+}
+
 /* VR outside a test's flight: a full-width world view of an island is
  * shown as a small model of it in front of the player (pw64-gfx
  * `Diorama`, birdman64 vr.rs): the game's camera can swoop and cut as it
