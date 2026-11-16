@@ -15,6 +15,7 @@
 #include <ultra64.h>
 #include <uv_graphics.h>
 #include <uv_math.h>
+#include <uv_matrix.h>
 #include "app/game.h"
 
 /* Output aspect w/h, 0 = 4:3 (off). Set by Rust before boot
@@ -108,6 +109,118 @@ void pw64_vr_crash_camera(void* cur_, const void* target_, const void* pilot_, f
     cur->m[2][0] = r[1] * f[2] - r[2] * f[1];
     cur->m[2][1] = r[2] * f[0] - r[0] * f[2];
     cur->m[2][2] = r[0] * f[1] - r[1] * f[0];
+}
+
+/* Camera matrix `cur` (position kept) looking along `f` (normalised in
+ * place), level: right horizontal, no roll. 0 when `f` is too short or
+ * straight up or down (nothing changed). */
+static int pw64_vr_look_level(Mtx4F* cur, float f[3]) {
+    float r[3], len;
+    int i;
+
+    len = uvSqrtF(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
+    if (len < 1e-4f) {
+        return 0;
+    }
+    for (i = 0; i < 3; i++) {
+        f[i] /= len;
+    }
+    r[0] = f[1];
+    r[1] = -f[0];
+    r[2] = 0.0f;
+    len = uvSqrtF(r[0] * r[0] + r[1] * r[1]);
+    if (len < 1e-4f) {
+        return 0;
+    }
+    r[0] /= len;
+    r[1] /= len;
+    for (i = 0; i < 3; i++) {
+        cur->m[0][i] = r[i];
+        cur->m[1][i] = f[i];
+        cur->m[i][3] = 0.0f;
+    }
+    cur->m[2][0] = r[1] * f[2] - r[2] * f[1];
+    cur->m[2][1] = r[2] * f[0] - r[0] * f[2];
+    cur->m[2][2] = r[0] * f[1] - r[1] * f[0];
+    cur->m[3][3] = 1.0f;
+    return 1;
+}
+
+void pw64_vr_heading_frame(void* out_, const void* at_, float vx, float vy) {
+    Mtx4F* out = out_;
+    const Mtx4F* at = at_;
+    float f[3];
+    int i;
+
+    f[0] = vx;
+    f[1] = vy;
+    f[2] = 0.0f;
+    if (!pw64_vr_look_level(out, f)) {
+        f[0] = at->m[1][0];
+        f[1] = at->m[1][1];
+        f[2] = 0.0f;
+        if (!pw64_vr_look_level(out, f)) {
+            uvMat4SetIdentity(out);
+        }
+    }
+    for (i = 0; i < 3; i++) {
+        out->m[3][i] = at->m[3][i];
+    }
+}
+
+void pw64_vr_cannon_cinematic(void* cur_, const void* cannon_, const void* pilot_, float dt, float now) {
+    static float last = -1.0f;
+    Mtx4F* cur = cur_;
+    const Mtx4F* cannon = cannon_;
+    const Mtx4F* pilot = pilot_;
+    float k = dt * 0.6f; /* a slow pan: a little under half the way a second */
+    float f[3], d[2], len;
+    int i;
+
+    /* A new shot or the view turned back on: behind the cannon (opposite
+     * the pilot's way from it) and to its right, above it, looking at it. */
+    if (last < 0.0f || now - last > 0.25f || now < last) {
+        d[0] = pilot->m[3][0] - cannon->m[3][0];
+        d[1] = pilot->m[3][1] - cannon->m[3][1];
+        len = uvSqrtF(d[0] * d[0] + d[1] * d[1]);
+        if (len < 1e-3f) {
+            d[0] = pilot->m[1][0];
+            d[1] = pilot->m[1][1];
+            len = uvSqrtF(d[0] * d[0] + d[1] * d[1]);
+        }
+        if (len < 1e-3f) {
+            d[0] = 0.0f;
+            d[1] = 1.0f;
+            len = 1.0f;
+        }
+        d[0] /= len;
+        d[1] /= len;
+        cur->m[3][0] = cannon->m[3][0] - d[0] * PW64_VR_CINE_BACK_M + d[1] * PW64_VR_CINE_SIDE_M;
+        cur->m[3][1] = cannon->m[3][1] - d[1] * PW64_VR_CINE_BACK_M - d[0] * PW64_VR_CINE_SIDE_M;
+        cur->m[3][2] = cannon->m[3][2] + PW64_VR_CINE_UP_M;
+        for (i = 0; i < 3; i++) {
+            f[i] = cannon->m[3][i] - cur->m[3][i];
+        }
+        pw64_vr_look_level(cur, f);
+        k = 0.0f;
+    }
+    last = now;
+
+    if (k > 1.0f) {
+        k = 1.0f;
+    }
+    for (i = 0; i < 3; i++) {
+        d[0] = pilot->m[3][i] - cur->m[3][i];
+        f[i] = d[0];
+    }
+    len = uvSqrtF(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
+    if (len < 1e-3f) {
+        return;
+    }
+    for (i = 0; i < 3; i++) {
+        f[i] = cur->m[1][i] + (f[i] / len - cur->m[1][i]) * k;
+    }
+    pw64_vr_look_level(cur, f);
 }
 
 /* VR outside a test's flight: a full-width world view of an island is

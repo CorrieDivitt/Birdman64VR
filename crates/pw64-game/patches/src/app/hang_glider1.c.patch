@@ -44,7 +44,7 @@
 +            // 1 m behind them at sail height, pitched down), level: above
 +            // the control bar (tuned in the headset). The chase 50% closer.
 +            if (pw64_widescreen_aspect < 0.0f) {
-+                hgData->camera->unk68.y = hgData->unk27C.y * 0.2f + 0.5f;
++                hgData->camera->unk68.y = hgData->unk27C.y * 0.2f + 0.3f;
 +                hgData->camera->unk68.z = hgData->unk27C.z * 0.85f + 0.5f;
 +                hgData->camera->unk74 = 0.0f;
 +                hgData->camera->unk48 = 0.35f;
