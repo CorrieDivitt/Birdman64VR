@@ -756,20 +756,21 @@ mod real {
     }
 
     /// The gauges on the cockpit's dashboard ([`pw64_gfx::DashSlot`]; the
-    /// dashboard point is 15 cm behind and 3 cm below the middle of the
-    /// gyrocopter's windscreen's lower edge, pw64_native.h): the throttle
-    /// (`hud_edit::ELEMENTS` id 3, about 62 x 32 N64 px, 12 x 6 cm) 5 cm up
-    /// the panel, towards the dashboard's tip; the map (radar, id 6, 70 x 70
-    /// px, 10 cm across) below it.
+    /// game sends a point on the dashboard's surface for each,
+    /// `pw64_vr_gyro_dash`): the throttle (`hud_edit::ELEMENTS` id 3, about
+    /// 62 x 32 N64 px, 12 x 6 cm) just below the dashboard's tip, the map
+    /// (radar, id 6, 70 x 70 px, 10 cm across) below it.
     const DASH_SLOTS: [pw64_gfx::DashSlot; 2] = [
         pw64_gfx::DashSlot {
             elem: 3,
-            offset: [0.0, 0.05],
+            point: 0,
+            offset: [0.0; 2],
             m_per_px: 0.002,
         },
         pw64_gfx::DashSlot {
             elem: 6,
-            offset: [0.0, -0.045],
+            point: 1,
+            offset: [0.0; 2],
             m_per_px: 0.0014,
         },
     ];

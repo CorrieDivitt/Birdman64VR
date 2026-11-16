@@ -279,13 +279,19 @@ pub struct Frame {
     pub dash: Option<Dash>,
 }
 
-/// Birdman64VR: a point on the vehicle's dashboard as the game camera sees
-/// it (x right, y up, -z forward, game units = metres; the same space as
-/// [`Frame::views`]), with the vehicle's right axis there.
+/// Birdman64VR: points on the vehicle's dashboard, one per dashboard gauge
+/// ([`crate::DashSlot::point`]), as the game camera sees them (x right, y
+/// up, -z forward, game units = metres; the same space as
+/// [`Frame::views`]), with the vehicle's right axis.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Dash {
-    pub point: [f32; 3],
+    pub points: [[f32; 3]; Dash::POINTS],
     pub right: [f32; 3],
+}
+
+impl Dash {
+    /// How many points the game sends (`PW64_DASH_POINTS`).
+    pub const POINTS: usize = 2;
 }
 
 /// Birdman64VR: what the game told the renderer about a world view shown

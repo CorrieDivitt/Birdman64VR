@@ -619,66 +619,80 @@ static int pw64_split_world_view(const UnkStruct_80204D94* c) {
  * are harmless on hardware. A fill view marks the frame: the border bars
  * stay off until the next uvGfxBegin. A left/right split world view gets
  * its view rect too (the split tag outside a HUD bracket). */
-/* Birdman64VR: the cockpit dashboard (VR HUD > Throttle on the dashboard).
- * The vehicle names a point on its model each frame in first person
- * (pw64_vr_dash_set, model units = cm, model frame: x right, y forward,
- * z up); at the end of the world view it goes to the renderer in the
- * camera's space (x right, y up, -z forward, metres) with the model's
- * right axis, so the gauge stays on the dashboard however the camera
- * turns. 6 floats, `G_NOOP` w0 low bits "DH" + index (pw64-gfx
- * interp::DASH_TAG). */
+/* Birdman64VR: the cockpit dashboard (VR HUD > Throttle and map). The
+ * vehicle names points on its model each frame in first person, one per
+ * dashboard gauge (pw64_vr_dash_set; model units = cm, model frame: x
+ * right, y forward, z up). At the end of the world view they go to the
+ * renderer in the camera's space (x right, y up, -z forward, metres) with
+ * the model's right axis, so the gauges stay on the dashboard however the
+ * camera turns. PW64_DASH_POINTS points then the axis, 3 floats each,
+ * `G_NOOP` w0 low bits "DH" + index (pw64-gfx interp::DASH_TAG). */
 #define PW64_DASH_TAG 0x444800u /* "DH" */
+#define PW64_DASH_POINTS 2
 static int sPw64DashObj = -1;
 static int sPw64DashModel = -1;
-static float sPw64DashLocal[3];
+static float sPw64DashLocal[PW64_DASH_POINTS][3];
 
-void pw64_vr_dash_set(int objId, float x, float y, float z) {
+void pw64_vr_dash_set(int objId, const float (*points)[3]) {
+    int i, k;
     sPw64DashObj = objId;
     sPw64DashModel = (objId >= 0 && objId < 100) ? D_80263780[objId].modelId : -1;
-    sPw64DashLocal[0] = x;
-    sPw64DashLocal[1] = y;
-    sPw64DashLocal[2] = z;
+    for (i = 0; i < PW64_DASH_POINTS; i++) {
+        for (k = 0; k < 3; k++) {
+            sPw64DashLocal[i][k] = points != NULL ? points[i][k] : 0.0f;
+        }
+    }
 }
 
-/* The gyrocopter's dashboard point (`on`: VR first person). The middle of
- * the windscreen's lower edge (part 9, PW64_GYRO_WINDSCREEN_PART) in each
- * pilot's model, from pw64-extract --models; the point is behind and
- * below it (PW64_VR_GYRO_DASH_BACK / _DOWN). */
+/* The gyrocopter's dashboard (`on`: VR first person): per pilot model, the
+ * throttle's and the map's centres on the dashboard's surface along its
+ * middle (1 cm above it), from the ROM's models (pw64-extract --models):
+ * the throttle's top about 2 degrees below the dashboard's tip (the
+ * windscreen's lower edge, part 9), the map's top 2 degrees below the
+ * throttle, as seen from that pilot's first-person eye. */
 void pw64_vr_gyro_dash(int objId, int modelId, int on) {
-    float y, z;
+    static const float lark[2][3] = {{0.0f, 64.0f, 22.0f}, {0.0f, 56.0f, 16.0f}};
+    static const float goose[2][3] = {{0.0f, 88.0f, 19.0f}, {0.0f, 77.0f, 14.0f}};
+    static const float hawk[2][3] = {{0.0f, 73.0f, 27.0f}, {0.0f, 66.0f, 19.0f}};
+    static const float kiwi[2][3] = {{0.0f, 65.0f, 22.0f}, {0.0f, 57.0f, 16.0f}};
+    static const float robin[2][3] = {{0.0f, 74.0f, 27.0f}, {0.0f, 67.0f, 19.0f}};
+    const float (*pts)[3];
     switch (modelId) {
     case MODEL_GYRO_LARK:
+        pts = lark;
+        break;
     case MODEL_GYRO_KIWI:
-        y = 68.0f, z = 24.0f;
+        pts = kiwi;
         break;
     case MODEL_GYRO_GOOSE:
-    case MODEL_GYRO_IBIS:
-        y = 96.0f, z = 22.0f;
+    case MODEL_GYRO_IBIS: /* the same cockpit */
+        pts = goose;
         break;
     case MODEL_GYRO_HAWK:
+        pts = hawk;
+        break;
     case MODEL_GYRO_ROBIN:
-        y = 84.0f, z = 27.0f;
+        pts = robin;
         break;
     default: /* a plane variant (pw64_plane.c) or unknown: no dashboard */
-        on = 0;
-        y = z = 0.0f;
+        pts = NULL;
         break;
     }
-    if (!on) {
+    if (!on || pts == NULL) {
         if (sPw64DashObj == objId) {
-            pw64_vr_dash_set(-1, 0.0f, 0.0f, 0.0f);
+            pw64_vr_dash_set(-1, NULL);
         }
         return;
     }
-    pw64_vr_dash_set(objId, 0.0f, y - PW64_VR_GYRO_DASH_BACK, z - PW64_VR_GYRO_DASH_DOWN);
+    pw64_vr_dash_set(objId, pts);
 }
 
 static void pw64_vr_dash_tag(const UnkStruct_80204D94* c) {
     const Unk80263780* d;
     const Mtx4F* m;
     const Mtx4F* cam = &c->unk110;
-    float w[3], r[3], v[6], len;
-    int i;
+    float w[PW64_DASH_POINTS + 1][3], v[(PW64_DASH_POINTS + 1) * 3], len;
+    int i, k, n;
     if (sPw64DashObj < 0 || sPw64DashObj >= 100) {
         return;
     }
@@ -688,26 +702,29 @@ static void pw64_vr_dash_tag(const UnkStruct_80204D94* c) {
         return;
     }
     m = &D_80265080[d->unk2[0]]; /* part 0: rotation x 1/model scale */
-    for (i = 0; i < 3; i++) {
-        w[i] = sPw64DashLocal[0] * m->m[0][i] + sPw64DashLocal[1] * m->m[1][i] +
-               sPw64DashLocal[2] * m->m[2][i] + m->m[3][i] - cam->m[3][i];
-        r[i] = m->m[0][i];
+    for (n = 0; n < PW64_DASH_POINTS; n++) {
+        const float* l = sPw64DashLocal[n];
+        for (i = 0; i < 3; i++) {
+            w[n][i] = l[0] * m->m[0][i] + l[1] * m->m[1][i] + l[2] * m->m[2][i] + m->m[3][i] -
+                      cam->m[3][i];
+        }
     }
-    len = uvSqrtF(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]);
+    len = uvSqrtF(m->m[0][0] * m->m[0][0] + m->m[0][1] * m->m[0][1] + m->m[0][2] * m->m[0][2]);
     if (len <= 0.0f) {
         return;
     }
     for (i = 0; i < 3; i++) {
-        r[i] /= len;
+        w[PW64_DASH_POINTS][i] = m->m[0][i] / len; /* the right axis (no position) */
     }
     /* Camera rows: right, forward, up. */
-    v[0] = w[0] * cam->m[0][0] + w[1] * cam->m[0][1] + w[2] * cam->m[0][2];
-    v[1] = w[0] * cam->m[2][0] + w[1] * cam->m[2][1] + w[2] * cam->m[2][2];
-    v[2] = -(w[0] * cam->m[1][0] + w[1] * cam->m[1][1] + w[2] * cam->m[1][2]);
-    v[3] = r[0] * cam->m[0][0] + r[1] * cam->m[0][1] + r[2] * cam->m[0][2];
-    v[4] = r[0] * cam->m[2][0] + r[1] * cam->m[2][1] + r[2] * cam->m[2][2];
-    v[5] = -(r[0] * cam->m[1][0] + r[1] * cam->m[1][1] + r[2] * cam->m[1][2]);
-    for (i = 0; i < 6; i++) {
+    for (n = 0; n <= PW64_DASH_POINTS; n++) {
+        for (k = 0; k < 3; k++) {
+            int row = k == 0 ? 0 : k == 1 ? 2 : 1;
+            float s = w[n][0] * cam->m[row][0] + w[n][1] * cam->m[row][1] + w[n][2] * cam->m[row][2];
+            v[n * 3 + k] = k == 2 ? -s : s;
+        }
+    }
+    for (i = 0; i < (PW64_DASH_POINTS + 1) * 3; i++) {
         union {
             float f;
             u32 u;

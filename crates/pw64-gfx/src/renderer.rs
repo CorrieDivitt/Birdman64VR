@@ -182,17 +182,20 @@ pub struct StereoEye {
 pub struct DashSlot {
     /// Movable HUD element id (`DrawCall::elem`).
     pub elem: u8,
-    /// Its centre from the dashboard point along the panel's right and up
-    /// axes, metres.
+    /// Which of the frame's dashboard points it sits at
+    /// ([`crate::Dash::points`]).
+    pub point: u8,
+    /// Its centre from that point along its panel's right and up axes,
+    /// metres (fine tuning; 0 = on the point).
     pub offset: [f32; 2],
     /// Size of an N64 pixel there, metres.
     pub m_per_px: f32,
 }
 
-/// Birdman64VR: flight gauges on the cockpit's dashboard
-/// ([`StereoEye::hud_dash`]): a flat panel through the frame's
-/// [`crate::Dash`] point, facing the eye, level with the vehicle's right
-/// axis; each gauge at its [`DashSlot`] offset and size, centred on the
+/// Birdman64VR: a flight gauge on the cockpit's dashboard
+/// ([`StereoEye::hud_dash`]): a flat panel through one of the frame's
+/// [`crate::Dash`] points, facing the eye, level with the vehicle's right
+/// axis; the gauge at its [`DashSlot`] offset and size, centred on the
 /// element's centre. In camera space (game units), so it moves with the
 /// vehicle however the camera turns.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -211,12 +214,12 @@ impl DashPanel {
     /// pass in front.
     pub const DEPTH_PULL: f32 = 0.8;
 
-    /// The panel's axes for `dash`: facing the camera (the eye is within
-    /// centimetres of it), its right as close to the vehicle's right as
-    /// that allows; `None` when degenerate.
-    pub fn new(dash: &crate::Dash) -> Option<Self> {
+    /// The panel at `dash`'s point `point`: facing the camera (the eye is
+    /// within centimetres of it), its right as close to the vehicle's
+    /// right as that allows; `None` when degenerate or no such point.
+    pub fn new(dash: &crate::Dash, point: u8) -> Option<Self> {
         let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-        let p = dash.point;
+        let p = *dash.points.get(point as usize)?;
         let len = dot(p, p).sqrt();
         if len < 1e-4 {
             return None;
@@ -1606,7 +1609,6 @@ impl Renderer {
                 *c = b.map(|b| [0.5 * (b[0] + b[2]), 0.5 * (b[1] + b[3])]);
             }
         }
-        let dash = frame.dash.as_ref().and_then(DashPanel::new);
         let clip_views: Vec<Mat4> = match &eye.clip {
             Some(c) => frame
                 .views
@@ -1657,7 +1659,9 @@ impl Renderer {
             let slot = eye.hud_dash.iter().find(|s| {
                 d.view == 0 && eye.hud_sphere.is_some() && d.elem != 0 && s.elem == d.elem
             });
-            let dash_at = dash.zip(slot).zip(centre);
+            let dash_at = slot
+                .and_then(|s| Some((DashPanel::new(frame.dash.as_ref()?, s.point)?, s)))
+                .zip(centre);
             if d.view != 0 || dash_at.is_some() {
                 passes.last_mut().unwrap().push(i);
             } else {
@@ -2099,58 +2103,79 @@ mod sphere_tests {
         let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
         // 0.6 m ahead and 0.35 m down, the vehicle level.
         let dash = crate::Dash {
-            point: [0.0, -0.35, -0.6],
+            points: [[0.0, -0.35, -0.6], [0.0, -0.5, -0.4]],
             right: [1.0, 0.0, 0.0],
         };
-        let p = DashPanel::new(&dash).unwrap();
+        let point = dash.points[0];
+        let p = DashPanel::new(&dash, 0).unwrap();
         let at = DashSlot {
             elem: 3,
+            point: 0,
             offset: [0.0; 2],
             m_per_px: 0.002,
         };
         let c = [40.0, 70.0];
-        assert!(close(p.place(&at, c, c), dash.point));
+        assert!(close(p.place(&at, c, c), point));
         // 10 px right: 2 cm to the right; 10 px up: up the panel.
         assert!(close(p.place(&at, [50.0, 70.0], c), [0.02, -0.35, -0.6]));
         let up = p.place(&at, [40.0, 60.0], c);
-        assert!(close(up, [0, 1, 2].map(|i| dash.point[i] + 0.02 * p.up[i])) && p.up[1] > 0.8);
+        assert!(close(up, [0, 1, 2].map(|i| point[i] + 0.02 * p.up[i])) && p.up[1] > 0.8);
         // A slot 5 cm up the panel, half size: its centre there, its pixels
         // half as far apart.
         let higher = DashSlot {
             elem: 6,
+            point: 0,
             offset: [0.0, 0.05],
             m_per_px: 0.001,
         };
         let o = p.centre(&higher);
-        assert!(close(o, [0, 1, 2].map(|i| dash.point[i] + 0.05 * p.up[i])));
+        assert!(close(o, [0, 1, 2].map(|i| point[i] + 0.05 * p.up[i])));
         assert!(close(p.place(&higher, c, c), o));
         assert!(close(
             p.place(&higher, [50.0, 70.0], c),
             [0, 1, 2].map(|i| o[i] + 0.01 * p.right[i])
         ));
         // The panel faces the eye: its axes are square to the line of sight.
-        assert!(dot(p.right, dash.point).abs() < 1e-5 && dot(p.up, dash.point).abs() < 1e-5);
+        assert!(dot(p.right, point).abs() < 1e-5 && dot(p.up, point).abs() < 1e-5);
+        // The second point has its own panel, facing the eye from there.
+        let q = DashPanel::new(&dash, 1).unwrap();
+        let second = DashSlot { point: 1, ..higher };
+        assert!(close(
+            q.place(&second, c, c),
+            [0, 1, 2].map(|i| dash.points[1][i] + 0.05 * q.up[i])
+        ));
+        assert!(dot(q.up, dash.points[1]).abs() < 1e-5);
+        assert!(DashPanel::new(&dash, 2).is_none(), "no third point");
         // Rolled 30 degrees right: the panel's up leans right too.
         let (s, co) = (30f32.to_radians().sin(), 30f32.to_radians().cos());
-        let rolled = DashPanel::new(&crate::Dash {
-            point: [0.0, 0.0, -0.6],
-            right: [co, -s, 0.0],
-        })
+        let rolled = DashPanel::new(
+            &crate::Dash {
+                points: [[0.0, 0.0, -0.6]; 2],
+                right: [co, -s, 0.0],
+            },
+            0,
+        )
         .unwrap();
         assert!(close(rolled.up, [s, co, 0.0]));
         // Degenerate: at the eye, or right along the line of sight.
         assert!(
-            DashPanel::new(&crate::Dash {
-                point: [0.0; 3],
-                right: [1.0, 0.0, 0.0]
-            })
+            DashPanel::new(
+                &crate::Dash {
+                    points: [[0.0; 3]; 2],
+                    right: [1.0, 0.0, 0.0]
+                },
+                0
+            )
             .is_none()
         );
         assert!(
-            DashPanel::new(&crate::Dash {
-                point: [0.0, 0.0, -1.0],
-                right: [0.0, 0.0, 1.0]
-            })
+            DashPanel::new(
+                &crate::Dash {
+                    points: [[0.0, 0.0, -1.0]; 2],
+                    right: [0.0, 0.0, 1.0]
+                },
+                0
+            )
             .is_none()
         );
     }
@@ -2434,6 +2459,7 @@ mod tests {
         });
         eye.hud_dash = &[DashSlot {
             elem: 3,
+            point: 0,
             offset: [0.0; 2],
             m_per_px: 0.002,
         }];
@@ -2453,14 +2479,14 @@ mod tests {
         dashed.draws.push(gauge);
         // 2 units away, a quarter of the view left of centre: x = 24.
         dashed.dash = Some(crate::Dash {
-            point: [-0.5, 0.0, -2.0],
+            points: [[-0.5, 0.0, -2.0]; 2],
             right: [1.0, 0.0, 0.0],
         });
         r.render_stereo(&dashed, &view, (w, h), &eye);
         assert_eq!(px(&read_rgba(&device, &queue, &tex), 24, 24), [0, 0, 255]);
         // 4 units away, the same direction: behind the red quad.
         dashed.dash = Some(crate::Dash {
-            point: [-1.0, 0.0, -4.0],
+            points: [[-1.0, 0.0, -4.0]; 2],
             right: [1.0, 0.0, 0.0],
         });
         r.render_stereo(&dashed, &view, (w, h), &eye);

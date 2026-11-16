@@ -114,16 +114,11 @@ extern int pw64_vr_gyro_windscreen;
  * translucent part; pw64-extract --models, models 0x127-0x133). */
 #define PW64_GYRO_WINDSCREEN_PART 9
 /* Birdman64VR: the gyrocopter's first-person eye this much further back
- * than the game's (code_7CF30.c.patch gyrocopterEnterLeave), metres. */
-#define PW64_VR_GYRO_EYE_BACK_M 0.25f
-/* Birdman64VR, same file: the cockpit dashboard point of the vehicle in
- * first person (model units, model frame), sent to the renderer each frame
- * (VR HUD > Throttle on the dashboard); objId < 0: none. */
-void pw64_vr_dash_set(int objId, float x, float y, float z);
-/* The gyrocopter's dashboard point: this far behind (towards the pilot)
- * and below the middle of the windscreen's lower edge, model units (cm). */
-#define PW64_VR_GYRO_DASH_BACK 15.0f
-#define PW64_VR_GYRO_DASH_DOWN 3.0f
+ * than the game's (code_7CF30.c.patch gyrocopterEnterLeave), metres: the
+ * game's was too close to the windscreen, 0.25 m back was a little far, so
+ * 0.1 m forward again (headset). Centred across the cockpit too (the
+ * game's is up to 1.3 cm to the right). */
+#define PW64_VR_GYRO_EYE_BACK_M 0.15f
 /* Birdman64VR: the gyrocopter's fuel gauge in VR (hud.c.patch
  * hudDrawGyrocopter; the flat game's is at 98, 37), N64 HUD px, y up: on
  * the HUD sphere at the default spread (275%) its centre sits midway
@@ -131,6 +126,11 @@ void pw64_vr_dash_set(int objId, float x, float y, float z);
  * below it, horizontally between their centres. */
 #define PW64_VR_GYRO_FUEL_X 207
 #define PW64_VR_GYRO_FUEL_Y 53
+/* Birdman64VR, same file: the cockpit dashboard's points of the vehicle in
+ * first person, one per dashboard gauge (2: throttle, map; model units,
+ * model frame), sent to the renderer each frame (VR HUD > Throttle and
+ * map); objId < 0 or points NULL: none. */
+void pw64_vr_dash_set(int objId, const float (*points)[3]);
 /* The gyrocopter's dashboard on (`on`) or off for dobj `objId` with model
  * `modelId` (code_7CF30.c.patch, every frame). */
 void pw64_vr_gyro_dash(int objId, int modelId, int on);

@@ -166,7 +166,7 @@ pub struct Interpreter {
     /// Birdman64VR: the island model's values as their tags arrive.
     diorama_in: [f32; 22],
     /// Birdman64VR: the dashboard's values as their tags arrive.
-    dash_in: [f32; 6],
+    dash_in: [f32; (crate::Dash::POINTS + 1) * 3],
     split: Option<[f32; 4]>,
     /// Current movable HUD element (`HUD_ELEM_TAG` markers, 0 = none);
     /// reset per run.
@@ -203,8 +203,8 @@ pub const WIDE_TAG_OFF: u32 = 0x5057_5730;
 /// (`pw64_diorama_tag`, [`Diorama`]).
 pub const DIORAMA_TAG: u32 = 0x44_5200;
 /// Birdman64VR: `G_NOOP` w0 marker (low 24 bits, + an index in the low
-/// byte) of the cockpit dashboard's six values, one f32 in w1 each
-/// (`pw64_vr_dash_tag`, [`crate::Dash`]: point, then right axis).
+/// byte) of the cockpit dashboard's values, one f32 in w1 each
+/// (`pw64_vr_dash_tag`, [`crate::Dash`]: the points, then the right axis).
 pub const DASH_TAG: u32 = 0x44_4800;
 /// `G_NOOP` w1 HUD anchor marker: "PWA" + `L`/`C`/`R` in the low byte;
 /// applies to the following draws (see [`Anchor`]).
@@ -336,7 +336,7 @@ impl Interpreter {
             hud: false,
             split_x: [0.0; 2],
             diorama_in: [0.0; 22],
-            dash_in: [0.0; 6],
+            dash_in: [0.0; (crate::Dash::POINTS + 1) * 3],
             split: None,
             elem: 0,
             commands: 0,
@@ -502,9 +502,10 @@ impl Interpreter {
                     self.dash_in[i] = f32::from_bits(w1);
                     if i == self.dash_in.len() - 1 {
                         let v = self.dash_in;
+                        let at = |i: usize| [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
                         self.frame.dash = Some(crate::Dash {
-                            point: [v[0], v[1], v[2]],
-                            right: [v[3], v[4], v[5]],
+                            points: std::array::from_fn(at),
+                            right: at(crate::Dash::POINTS),
                         });
                     }
                 }
@@ -1490,7 +1491,7 @@ mod tests {
     #[test]
     fn dash_tag_values() {
         let mut mem = VecMemory::default();
-        let v = [0.1f32, -0.4, -0.7, 1.0, 0.0, 0.0];
+        let v = [0.1f32, -0.4, -0.7, 0.0, -0.5, -0.6, 1.0, 0.0, 0.0];
         let mut cmds: Vec<(u32, u32)> = v
             .iter()
             .enumerate()
@@ -1503,7 +1504,7 @@ mod tests {
         assert_eq!(
             f.dash,
             Some(crate::Dash {
-                point: [0.1, -0.4, -0.7],
+                points: [[0.1, -0.4, -0.7], [0.0, -0.5, -0.6]],
                 right: [1.0, 0.0, 0.0]
             })
         );
