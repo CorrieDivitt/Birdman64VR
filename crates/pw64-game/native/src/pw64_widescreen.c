@@ -55,6 +55,10 @@ int pw64_vr_flight(void) {
  * The sphere puts screen row y at pitch (120 - y) * this. */
 float pw64_vr_hud_rad_per_px = 0.0f;
 
+/* Birdman64VR: the gyrocopter's windscreen in VR first person (Rust sets it
+ * from the VR HUD page, pw64_game::set_vr_gyro_windscreen). */
+int pw64_vr_gyro_windscreen = 1;
+
 float pw64_vr_aim_reticle_y(float flat, float down) {
     float r = pw64_vr_hud_rad_per_px;
     float y;

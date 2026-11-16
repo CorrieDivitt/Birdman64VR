@@ -294,6 +294,23 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   the reticle row is now set from the sphere's scale
   (`pw64_vr_aim_reticle_y`, `pw64_vr_hud_rad_per_px` set by vr.rs each
   frame): its centre 6 degrees below the sphere's, at any HUD size.
+- **Gyrocopter first person** shows the gyrocopter and its pilot in VR
+  (asked for on the headset). The game hides them there
+  (`gyrocopterMovementFrame`: `unk5D == 0` clears dobj state bit 2); in
+  VR flight the bit stays set and `pw64_dobj_cockpit` stays 0, and the
+  model goes on the near list (state bit 4, `uvDobj_8021771C`: own
+  frustum after a z clear) like the hang glider's and birdman's first
+  person. Drawn in the main pass only, it was invisible on the headset:
+  the first-person near plane is 3 m (camera.c).
+  Headset: "really helped with immersion and not feeling nauseous". The
+  eye is 0.25 m further back than the game's (`PW64_VR_GYRO_EYE_BACK_M`,
+  gyrocopterEnterLeave; it was too close to the windscreen). The
+  windscreen is part 9 of all six pilots' models (the only translucent
+  part, `PW64_GYRO_WINDSCREEN_PART`); VR HUD > Gyrocopter windscreen
+  (`[vr] gyro_windscreen`, `pw64_vr_gyro_windscreen`) hides it in first
+  person, never from outside. The pilot
+  is part of the gyrocopter model (one model per pilot; head `unk572`,
+  arms posed by the joint animation `unk590`).
 - **Open**: the cannonball landing pull-back is the game's (fine on the
   headset).
 

@@ -106,6 +106,16 @@ extern float pw64_vr_hud_rad_per_px;
  * `down` radians below the view's centre, the direction the missiles fly;
  * otherwise `flat`, the game's value. */
 float pw64_vr_aim_reticle_y(float flat, float down);
+/* Birdman64VR, same file: 1 = the gyrocopter's windscreen shows in VR
+ * first person (Rust: VR HUD page, `[vr] gyro_windscreen`). Always shown
+ * from outside. */
+extern int pw64_vr_gyro_windscreen;
+/* The windscreen: part 9 of all six pilots' gyrocopter models (the only
+ * translucent part; pw64-extract --models, models 0x127-0x133). */
+#define PW64_GYRO_WINDSCREEN_PART 9
+/* Birdman64VR: the gyrocopter's first-person eye this much further back
+ * than the game's (code_7CF30.c.patch gyrocopterEnterLeave), metres. */
+#define PW64_VR_GYRO_EYE_BACK_M 0.25f
 /* Birdman64VR, same file: outside a test's flight, a world view with
  * terrain is shown as a small model of the island (the "diorama": menus,
  * title fly-over, results, replays). 1 for such a channel

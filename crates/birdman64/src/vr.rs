@@ -17,7 +17,7 @@
 //! Only on Windows, Linux and Android; other targets get a stub that is
 //! never requested.
 
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, AtomicU64, Ordering};
 
 static REQUESTED: AtomicBool = AtomicBool::new(false);
 /// The headset's refresh rate in mHz once frames flow (0: not known).
@@ -170,6 +170,32 @@ pub(crate) fn set_hud_shown(id: u8, shown: bool) {
         .collect();
     if let Err(e) = crate::config::save_vr_hud_hidden(&names) {
         eprintln!("[vr] HUD choice not saved: {e}");
+    }
+}
+
+/// The gyrocopter's windscreen in first person (`[vr] gyro_windscreen`, the
+/// settings' VR HUD page): 0 = not loaded yet, 1 = shown, 2 = hidden.
+static GYRO_WINDSCREEN: AtomicU8 = AtomicU8::new(0);
+
+/// Whether the gyrocopter's windscreen shows in VR first person.
+pub(crate) fn gyro_windscreen() -> bool {
+    match GYRO_WINDSCREEN.load(Ordering::Relaxed) {
+        0 => {
+            let on = crate::config::get().vr_gyro_windscreen.unwrap_or(true);
+            GYRO_WINDSCREEN.store(if on { 1 } else { 2 }, Ordering::Relaxed);
+            on
+        }
+        v => v == 1,
+    }
+}
+
+/// Shows or hides the gyrocopter's windscreen in VR first person and saves
+/// the choice (the C side takes it at the next headset frame).
+pub(crate) fn set_gyro_windscreen(on: bool) {
+    GYRO_WINDSCREEN.store(if on { 1 } else { 2 }, Ordering::Relaxed);
+    HUD_CHANGED.store(true, Ordering::Relaxed);
+    if let Err(e) = crate::config::save_vr_gyro_windscreen(on) {
+        eprintln!("[vr] windscreen choice not saved: {e}");
     }
 }
 
@@ -676,6 +702,7 @@ mod real {
         // The gyrocopter's aim reticle is placed on this sphere by the C
         // side, in its pixels (pw64_vr_aim_reticle_y).
         pw64_game::set_vr_hud_rad_per_px(HUD_RAD_PER_PX * layout.size);
+        pw64_game::set_vr_gyro_windscreen(super::gyro_windscreen());
         let hud_sphere = pw64_gfx::HudSphere {
             eye: mul(
                 &math::view(pose.orientation, pose.position),
