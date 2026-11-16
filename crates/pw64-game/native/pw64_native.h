@@ -126,9 +126,9 @@ void pw64_vr_heading_frame(void* out, const void* at, float vx, float vy);
  * and to one side, first looking at the cannon, then turning slowly and
  * level after the pilot (`pilot`) towards the target. A gap in `now` = a
  * new shot (or the view switched back on). */
-#define PW64_VR_CINE_BACK_M 30.0f
-#define PW64_VR_CINE_SIDE_M 20.0f
-#define PW64_VR_CINE_UP_M 10.0f
+#define PW64_VR_CINE_BACK_M 8.0f
+#define PW64_VR_CINE_SIDE_M 5.0f
+#define PW64_VR_CINE_UP_M 3.0f
 void pw64_vr_cannon_cinematic(void* cur, const void* cannon, const void* pilot, float dt, float now);
 /* Fill screen (renderer.md "Fill screen"), same file: 0 = off (set by Rust
  * before boot), the per-frame "a filled world view was drawn" flag (reset

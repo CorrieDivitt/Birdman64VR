@@ -25,15 +25,7 @@
      cbData->unk11D = 0;
      if (gameState != GAME_STATE_RESULTS) {
          stickX = demoGetInputs(cbData->unk10, INPUT_AXIS_X);
-@@ -268,5 +277,6 @@
-                 uvMat4Copy(&sp7C, &cbData->unk58);
-                 uvMat4RotateAxis(&sp7C, cbData->zAxis - cbData->unkCC, 'z');
--                uvMat4LocalTranslate(&sp7C, 0.0f, -12.0f, 2.0f);
-+                // PW64 VR: the aiming view from behind the cannon 5 m higher.
-+                uvMat4LocalTranslate(&sp7C, 0.0f, -12.0f, (pw64_widescreen_aspect < 0.0f) ? 7.0f : 2.0f);
-                 uvMat4RotateAxis(&sp7C, cbData->xAxis * 0.3f, 'x');
-                 uvMat4Copy(&cbData->camera->unk108, &sp7C);
-@@ -310,5 +320,21 @@
+@@ -310,5 +319,21 @@
          cbData->camera->unk228 = cbData->unk120;
          uvMat4Copy(&cbData->camera->unk80, sp2C);
 -        camera_802D5884(cbData->camera, cbData->unkB4);
@@ -44,7 +36,7 @@
 +        if ((pw64_widescreen_aspect < 0.0f) && (cbData->unkD4 == 1) && (cbData->unkB4 == 0)) {
 +            pw64_vr_heading_frame(&cbData->camera->unk80, sp2C, cbData->unk1C4.x, cbData->unk1C4.y);
 +            cbData->camera->unk68.x = 0.0f;
-+            cbData->camera->unk68.y = 0.3f;
++            cbData->camera->unk68.y = 0.45f;
 +            cbData->camera->unk68.z = 0.3f;
 +            cbData->camera->unk74 = 0.0f;
 +            cbData->camera->unk78 = 0.0f;
@@ -58,7 +50,7 @@
 +        }
 +        camera_802D45C4(cbData->camera, cbData->unkB8);
      }
-@@ -473,11 +499,14 @@
+@@ -473,11 +498,14 @@
      func_802D9430(cbData);
  }
  
@@ -76,7 +68,7 @@
      Camera* camera;
      f32 temp_fv0_2;
      f32 var_fv1;
-@@ -826,9 +855,10 @@
+@@ -826,9 +854,10 @@
      return sp50;
  }
  
@@ -90,7 +82,7 @@
      Unk80364210* temp_v1;
      Unk80362690_Unk0* temp_s0;
      u8 sp27;
-@@ -836,8 +866,7 @@
+@@ -836,8 +865,7 @@
  
      temp_s0 = &D_80362690->unkC[D_80362690->unk9C];
      temp_v1 = func_8032BE10();
@@ -100,7 +92,7 @@
          if (cbData->unkD5 == 2) {
              sp27 = 1;
          } else {
-@@ -875,6 +904,19 @@
+@@ -875,6 +903,19 @@
              }
          }
      }
@@ -120,7 +112,7 @@
      uvEventPost(0xC, 0);
      if (D_8034F850 < D_8034EA00) {
          cannonPilotLand(cbData);
-@@ -998,7 +1040,9 @@
+@@ -998,7 +1039,9 @@
      uvMat4Copy(&sp4C, &cbData->unk14);
      uvMat4RotateAxis(&sp4C, 1.5707961f, 'x');
      func_802EDAF0(temp_s0, &cbData->unk14, cbData->unk120, cbData->unk1D0, 0.0f, 1.0f, cbData->unk4, cbData->unk8, 0, cbData->unk11C, 5);
@@ -131,7 +123,7 @@
      return 1;
  }
  
-@@ -1015,3 +1059,236 @@
+@@ -1015,3 +1058,236 @@
          }
      }
  }
