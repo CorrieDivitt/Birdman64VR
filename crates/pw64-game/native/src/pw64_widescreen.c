@@ -257,7 +257,7 @@ float pw64_vr_cannon_scale(const void* pilot_, const void* cam_) {
 void pw64_vr_cannon_trail(int on, const void* pilot_, float dt) {
     /* A smoke has at most 10 puffs, one every tenth of its life: a few of
      * them started a little apart make a denser, longer trail. */
-    static s32 trail[PW64_VR_TRAIL_N] = { -1, -1, -1 };
+    static s32 trail[PW64_VR_TRAIL_N] = { -1, -1, -1, -1, -1, -1 };
     static float flown = 0.0f;
     const Mtx4F* pilot = pilot_;
     int i;
