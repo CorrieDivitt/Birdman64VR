@@ -294,6 +294,12 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   the reticle row is now set from the sphere's scale
   (`pw64_vr_aim_reticle_y`, `pw64_vr_hud_rad_per_px` set by vr.rs each
   frame): its centre 6 degrees below the sphere's, at any HUD size.
+- **Gyrocopter first person** shows the gyrocopter and its pilot in VR
+  (asked for on the headset). The game hides them there
+  (`gyrocopterMovementFrame`: `unk5D == 0` clears dobj state bit 2); in
+  VR flight the bit stays set and `pw64_dobj_cockpit` stays 0. The pilot
+  is part of the gyrocopter model (one model per pilot; head `unk572`,
+  arms posed by the joint animation `unk590`).
 - **Open**: the cannonball landing pull-back is the game's (fine on the
   headset).
 
