@@ -1404,9 +1404,12 @@ impl App {
         // picture below: the headset frame it is for starts within ms.
         // Also when a VR HUD setting changed with the game paused (no new
         // frame comes): the last frame again, so the change shows at once.
+        // And on every redraw while the settings overlay pauses the game:
+        // the headset would otherwise turn the picture drawn at the pause
+        // with the head (reprojection), showing black past its edges.
         let hud_changed = crate::vr::take_hud_changed();
-        if (q.frames > 0 || hud_changed)
-            && let Some(vr) = &mut self.vr
+        if let Some(vr) = &mut self.vr
+            && (q.frames > 0 || hud_changed || (crate::settings::is_open() && vr.stereo()))
         {
             let shown = q.show.or(self.shown);
             let frame = q
