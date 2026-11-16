@@ -1316,8 +1316,20 @@ fn env_enabled() -> Option<bool> {
 }
 
 /// Whether split-screen is on (also read by main to set the C flag).
+/// Never in VR ([`vr_single_player`]).
 pub fn splitscreen_enabled() -> bool {
-    crate::opts::precedence(env_enabled(), config::get().splitscreen.enabled, false)
+    !vr_single_player()
+        && crate::opts::precedence(env_enabled(), config::get().splitscreen.enabled, false)
+}
+
+/// Birdman64VR: VR is single-player. The stereo world needs one
+/// full-screen view, and with split-screen on a lone pad is player 2's
+/// (player 1 being the keyboard on a PC): in the headset player 1, who
+/// drives the menus, got nothing, after the title's Players item had been
+/// switched to 2 Players and saved.
+fn vr_single_player() -> bool {
+    static VR: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    !cfg!(test) && *VR.get_or_init(crate::vr::requested)
 }
 
 /// An on/off split-screen env override (`PW64_SPLIT_COLLIDE`,
@@ -1586,6 +1598,15 @@ pub fn stage_p2(p: P2Input) {
 /// controller is missing.
 pub fn split_tick() {
     let on = pw64_game::split_on();
+    // VR: switched on (the title's Players item): straight back off, and
+    // the routing stays single-player meanwhile.
+    if on && vr_single_player() {
+        if pw64_game::split_req_pending().is_none() {
+            eprintln!("[input] split-screen is not available in VR; switching it off");
+            pw64_game::request_split(false);
+        }
+        return;
+    }
     // A request the game applied (or overrode with its own item) is done.
     if pw64_game::split_req_pending().is_none() {
         SPLIT_REQ.store(0, Ordering::Relaxed);

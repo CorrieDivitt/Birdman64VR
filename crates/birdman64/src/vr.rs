@@ -586,11 +586,12 @@ mod real {
     /// Around the model: a dim, slightly blue room.
     const MODEL_BACKGROUND: [f64; 3] = [0.012, 0.016, 0.026];
 
-    /// The title view: how far behind and above the game camera, in game
+    /// The title view: how far behind and above (negative: below) the game camera, in game
     /// metres.
-    /// 12 m behind hid the logo behind the menu; 5 m.
+    /// 12 m behind hid the logo behind the menu; 5 m. 3 m below it, so
+    /// the logo floats above the menu.
     const TITLE_BACK_M: f32 = 5.0;
-    const TITLE_UP_M: f32 = 1.0;
+    const TITLE_UP_M: f32 = -3.0;
 
     /// A camera world matrix (rows right, forward, up, position; z up)
     /// turned level: facing the same way, no pitch or roll.
@@ -1761,7 +1762,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         }
 
         /// The title view: the flight view from a level point a little
-        /// behind and above the game camera.
+        /// behind the game camera, offset vertically by TITLE_UP_M.
         #[test]
         fn title_view_is_behind_the_camera() {
             let fov = std::f32::consts::FRAC_PI_4;
