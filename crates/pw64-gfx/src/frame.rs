@@ -282,6 +282,9 @@ pub struct Frame {
     /// horizon lock; then 1 where the lock is off (cannonball, sky diving),
     /// else 0; then the player camera's mode (camera.c, -1 unknown).
     pub up: Option<[f32; 5]>,
+    /// Birdman64VR: a photo was taken this frame (`pw64_vr_shutter`): the
+    /// headset blinks.
+    pub shutter: bool,
 }
 
 /// Birdman64VR: points on the vehicle's dashboard, one per dashboard gauge

@@ -213,6 +213,9 @@ pub const DASH_TAG: u32 = 0x44_4800;
 /// mode, five f32
 /// in w1 (`pw64_vr_up_tag`, [`Frame::up`]).
 pub const UP_TAG: u32 = 0x55_5000;
+/// Birdman64VR `G_NOOP` w0 marker ("SH" in bits 8-23): a photo was taken
+/// (`pw64_vr_shutter`, [`Frame::shutter`]).
+pub const SHUTTER_TAG: u32 = 0x53_4800;
 /// `G_NOOP` w1 HUD anchor marker: "PWA" + `L`/`C`/`R` in the low byte;
 /// applies to the following draws (see [`Anchor`]).
 pub const ANCHOR_TAG: u32 = 0x5057_4100;
@@ -381,6 +384,7 @@ impl Interpreter {
             diorama: None,
             dash: None,
             up: None,
+            shutter: false,
         };
         self.run_into(mem, dl, &mut frame);
         frame
@@ -413,6 +417,7 @@ impl Interpreter {
         frame.diorama = None;
         frame.dash = None;
         frame.up = None;
+        frame.shutter = false;
         std::mem::swap(&mut self.frame, frame);
         self.execute(mem, dl);
         std::mem::swap(&mut self.frame, frame);
@@ -530,6 +535,8 @@ impl Interpreter {
                     }
                 }
             }
+            // Birdman64VR: a photo was taken (pw64_vr_shutter).
+            op::G_NOOP if w0 & 0xFF_FF00 == SHUTTER_TAG => self.frame.shutter = true,
             // Widescreen world-view markers (native game, pw64_widescreen.c).
             op::G_NOOP if w1 == WIDE_TAG_ON || w1 == WIDE_TAG_OFF => {
                 self.wide_view = w1 == WIDE_TAG_ON;
@@ -1548,6 +1555,18 @@ mod tests {
         assert_eq!(Interpreter::new().run(&mem, dl).up, Some(v));
         let dl = mem.push_words(&words(&[(0xB800_0000, 0)]));
         assert_eq!(Interpreter::new().run(&mem, dl).up, None);
+    }
+
+    /// Birdman64VR photo shutter (`pw64_vr_shutter`): the tag sets
+    /// `Frame::shutter` for that frame only.
+    #[test]
+    fn shutter_tag() {
+        let mut mem = VecMemory::default();
+        let tagged = mem.push_words(&words(&[(0xC000_0000 | SHUTTER_TAG, 0), (0xB800_0000, 0)]));
+        let plain = mem.push_words(&words(&[(0xB800_0000, 0)]));
+        let mut it = Interpreter::new();
+        assert!(it.run(&mem, tagged).shutter);
+        assert!(!it.run(&mem, plain).shutter);
     }
 
     #[test]

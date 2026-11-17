@@ -121,10 +121,11 @@ int pw64_vr_strip_c(int buttons);
  * 0 hang glider .. 6 birdman), -1 outside a flight (menus) or outside VR.
  * Read by Rust (pw64_game::vr_flight_vehicle) for the VR HUD page. */
 int pw64_vr_flight_vehicle(void);
-/* Birdman64VR, same file: the photo shutter in VR, closed `x` N64 px from
- * each side (hud.c.patch hudDrawCamera): one full-screen black fill, its
- * alpha by how far it closed, instead of two bars. */
-void pw64_vr_shutter(int x);
+/* Birdman64VR, same file: a photo was taken (hud.c.patch hudDrawCamera,
+ * as the shutter starts): in VR a tag in the display list, on which the
+ * headset blinks its whole view (p13); the game's two shutter bars are not
+ * drawn there. Nothing outside VR. */
+void pw64_vr_shutter(void);
 /* Birdman64VR, same file: 1 = the gyrocopter's windscreen shows in VR
  * first person (Rust: VR HUD page, `[vr] gyro_windscreen`). Always shown
  * from outside. */

@@ -153,6 +153,9 @@ enum Row {
     VrHudPage,
     /// Main (in VR only, under VR HUD): open the VR Comfort page.
     VrComfortPage,
+    /// Main (in VR on a headset that can, under VR Comfort): the menus in
+    /// the player's own room, on / off (`vr::passthrough`, p12).
+    Passthrough,
     /// VR HUD page: show or hide one flight-HUD element in the headset
     /// (`hud_edit::ELEMENTS` id).
     HudShow(u8),
@@ -1840,6 +1843,16 @@ impl Overlay {
         pw64_game::vr_flight_vehicle()
     }
 
+    /// The headset can show the player's room: the Passthrough row is
+    /// offered (a Quest, natively; never on PC).
+    fn passthrough_offered(&self) -> bool {
+        #[cfg(test)]
+        if self.force_vr {
+            return true;
+        }
+        crate::vr::passthrough_available()
+    }
+
     /// The pages are laid out for the headset (`VR_HIDDEN_*`, VR HUD page).
     fn in_vr(&self) -> bool {
         #[cfg(test)]
@@ -1902,6 +1915,9 @@ impl Overlay {
                 if self.in_vr() {
                     rows.insert(at + 1, Row::VrHudPage);
                     rows.insert(at + 2, Row::VrComfortPage);
+                    if self.passthrough_offered() {
+                        rows.insert(at + 3, Row::Passthrough);
+                    }
                     rows.retain(|r| !VR_HIDDEN_MAIN.contains(r));
                 }
                 rows
@@ -2097,6 +2113,14 @@ impl Overlay {
                 }
                 if rows.contains(&Row::VrComfortPage) {
                     self.text_row(ui, at(Row::VrComfortPage), "VR Comfort \u{203a}");
+                }
+                if rows.contains(&Row::Passthrough) {
+                    let label = if crate::vr::passthrough() {
+                        "Passthrough: on"
+                    } else {
+                        "Passthrough: off"
+                    };
+                    self.text_row(ui, at(Row::Passthrough), label);
                 }
                 // Not in VR (`rows`): `at` would panic on a missing row.
                 if rows.contains(&Row::SplitScreen) {
@@ -2978,6 +3002,7 @@ impl Overlay {
             Row::VrComfortPage => self.enter_page(Page::VrComfort, Row::VrComfortPage),
             Row::HudDistance | Row::HudSpread | Row::HudSize => self.change(1, true),
             Row::HorizonLock => step_horizon_lock(1),
+            Row::Passthrough => crate::vr::set_passthrough(!crate::vr::passthrough()),
             Row::GyroWindscreen => crate::vr::set_gyro_windscreen(!crate::vr::gyro_windscreen()),
             Row::DashGauges => crate::vr::set_dash_gauges(!crate::vr::dash_gauges()),
             Row::HudShow(id) => {
@@ -3268,6 +3293,7 @@ impl Overlay {
                 crate::vr::set_hud_layout(l);
             }
             Row::HorizonLock => step_horizon_lock(d),
+            Row::Passthrough => crate::vr::set_passthrough(!crate::vr::passthrough()),
             // Left / right flip a VR HUD row too.
             Row::GyroWindscreen => crate::vr::set_gyro_windscreen(!crate::vr::gyro_windscreen()),
             Row::DashGauges => crate::vr::set_dash_gauges(!crate::vr::dash_gauges()),
@@ -4091,6 +4117,10 @@ fn help(row: Row) -> &'static str {
         }
         Row::VrHudPage => "Where the flight gauges sit in the headset, and which ones show.",
         Row::VrComfortPage => "Settings that make flying in the headset easier on the stomach.",
+        Row::Passthrough => {
+            "Show the menus and the island model in your own room. Off: in a dim virtual \
+             room. Flights are always fully virtual."
+        }
         Row::HudDistance => {
             "How far away the gauges float. They keep their apparent size; nearer feels \
              more like a helmet display, further more like the sky."
@@ -5119,6 +5149,12 @@ mod tests {
             assert_eq!(main.contains(&Row::VrHudPage), vr);
             assert_eq!(main.contains(&Row::HudLayout), !vr);
             assert_eq!(main.contains(&Row::VrComfortPage), vr);
+            // p12: Passthrough right under VR Comfort.
+            assert_eq!(main.contains(&Row::Passthrough), vr);
+            if vr {
+                let i = main.iter().position(|r| *r == Row::VrComfortPage).unwrap();
+                assert_eq!(main[i + 1], Row::Passthrough);
+            }
             o.page = Page::Graphics;
             assert_eq!(o.rows().contains(&Row::Opt(Opt::Widescreen)), !vr);
             assert_eq!(o.rows().contains(&Row::Opt(Opt::TexFilter)), !vr);

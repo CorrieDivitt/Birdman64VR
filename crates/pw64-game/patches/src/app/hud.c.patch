@@ -121,7 +121,7 @@
          }
      } else if (hud->cameraState & HUD_CAM_RENDER_SHUTTER) {
          hud->cameraState = CAMERA_SHUTTER_FRAMES; // state now means # frames to render shutter
-+        sPw64ShutterAcc = 0.0f;                   // PW64 rate
++        sPw64ShutterAcc = 0.0f; pw64_vr_shutter(); // PW64 rate; Birdman64VR: the headset blinks
      } else if (hud->cameraState != 0) {
          // field is count down for rendering black rects for shutter
          if (hud->cameraState != 0) {
@@ -137,10 +137,10 @@
 +        if (pw64_widescreen_aspect > 4.0f / 3.0f) {
 +            x = (s32)(x * pw64_widescreen_aspect * 0.75f);
 +        }
-+        // Birdman64VR: a blink over the whole view (two bars on the HUD
-+        // sphere were a black square in front of the player).
++        // Birdman64VR: no bars (on the HUD sphere they were a black square
++        // in front of the player); the headset blinks (pw64_vr_shutter).
 +        if (pw64_widescreen_aspect < 0.0f) {
-+            pw64_vr_shutter(x);
++            (void)x;
 +        } else {
 +        pw64_hud_set_anchor('L');
 +        // PW64 fill screen: the shutter must cover row 0 too (the world

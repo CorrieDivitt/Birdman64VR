@@ -199,6 +199,49 @@ pub(crate) fn set_gyro_windscreen(on: bool) {
     }
 }
 
+/// The headset can show the player's room behind the picture
+/// (`XrContext::passthrough_available`; set by the headset thread). Read
+/// by the window thread, which then leaves the island model's background
+/// clear, and by the settings, which then offer the Passthrough row.
+static PASSTHROUGH_AVAILABLE: AtomicBool = AtomicBool::new(false);
+
+/// p12: whether the headset can show the player's room (a Quest, natively).
+pub(crate) fn passthrough_available() -> bool {
+    PASSTHROUGH_AVAILABLE.load(Ordering::Relaxed)
+}
+
+/// The menus in the player's room (`[vr] passthrough`, the settings' main
+/// page): 0 = not loaded yet, 1 = on, 2 = off.
+static PASSTHROUGH: AtomicU8 = AtomicU8::new(0);
+
+/// Whether the menus are shown in the player's room where the headset can.
+pub(crate) fn passthrough() -> bool {
+    match PASSTHROUGH.load(Ordering::Relaxed) {
+        0 => {
+            let on = crate::config::get().vr_passthrough.unwrap_or(true);
+            PASSTHROUGH.store(if on { 1 } else { 2 }, Ordering::Relaxed);
+            on
+        }
+        v => v == 1,
+    }
+}
+
+/// Turns the menus' passthrough on or off (from the next headset frame)
+/// and saves the choice.
+pub(crate) fn set_passthrough(on: bool) {
+    PASSTHROUGH.store(if on { 1 } else { 2 }, Ordering::Relaxed);
+    // A paused game's island model is redrawn with the other background.
+    HUD_CHANGED.store(true, Ordering::Relaxed);
+    if let Err(e) = crate::config::save_vr_bool("passthrough", on) {
+        eprintln!("[vr] passthrough choice not saved: {e}");
+    }
+}
+
+/// The room shows this frame: the headset can and the player wants it.
+fn passthrough_on() -> bool {
+    passthrough_available() && passthrough()
+}
+
 /// p8: how much further back (metres; negative nearer) each vehicle's
 /// camera sits in VR, set with the right stick, one per `VEHICLE_*`: chase
 /// views (`[vr] chase_offsets`) and first person (`[vr]
@@ -950,10 +993,21 @@ mod real {
     /// ...or, where the headset can show it (passthrough, p12), the
     /// player's own room: nothing (transparent black, premultiplied).
     const MODEL_BACKGROUND_ROOM: [f64; 4] = [0.0; 4];
-    /// The headset can show the player's room behind the picture
-    /// (`XrContext::passthrough_available`; headset thread → window
-    /// thread, which then leaves the island model's background clear).
-    static PASSTHROUGH: AtomicBool = AtomicBool::new(false);
+    /// p13: when the last photo was taken (window thread → headset
+    /// thread, which blinks the whole view to black and back).
+    static SHUTTER_AT: Mutex<Option<Instant>> = Mutex::new(None);
+    /// The blink: closing, then opening again.
+    const SHUTTER_CLOSE: Duration = Duration::from_millis(70);
+    const SHUTTER_OPEN: Duration = Duration::from_millis(130);
+
+    /// How black the view is `t` after a photo was taken (0 = clear).
+    fn shutter_alpha(t: Duration) -> f32 {
+        if t < SHUTTER_CLOSE {
+            t.as_secs_f32() / SHUTTER_CLOSE.as_secs_f32()
+        } else {
+            1.0 - ((t - SHUTTER_CLOSE).as_secs_f32() / SHUTTER_OPEN.as_secs_f32()).min(1.0)
+        }
+    }
 
     /// The views shown in the player's room where the headset can
     /// (`Source::scene`): the flat screens and the island model.
@@ -1338,6 +1392,11 @@ mod real {
             frame: Option<&pw64_gfx::Frame>,
         ) {
             let poses = *NEXT_EYES.lock().unwrap_or_else(|e| e.into_inner());
+            // p13: a photo was taken: the headset blinks.
+            if frame.is_some_and(|f| f.shutter) {
+                *SHUTTER_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+                log("photo shutter: blink", true);
+            }
             // Between screens the game shows blank frames (black fills,
             // loads): keep the last stereo picture (the runtime reprojects
             // it with the head) and the panel clear over it, rather than
@@ -1525,7 +1584,7 @@ mod real {
                     None => stereo_eye(&seated),
                 };
                 // p12: the island model in the player's room.
-                if matrices.clip.is_some() && PASSTHROUGH.load(Ordering::Relaxed) {
+                if matrices.clip.is_some() && super::passthrough_on() {
                     matrices.background = Some(MODEL_BACKGROUND_ROOM);
                 }
                 // Horizon lock, in flight: the world level, the vehicle
@@ -2041,7 +2100,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             make(PanelBlend::Keyed),
             make(PanelBlend::Cutout),
         );
-        PASSTHROUGH.store(xr.passthrough_available(), Ordering::Relaxed);
+        super::PASSTHROUGH_AVAILABLE.store(xr.passthrough_available(), Ordering::Relaxed);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("vr panel"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -2149,7 +2208,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     // late, paused, loading); the runtime reprojects.
                     eyes: world.get().map(|w| w.1),
                     // p12: the menus in the player's room.
-                    passthrough: in_room(s.scene),
+                    passthrough: in_room(s.scene) && super::passthrough(),
                 }
             };
             if super::RECENTRE.swap(false, Ordering::Relaxed) {
@@ -2167,6 +2226,11 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 }
                 let fade_alpha =
                     1.0 - (scene_since.elapsed().as_secs_f32() / FADE_IN.as_secs_f32()).min(1.0);
+                // p13: ...or blinking after a photo.
+                let fade_alpha = SHUTTER_AT
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .map_or(fade_alpha, |at| fade_alpha.max(shutter_alpha(at.elapsed())));
                 let eye_bound = eye_bound.borrow();
                 // Stereo report: a new picture, or the last one again?
                 if let Some((_, _, serial)) = world {
@@ -2318,7 +2382,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 log(&line, true);
             }
             // (A failure to start it ends passthrough: the dim room again.)
-            PASSTHROUGH.store(xr.passthrough_available(), Ordering::Relaxed);
+            super::PASSTHROUGH_AVAILABLE.store(xr.passthrough_available(), Ordering::Relaxed);
             // The Touch controllers: a pad for player 1 (input/xr_pad.rs).
             let pad = xr.pad();
             if pad.active != touch_active {
@@ -2675,6 +2739,19 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             assert!(super::horizon_correction([0.0, 1.0, 0.0], HorizonLock::Full).is_none());
             let r = super::horizon_correction([0.1, -1.0, 0.0], HorizonLock::Full).unwrap();
             assert!(apply(&r, [0.1, -1.0, 0.0])[1] > 0.99);
+        }
+
+        /// p13: the blink closes fully, then opens again and stays open.
+        #[test]
+        fn the_shutter_blinks_once() {
+            use std::time::Duration;
+            let a = |ms| super::shutter_alpha(Duration::from_millis(ms));
+            assert_eq!(a(0), 0.0);
+            assert!(a(35) > 0.4 && a(35) < 0.6);
+            assert!((a(70) - 1.0).abs() < 1e-4);
+            assert!(a(135) > 0.4 && a(135) < 0.6);
+            assert_eq!(a(200), 0.0);
+            assert_eq!(a(5000), 0.0);
         }
 
         /// p12: the room shows behind the flat screens and the island

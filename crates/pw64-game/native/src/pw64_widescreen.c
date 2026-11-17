@@ -98,23 +98,19 @@ float pw64_vr_aim_reticle_x(float flat, float down) {
     return pw64_round(right / r);
 }
 
-void pw64_vr_shutter(int x) {
-    int a = (x * 255) / (SCREEN_WIDTH / 2);
-    if (a > 255) {
-        a = 255;
+/* Must match pw64-gfx `interp::SHUTTER_TAG`. */
+#define PW64_SHUTTER_TAG 0x534800u /* "SH" */
+
+void pw64_vr_shutter(void) {
+    if (pw64_widescreen_aspect >= 0.0f) {
+        return;
     }
-    /* Full width and untextured: the renderer draws it over the whole eye
-     * (pw64-gfx EYE_FADE), like the game's own fades. */
-    uvGfxStatePush();
-    uvGfxSetFlags(GFX_STATE_XLU | GFX_STATE_TEXTURE_NONE);
-    uvGfxClearFlags(GFX_STATE_ZBUFFER);
-    uvVtxBeginPoly();
-    uvVtx(0, 0, 0, 0, 0, 0, 0, 0, (u8)a);
-    uvVtx(SCREEN_WIDTH, 0, 0, 0, 0, 0, 0, 0, (u8)a);
-    uvVtx(SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0, 0, 0, 0, (u8)a);
-    uvVtx(0, SCREEN_HEIGHT, 0, 0, 0, 0, 0, 0, (u8)a);
-    uvVtxEndPoly();
-    uvGfxStatePop();
+    /* The renderer only notes it (Frame::shutter); the headset draws the
+     * blink itself, over the whole eye and on its own clock. (A fill drawn
+     * here for the game's three shutter frames never showed.) */
+    gGfxDisplayListHead->words.w0 = ((u32)G_NOOP << 24) | PW64_SHUTTER_TAG;
+    gGfxDisplayListHead->words.w1 = 0;
+    gGfxDisplayListHead++;
 }
 
 int pw64_vr_flight_vehicle(void) {

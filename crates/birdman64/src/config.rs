@@ -124,6 +124,9 @@ pub struct Config {
     /// `[vr] gyro_windscreen`: the gyrocopter's windscreen in VR first
     /// person (`None` = default, shown).
     pub vr_gyro_windscreen: Option<bool>,
+    /// `[vr] passthrough`: the menus in the player's own room where the
+    /// headset can show it (Quest; `None` = default, on).
+    pub vr_passthrough: Option<bool>,
     /// `[vr] dash_gauges`: the throttle and the map on the cockpit's
     /// dashboard in first person (`None` = default, on).
     pub vr_dash_gauges: Option<bool>,
@@ -908,6 +911,7 @@ fn from_table(table: &toml::Table) -> Config {
                 for (key, slot) in [
                     ("gyro_windscreen", &mut cfg.vr_gyro_windscreen),
                     ("dash_gauges", &mut cfg.vr_dash_gauges),
+                    ("passthrough", &mut cfg.vr_passthrough),
                 ] {
                     let Some(v) = t.get(key) else { continue };
                     match coerce_bool(v) {
