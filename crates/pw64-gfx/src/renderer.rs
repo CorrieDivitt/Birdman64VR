@@ -265,6 +265,16 @@ impl DashPanel {
     }
 }
 
+/// Birdman64VR: N64 screen clip space → an eye's clip space for the game's
+/// full-screen fades in flight: three times as wide and high as the eye, so
+/// the 4:3 box covers the whole view.
+const EYE_FADE: Mat4 = [
+    [3.0, 0.0, 0.0, 0.0],
+    [0.0, 3.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0, 0.0],
+    [0.0, 0.0, 0.0, 1.0],
+];
+
 /// The flight HUD on the inside of a sphere around the player
 /// ([`StereoEye::hud_sphere`]): an N64 screen point `(x, y)` is seen at
 /// yaw `(x - 160)·rad_per_px`, pitch `(120 - y)·rad_per_px`, `radius`
@@ -1651,8 +1661,19 @@ impl Renderer {
             {
                 passes.push(Vec::new());
             }
+            // The game's full-screen fades in flight (crash fade to white or
+            // black, sky diving's clouds: full-width untextured fills after
+            // the world starts): over the whole eye, not on the HUD sphere
+            // (a square in front) and not dropped (a hard cut).
+            let fade = d.view == 0
+                && i > first_world
+                && eye.hud_sphere.is_some()
+                && matches!(d.wide, Wide::Stretch(_))
+                && d.pipeline.shader.mode != ShaderMode::DepthClear;
             let m = if d.view != 0 {
                 world.get(d.view as usize - 1)
+            } else if fade {
+                Some(&EYE_FADE)
             } else if i > first_world
                 && !matches!(d.wide, Wide::Stretch(_))
                 && d.pipeline.shader.mode != ShaderMode::DepthClear
@@ -1681,6 +1702,13 @@ impl Renderer {
             } else {
                 panel.push(i);
             }
+            if fade {
+                keys[i].depth = crate::rdp::DepthState {
+                    test: false,
+                    write: false,
+                    decal: false,
+                };
+            }
             if dash_at.is_some() {
                 keys[i].depth = crate::rdp::DepthState {
                     test: true,
@@ -1691,7 +1719,7 @@ impl Renderer {
             let mut u = d.uniforms;
             u.vr = [1.0, 0.0, 0.0, 0.0];
             u.eye = *m;
-            if let Some(h) = eye.hud_sphere.as_ref().filter(|_| d.view == 0) {
+            if let Some(h) = eye.hud_sphere.as_ref().filter(|_| d.view == 0 && !fade) {
                 if let Some(((p, s), c)) = dash_at {
                     let o = p.centre(s);
                     u.vr = [1.0, 0.0, 0.0, 3.0];
