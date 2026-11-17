@@ -67,6 +67,7 @@ unsafe extern "C" {
     static mut pw64_vr_gyro_windscreen: i32;
     /// native/src/pw64_widescreen.c: the vehicle flown in VR, -1 none.
     fn pw64_vr_flight_vehicle() -> i32;
+
 }
 
 /// Infinite LOD (models always at their most detailed level) and infinite

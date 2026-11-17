@@ -174,6 +174,12 @@ pub struct StereoEye {
     /// instead of the sphere while the frame has one
     /// ([`crate::Frame::dash`], [`DashPanel`]), each where its slot says.
     pub hud_dash: &'static [DashSlot],
+    /// Birdman64VR horizon lock: the rotation (row vectors, camera space)
+    /// the world is levelled with, for the fixed sights on the HUD sphere
+    /// (`elem` 0: the gyrocopter's reticle), so they stay on what they aim
+    /// at. Turned on the sphere: moved in N64 pixels instead, the game
+    /// clipped them at its screen's edges.
+    pub sight: Option<[[f32; 3]; 3]>,
 }
 
 /// Birdman64VR: where one HUD element sits on the dashboard
@@ -1626,6 +1632,14 @@ impl Renderer {
         // the land), then the panel.
         let mut passes: Vec<Vec<usize>> = vec![Vec::new()];
         let mut panel = Vec::new();
+        // First person in a cockpit (the frame has dashboard points): how
+        // far the windscreen is, for the fixed sights (below). The first
+        // point sits just below the glass's lower edge; game units are
+        // metres.
+        let glass = frame.dash.as_ref().map(|d| {
+            let p = d.points[0];
+            (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt().max(0.3) + 0.05
+        });
         // Each draw's pipeline: its own, except a dashboard gauge's, which
         // is depth tested against the cockpit (see below).
         let mut keys: Vec<PipelineKey> = frame.draws.iter().map(|d| d.pipeline).collect();
@@ -1690,13 +1704,36 @@ impl Renderer {
                     ];
                 } else {
                     let shift = centre.map_or([0.0; 2], |c| h.shift(c));
+                    // The cockpit's fixed sights (the gyrocopter's aim
+                    // reticle: elements that never move, `elem` 0) sit on
+                    // the windscreen, as far as the dashboard's tip, and
+                    // over it: seen at 10 m through the glass they looked
+                    // hidden behind it. Same direction and size (the
+                    // sphere's angles do not depend on its radius).
+                    let radius = match glass {
+                        Some(g) if d.elem == 0 => {
+                            keys[i].depth = crate::rdp::DepthState {
+                                test: false,
+                                write: false,
+                                decal: false,
+                            };
+                            g
+                        }
+                        _ => h.radius,
+                    };
                     u.vr = [1.0, 0.0, 0.0, 2.0];
                     u.eye = h.eye;
+                    // The fixed sights turn with the horizon lock (rows
+                    // 1-3, w of row 1 = on).
+                    let turn = eye.sight.filter(|_| d.elem == 0);
+                    let row = |k: usize, on: f32| {
+                        turn.map_or([0.0; 4], |r| [r[k][0], r[k][1], r[k][2], on])
+                    };
                     u.clip = [
-                        [h.rad_per_px, h.radius, shift[0], shift[1]],
-                        [0.0; 4],
-                        [0.0; 4],
-                        [0.0; 4],
+                        [h.rad_per_px, radius, shift[0], shift[1]],
+                        row(0, 1.0),
+                        row(1, 0.0),
+                        row(2, 0.0),
                     ];
                 }
             }
@@ -2431,6 +2468,7 @@ mod tests {
             hud_sphere: None,
             hud_hidden: 0,
             hud_dash: &[],
+            sight: None,
         };
         r.render_stereo(&frame, &view, (w, h), &eye);
         let stereo = read_rgba(&device, &queue, &tex);
@@ -2571,6 +2609,7 @@ mod tests {
             views: Vec::new(),
             diorama: None,
             dash: None,
+            up: None,
         }
     }
 

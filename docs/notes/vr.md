@@ -220,7 +220,7 @@ which is dizzying as the player's head. Confirmed on the headset
 (2026-11-15): "the opening scene looks awesome, the menus work".
 
 - **Island model** (file and level select, results, replays): a full-width
-  world view with terrain is drawn as a 2.2 m model of the whole island on
+  world view with terrain is drawn as a 2.61 m model (2.2 m, then 25% bigger, then 5% smaller) of the whole island on
   a table below the menus (0.3 to 2.5 m ahead, 0.65 m down; the menus
   float 0.5 m higher meanwhile), game north away, fixed whatever the camera
   does. Its sea is kept, cut to a cylinder around the terrain and a little
@@ -419,6 +419,39 @@ spike_build.sh).
 | Sky diving | timer, altimeter, map, altitude, messages |
 | Jumble hopper | speed, timer, altimeter, map, altitude, messages |
 | Birdman | speed, altimeter, altitude, photos, messages |
+
+## Horizon lock (c5)
+
+Comfort: in flight the world stays level and the vehicle (its cockpit
+included) banks around the player. VR Comfort page (Main, under VR HUD) >
+Horizon lock: off / bank (default; the view still pitches with the vehicle)
+/ bank and pitch; never in the cannonball (the "UP" tag's fourth value:
+aiming up and down in first person must pitch)
+(`[vr] horizon_lock = "off" | "bank" | "full"`, `vr::HorizonLock`).
+
+- C: `pw64_vr_up_tag` (pw64_widescreen.c), at the end of a flight's world
+  view: the world's up in camera space from the channel's camera matrix
+  (`unk110` rows right, forward, up; their z), `G_NOOP` "UP" tag, three
+  floats → `pw64_gfx::Frame::up`.
+- vr.rs `horizon_correction(up, mode)`: bank turns about the view's
+  forward axis until up has no sideways part; full turns up onto straight up
+  (Rodrigues; upside down falls back to bank; looking straight up or down
+  has no bank). Put in front of `StereoEye::world` (camera space), so the
+  world, the cockpit and the dashboard gauges turn together; the HUD sphere
+  stays with the seat. Not for the title or the island model.
+- The gyrocopter's reticle: the game draws it where it always is (6 degrees
+  below the camera's forward line, `PW64_VR_GYRO_AIM_DOWN`,
+  `pw64_vr_aim_reticle_x/y`), and the renderer turns the fixed sights
+  (`elem` 0) on the HUD sphere by the same rotation (`StereoEye::sight`,
+  u.clip rows 1-3 in the sphere shader), so it stays on where the missiles
+  fly. A first try moved it in N64 pixels from C: past the game screen's
+  top or bottom edge (bank and pitch, pitching) the game clipped it, an
+  "invisible square".
+- In first person in a cockpit (the frame has dashboard points) the fixed
+  sights (`elem` 0: the gyrocopter's reticle) sit on the windscreen, as far
+  as the dashboard's tip + 5 cm, and are not depth tested: at the HUD
+  sphere's 10 m, drawn over glass under a metre away, they looked hidden
+  behind it. Same direction and size.
 
 ## Touch controllers (q3)
 

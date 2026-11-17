@@ -60,16 +60,41 @@ float pw64_vr_hud_rad_per_px = 0.0f;
  * from the VR HUD page, pw64_game::set_vr_gyro_windscreen). */
 int pw64_vr_gyro_windscreen = 1;
 
+/* Where a direction `down` radians below the camera's forward axis shows on
+ * the HUD sphere: radians right of and below the view's centre. (The
+ * horizon lock turns the sight on the sphere itself, pw64-gfx
+ * `StereoEye::sight`: moved here in N64 pixels, the game clipped it at its
+ * screen's edges.) */
+static void pw64_vr_aim_angles(float down, float* right, float* below) {
+    *right = 0.0f;
+    *below = down;
+}
+
+static float pw64_round(float v) {
+    return (float)(int)(v < 0.0f ? v - 0.5f : v + 0.5f);
+}
+
 float pw64_vr_aim_reticle_y(float flat, float down) {
     float r = pw64_vr_hud_rad_per_px;
-    float y;
+    float right, below;
     if (pw64_widescreen_aspect >= 0.0f || r <= 0.0f) {
         return flat;
     }
+    pw64_vr_aim_angles(down, &right, &below);
     /* hudDrawAimReticle: sprite centre row 115 - reticleY (y down); the
-     * sphere shows row 120 + down / r at `down` radians below its centre. */
-    y = -5.0f - down / r;
-    return (float)(int)(y < 0.0f ? y - 0.5f : y + 0.5f);
+     * sphere shows row 120 + below / r at `below` radians below its centre. */
+    return pw64_round(-5.0f - below / r);
+}
+
+float pw64_vr_aim_reticle_x(float flat, float down) {
+    float r = pw64_vr_hud_rad_per_px;
+    float right, below;
+    if (pw64_widescreen_aspect >= 0.0f || r <= 0.0f) {
+        return flat;
+    }
+    pw64_vr_aim_angles(down, &right, &below);
+    /* hudDrawAimReticle: sprite centre column 160 + reticleX. */
+    return pw64_round(right / r);
 }
 
 int pw64_vr_flight_vehicle(void) {
@@ -752,6 +777,35 @@ static void pw64_vr_dash_tag(const UnkStruct_80204D94* c) {
     }
 }
 
+/* Must match pw64-gfx `interp::UP_TAG`. */
+#define PW64_UP_TAG 0x555000u /* "UP" */
+
+/* Birdman64VR horizon lock (c5): the game world's up (+z) in the camera's
+ * space as the renderer has it (x right, y up, -z forward), then 1 where
+ * the lock is off (the cannonball: aiming up and down in first person must
+ * pitch, and the flight is the arc), else 0; four floats at the end of a
+ * flight's world view. The camera matrix's rows are right, forward, up;
+ * their z components are world up in each. */
+static void pw64_vr_up_tag(const UnkStruct_80204D94* c) {
+    const Mtx4F* cam = &c->unk110;
+    float v[4];
+    int i;
+    v[0] = cam->m[0][2];
+    v[1] = cam->m[2][2];
+    v[2] = -cam->m[1][2];
+    v[3] = pw64_vr_flight_vehicle() == VEHICLE_CANNONBALL ? 1.0f : 0.0f;
+    for (i = 0; i < 4; i++) {
+        union {
+            float f;
+            u32 u;
+        } bits;
+        bits.f = v[i];
+        gGfxDisplayListHead->words.w0 = ((u32)G_NOOP << 24) | PW64_UP_TAG | (u32)i;
+        gGfxDisplayListHead->words.w1 = bits.u;
+        gGfxDisplayListHead++;
+    }
+}
+
 /* Birdman64VR: a HUD part moved in VR (the cannonball's gauges around the
  * heading strip, hud.c.patch hudDrawCannonball): a translation of the
  * HUD's view matrix (N64 HUD px, y up) around its uvVtx draws. Nothing
@@ -794,6 +848,7 @@ void pw64_widescreen_tag(const void* chan, int on) {
     }
     if (!on && pw64_widescreen_aspect < 0.0f && pw64_vr_flight()) {
         pw64_vr_dash_tag(chan);
+        pw64_vr_up_tag(chan);
     }
     gGfxDisplayListHead->words.w0 = (u32)G_NOOP << 24;
     gGfxDisplayListHead->words.w1 = on ? PW64_WIDE_TAG_ON : PW64_WIDE_TAG_OFF;

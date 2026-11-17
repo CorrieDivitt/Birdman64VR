@@ -151,6 +151,8 @@ enum Row {
     HudLayout,
     /// Main (in VR only): open the VR HUD page.
     VrHudPage,
+    /// Main (in VR only, under VR HUD): open the VR Comfort page.
+    VrComfortPage,
     /// VR HUD page: show or hide one flight-HUD element in the headset
     /// (`hud_edit::ELEMENTS` id).
     HudShow(u8),
@@ -159,6 +161,9 @@ enum Row {
     HudDistance,
     HudSpread,
     HudSize,
+    /// VR HUD page: horizon lock (comfort, c5): off / bank / bank and
+    /// pitch (`vr::horizon_lock`), cycled with confirm or left / right.
+    HorizonLock,
     /// VR HUD page: the gyrocopter's windscreen in first person, shown /
     /// hidden (`vr::gyro_windscreen`).
     GyroWindscreen,
@@ -203,6 +208,8 @@ enum Page {
     Perf,
     /// Birdman64VR: which flight-HUD elements the headset shows.
     VrHud,
+    /// Birdman64VR: comfort settings (horizon lock).
+    VrComfort,
 }
 
 impl Page {
@@ -215,6 +222,7 @@ impl Page {
             Page::Split => 3,
             Page::Perf => 4,
             Page::VrHud => 5,
+            Page::VrComfort => 6,
         }
     }
 }
@@ -256,8 +264,20 @@ const VR_HIDDEN_GRAPHICS: [Opt; 10] = [
 /// dashboard rows on the VR HUD page.
 const VEHICLE_GYROCOPTER: u8 = 2;
 
+/// Steps the horizon lock by `d` (wrapping) and saves it.
+fn step_horizon_lock(d: i32) {
+    use crate::vr::HorizonLock;
+    let all = HorizonLock::ALL;
+    let i = all
+        .iter()
+        .position(|m| *m == crate::vr::horizon_lock())
+        .unwrap_or(1) as i32;
+    let n = all.len() as i32;
+    crate::vr::set_horizon_lock(all[(i + d).rem_euclid(n) as usize]);
+}
+
 /// How many pages (`Page::index` is the slot).
-const N_PAGES: usize = 6;
+const N_PAGES: usize = 7;
 
 /// The conditions a panel height was measured at: the safe egui screen
 /// (points) and the zoom. A change of either re-measures (text wraps and
@@ -1691,6 +1711,7 @@ impl Overlay {
             Page::Split => "Split-screen",
             Page::Perf => "Performance overlay",
             Page::VrHud => "VR HUD",
+            Page::VrComfort => "VR Comfort",
         };
         // The wide Controls page (U9): with room for both, the binding list
         // scrolls on the left and the controller drawing sits fixed on the
@@ -1880,6 +1901,7 @@ impl Overlay {
                 // (VR is single-player) in the headset.
                 if self.in_vr() {
                     rows.insert(at + 1, Row::VrHudPage);
+                    rows.insert(at + 2, Row::VrComfortPage);
                     rows.retain(|r| !VR_HIDDEN_MAIN.contains(r));
                 }
                 rows
@@ -1979,6 +2001,8 @@ impl Overlay {
                 rows.push(Row::Back);
                 rows
             }
+            // Comfort settings (more to come).
+            Page::VrComfort => vec![Row::HorizonLock, Row::Back],
             Page::Perf => vec![
                 Row::Opt(Opt::ShowFps),
                 Row::Opt(Opt::PerfFrametime),
@@ -2070,6 +2094,9 @@ impl Overlay {
                 }
                 if rows.contains(&Row::VrHudPage) {
                     self.text_row(ui, at(Row::VrHudPage), "VR HUD \u{203a}");
+                }
+                if rows.contains(&Row::VrComfortPage) {
+                    self.text_row(ui, at(Row::VrComfortPage), "VR Comfort \u{203a}");
                 }
                 // Not in VR (`rows`): `at` would panic on a missing row.
                 if rows.contains(&Row::SplitScreen) {
@@ -2313,6 +2340,15 @@ impl Overlay {
                         self.opt_row(ui, at(row), o);
                     }
                 }
+                ui.add_space(4.0);
+                self.text_row(ui, at(Row::Back), "\u{2039} Back");
+            }
+            Page::VrComfort => {
+                self.text_row(
+                    ui,
+                    at(Row::HorizonLock),
+                    &format!("Horizon lock: {}", crate::vr::horizon_lock().label()),
+                );
                 ui.add_space(4.0);
                 self.text_row(ui, at(Row::Back), "\u{2039} Back");
             }
@@ -2939,7 +2975,9 @@ impl Overlay {
                 self.show = false;
             }
             Row::VrHudPage => self.enter_page(Page::VrHud, Row::VrHudPage),
+            Row::VrComfortPage => self.enter_page(Page::VrComfort, Row::VrComfortPage),
             Row::HudDistance | Row::HudSpread | Row::HudSize => self.change(1, true),
+            Row::HorizonLock => step_horizon_lock(1),
             Row::GyroWindscreen => crate::vr::set_gyro_windscreen(!crate::vr::gyro_windscreen()),
             Row::DashGauges => crate::vr::set_dash_gauges(!crate::vr::dash_gauges()),
             Row::HudShow(id) => {
@@ -3229,6 +3267,7 @@ impl Overlay {
                 }
                 crate::vr::set_hud_layout(l);
             }
+            Row::HorizonLock => step_horizon_lock(d),
             // Left / right flip a VR HUD row too.
             Row::GyroWindscreen => crate::vr::set_gyro_windscreen(!crate::vr::gyro_windscreen()),
             Row::DashGauges => crate::vr::set_dash_gauges(!crate::vr::dash_gauges()),
@@ -3249,6 +3288,7 @@ impl Overlay {
             | Row::TouchHidden
             | Row::HudLayout
             | Row::VrHudPage
+            | Row::VrComfortPage
             | Row::ExportSave
             | Row::ImportSave
             | Row::CloseApp
@@ -4050,6 +4090,7 @@ fn help(row: Row) -> &'static str {
              stays."
         }
         Row::VrHudPage => "Where the flight gauges sit in the headset, and which ones show.",
+        Row::VrComfortPage => "Settings that make flying in the headset easier on the stomach.",
         Row::HudDistance => {
             "How far away the gauges float. They keep their apparent size; nearer feels \
              more like a helmet display, further more like the sky."
@@ -4059,6 +4100,11 @@ fn help(row: Row) -> &'static str {
              ones; 100% is the flat game's layout."
         }
         Row::HudSize => "How big the gauges are.",
+        Row::HorizonLock => {
+            "Comfort: keeps the horizon level while you fly, so the vehicle banks around \
+             you instead of the world tilting. Bank and pitch also keeps the view from \
+             pitching. Off is the original camera."
+        }
         Row::DashGauges => {
             "In first person, the throttle and the map sit on the gyrocopter's dashboard \
              instead of around you with the other gauges."
@@ -5057,6 +5103,7 @@ mod tests {
                 Page::Split,
                 Page::Perf,
                 Page::VrHud,
+                Page::VrComfort,
             ] {
                 o.page = page;
                 let ctx = egui::Context::default();
@@ -5071,6 +5118,7 @@ mod tests {
             assert_eq!(main.contains(&Row::SplitScreen), !vr);
             assert_eq!(main.contains(&Row::VrHudPage), vr);
             assert_eq!(main.contains(&Row::HudLayout), !vr);
+            assert_eq!(main.contains(&Row::VrComfortPage), vr);
             o.page = Page::Graphics;
             assert_eq!(o.rows().contains(&Row::Opt(Opt::Widescreen)), !vr);
             assert_eq!(o.rows().contains(&Row::Opt(Opt::TexFilter)), !vr);

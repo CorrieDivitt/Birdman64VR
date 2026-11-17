@@ -277,6 +277,10 @@ pub struct Frame {
     /// (`pw64_vr_dash_tag`), where a flight gauge can sit instead of the
     /// HUD sphere ([`crate::StereoEye::hud_dash`]).
     pub dash: Option<Dash>,
+    /// Birdman64VR, in flight: the game world's up in camera space (x
+    /// right, y up, -z forward; `pw64_vr_up_tag`), for the headset's
+    /// horizon lock; then 1 where the lock is off (the cannonball), else 0.
+    pub up: Option<[f32; 4]>,
 }
 
 /// Birdman64VR: points on the vehicle's dashboard, one per dashboard gauge
