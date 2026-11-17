@@ -244,7 +244,11 @@ which is dizzying as the player's head. Confirmed on the headset
   square in front of the player; now it keeps the last stereo picture
   (reprojected by the runtime) with the panel clear over it until a frame
   has something to show. Logged once per hold; a fall back to the panel
-  logs the frame's draws and textured draws.
+  logs the frame's draws and textured draws. With no stereo picture to keep
+  (the game's start), a blank frame shows nothing: the panel is cleared and
+  drawn blended (`Vr::blank`, `Source::blank`). Each change of a flat
+  frame's makeup is logged (`flat game frame: N draws, M textured, blank
+  B`, at most 12 per stretch without a world).
 - **Data**: after the world tag, 21 G_NOOP words (`PW64_DIORAMA_TAG`):
   the camera's world matrix, the island's bounds, a title flag, the game
   state and the title's phase (logged: `[vr] game state N, title phase P`).
@@ -430,7 +434,10 @@ game), widescreen and fill screen (the headset's own field of view), scale
 and its filter (the eyes are drawn at the headset's size; only the menu
 panel used them) and OLED care (LCD screens). Kept: frame rate, texture
 filtering and packs, MSAA (the eye pictures use it), full-detail models and
-view distance. The on-screen touch controls are never drawn in VR
+view distance. Move HUD (the flat screen's HUD editor) and texture
+filtering are hidden too: VR always filters smoothly (window.rs,
+`apply_live`), as the N64 3-point filter's frame rate was unsustainable in
+the headset. The on-screen touch controls are never drawn in VR
 (window.rs), and the title menu has no Players item in VR (its original two
 items and box; title_screen.c.patch `sPw64Items`).
 

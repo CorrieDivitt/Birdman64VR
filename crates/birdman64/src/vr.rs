@@ -455,6 +455,10 @@ mod stub {
             false
         }
 
+        pub(crate) fn blank(&self) -> bool {
+            false
+        }
+
         pub(crate) fn clear_panel(&self, _: &wgpu::Device, _: &wgpu::Queue, _: &wgpu::TextureView) {
         }
     }
@@ -603,6 +607,9 @@ mod real {
         /// the panel is the picture.
         world: Option<(usize, [EyePose; 2], u64)>,
         reading: Option<usize>,
+        /// A blank game frame with no stereo picture to keep (the game's
+        /// start): the panel is clear and shown blended, i.e. nothing.
+        blank: bool,
     }
 
     /// Where the eyes will be for the next headset frame (headset thread →
@@ -908,6 +915,14 @@ mod real {
         /// Blank game frames ([`pw64_gfx::Frame::is_blank`], between
         /// screens) are being skipped: the last stereo picture stays.
         holding: bool,
+        /// ...and with no stereo picture to keep: nothing is shown.
+        void: bool,
+        /// The last flat (no world) frame's makeup logged: draws, textured
+        /// draws, blank ([`Self::world`], for tracking down transitions).
+        flat_logged: Option<(usize, usize, bool)>,
+        /// Lines of that logged since the last frame with a world (capped:
+        /// 2D screens change their draw count often).
+        flat_lines: u32,
         /// The last stereo frame was the island model ([`diorama_eye`]).
         model: bool,
         /// ...and the title screen (recentre when it starts).
@@ -983,6 +998,9 @@ mod real {
                     eyes: None,
                     stereo: false,
                     holding: false,
+                    void: false,
+                    flat_logged: None,
+                    flat_lines: 0,
                     model: false,
                     title: false,
                     state: None,
@@ -1078,14 +1096,49 @@ mod real {
             // loads): keep the last stereo picture (the runtime reprojects
             // it with the head) and the panel clear over it, rather than
             // the panel's black picture, until there is something to show.
-            if self.stereo && frame.is_some_and(pw64_gfx::Frame::is_blank) {
-                if !self.holding {
-                    self.holding = true;
-                    log("blank game frame: holding the last stereo picture", true);
+            // Every flat frame's makeup, logged when it changes.
+            if let Some(f) = frame.filter(|f| !f.has_world()) {
+                let textured = f
+                    .draws
+                    .iter()
+                    .filter(|d| d.textures.iter().any(Option::is_some))
+                    .count();
+                let makeup = (f.draws.len(), textured, f.is_blank());
+                if self.flat_logged != Some(makeup) && self.flat_lines < 12 {
+                    self.flat_logged = Some(makeup);
+                    self.flat_lines += 1;
+                    log(
+                        &format!(
+                            "flat game frame: {} draws, {} textured, blank {}",
+                            makeup.0, makeup.1, makeup.2
+                        ),
+                        true,
+                    );
+                }
+            } else {
+                self.flat_logged = None;
+                self.flat_lines = 0;
+            }
+            if frame.is_some_and(pw64_gfx::Frame::is_blank) {
+                if self.stereo {
+                    if !self.holding {
+                        self.holding = true;
+                        log("blank game frame: holding the last stereo picture", true);
+                    }
+                } else if !self.void {
+                    // Nothing to hold (the game's start): show nothing
+                    // rather than the panel's black picture.
+                    self.void = true;
+                    self.source.lock().unwrap_or_else(|e| e.into_inner()).blank = true;
+                    log("blank game frame: showing nothing", true);
                 }
                 return;
             }
             self.holding = false;
+            if self.void {
+                self.void = false;
+                self.source.lock().unwrap_or_else(|e| e.into_inner()).blank = false;
+            }
             let (Some(frame), Some(poses)) =
                 (frame.filter(|f| stereo_on() && f.has_world()), poses)
             else {
@@ -1238,6 +1291,13 @@ mod real {
         /// what the window draws over the game (toasts, the settings menu).
         pub(crate) fn stereo(&self) -> bool {
             self.stereo
+        }
+
+        /// A blank game frame with no stereo picture to keep: the panel
+        /// starts out clear too (and is shown blended), so the headset shows
+        /// nothing but what the window draws over the game.
+        pub(crate) fn blank(&self) -> bool {
+            self.void
         }
 
         /// Clears the panel to fully transparent (the stereo world shows
@@ -1618,6 +1678,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             // and marked as being read, so the window thread leaves that
             // set alone.
             let world = std::cell::Cell::new(None::<(usize, [EyePose; 2], u64)>);
+            let blank = std::cell::Cell::new(false);
             let choose = || {
                 let mut s = source.lock().unwrap_or_else(|e| e.into_inner());
                 let mut eye_bound = eye_bound.borrow_mut();
@@ -1652,6 +1713,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     });
                 }
                 world.set(s.world.filter(|_| eye_bound.is_some()));
+                blank.set(s.blank);
                 Layers {
                     world: true,
                     panel: None,
@@ -1770,7 +1832,10 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                         pass.draw(0..6, 0..1);
                     }
                     if let Some((_, aspect, groups)) = &bound {
-                        pass.set_pipeline(if world.is_some() { &over } else { &pipeline });
+                        // Blended over the world, or over nothing for a
+                        // blank game frame (the panel is clear then).
+                        let blended = world.is_some() || blank.get();
+                        pass.set_pipeline(if blended { &over } else { &pipeline });
                         pass.set_bind_group(0, &groups[front][i], &[]);
                         pass.draw(0..6, 0..1);
                         // Latency probe: this thread's bar, on the panel's

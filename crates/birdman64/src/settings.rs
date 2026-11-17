@@ -221,7 +221,14 @@ impl Page {
 
 /// Birdman64VR: Main page rows that have no use in the headset: the
 /// touch controls (no touchscreen) and split-screen (VR is single-player).
-const VR_HIDDEN_MAIN: [Row; 3] = [Row::TouchLayout, Row::TouchHidden, Row::SplitScreen];
+/// Move HUD too: the flat screen's HUD editor (the headset's HUD is laid
+/// out on the VR HUD page).
+const VR_HIDDEN_MAIN: [Row; 4] = [
+    Row::TouchLayout,
+    Row::TouchHidden,
+    Row::SplitScreen,
+    Row::HudLayout,
+];
 
 /// Birdman64VR: Graphics options that do nothing in the headset. The window
 /// ones (display mode, fullscreen resolution, V-Sync: the headset paces the
@@ -229,9 +236,10 @@ const VR_HIDDEN_MAIN: [Row; 3] = [Row::TouchLayout, Row::TouchHidden, Row::Split
 /// own field of view), the flat picture's scale and its filter (the eyes are
 /// drawn at the headset's own size; only the menu panel used them) and OLED
 /// care (the Quest 3 has LCD screens). Still shown: frame rate, texture
-/// filtering and packs, MSAA (the eye pictures use it), full-detail models
-/// and view distance.
-const VR_HIDDEN_GRAPHICS: [Opt; 9] = [
+/// packs, MSAA (the eye pictures use it), full-detail models
+/// and view distance. Texture filtering too: the N64 original filter's frame
+/// rate is unsustainable in the headset, so VR always filters smoothly.
+const VR_HIDDEN_GRAPHICS: [Opt; 10] = [
     Opt::DisplayMode,
     Opt::Resolution,
     Opt::Vsync,
@@ -241,6 +249,7 @@ const VR_HIDDEN_GRAPHICS: [Opt; 9] = [
     Opt::Filter,
     Opt::OledDrift,
     Opt::OledBrightness,
+    Opt::TexFilter,
 ];
 
 /// How many pages (`Page::index` is the slot).
@@ -1620,7 +1629,12 @@ impl Overlay {
         gpu.filter = self.filter;
         // Shaders/pipelines are cached per filter: the next frame just uses
         // the other set (the dump renderer keeps the startup value).
-        gpu.renderer.options.filter = self.tex_filter;
+        // Birdman64VR: always smooth in the headset (window.rs).
+        gpu.renderer.options.filter = if self.in_vr() {
+            pw64_gfx::TexFilter::Bilinear
+        } else {
+            self.tex_filter
+        };
         // OLED care (O3): live, like the filters. The drift time comes from
         // the window's clock at the next drain.
         gpu.oled_drift = self.oled_drift;
@@ -2024,7 +2038,9 @@ impl Overlay {
                     };
                     self.text_row(ui, at(Row::TouchHidden), shown);
                 }
-                self.text_row(ui, at(Row::HudLayout), "Move HUD");
+                if rows.contains(&Row::HudLayout) {
+                    self.text_row(ui, at(Row::HudLayout), "Move HUD");
+                }
                 if rows.contains(&Row::VrHudPage) {
                     self.text_row(ui, at(Row::VrHudPage), "VR HUD \u{203a}");
                 }
@@ -5019,8 +5035,10 @@ mod tests {
             };
             assert_eq!(main.contains(&Row::SplitScreen), !vr);
             assert_eq!(main.contains(&Row::VrHudPage), vr);
+            assert_eq!(main.contains(&Row::HudLayout), !vr);
             o.page = Page::Graphics;
             assert_eq!(o.rows().contains(&Row::Opt(Opt::Widescreen)), !vr);
+            assert_eq!(o.rows().contains(&Row::Opt(Opt::TexFilter)), !vr);
             assert!(o.rows().contains(&Row::Opt(Opt::Msaa)));
         }
     }
