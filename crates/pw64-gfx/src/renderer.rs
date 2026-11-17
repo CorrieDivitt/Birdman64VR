@@ -1689,7 +1689,7 @@ impl Renderer {
             {
                 continue;
             }
-            // Diorama passthrough: no sky and no sea at all.
+            // Diorama mode: no sky and no sea at all.
             if eye.hide_env && d.env {
                 continue;
             }

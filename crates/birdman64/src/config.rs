@@ -127,9 +127,9 @@ pub struct Config {
     /// `[vr] passthrough`: the menus in the player's own room where the
     /// headset can show it (Quest; `None` = default, on).
     pub vr_passthrough: Option<bool>,
-    /// `[vr] diorama_passthrough`: flights in third person as a model in
-    /// the player's room (`None` = default, off).
-    pub vr_diorama_passthrough: Option<bool>,
+    /// `[vr] diorama_mode`: flights in third person as a model
+    /// ([`DIORAMA_MODE_VALUES`]; `None` = default, off; `vr::DioramaMode`).
+    pub vr_diorama_mode: Option<String>,
     /// `[vr] dash_gauges`: the throttle and the map on the cockpit's
     /// dashboard in first person (`None` = default, on).
     pub vr_dash_gauges: Option<bool>,
@@ -915,7 +915,6 @@ fn from_table(table: &toml::Table) -> Config {
                     ("gyro_windscreen", &mut cfg.vr_gyro_windscreen),
                     ("dash_gauges", &mut cfg.vr_dash_gauges),
                     ("passthrough", &mut cfg.vr_passthrough),
-                    ("diorama_passthrough", &mut cfg.vr_diorama_passthrough),
                 ] {
                     let Some(v) = t.get(key) else { continue };
                     match coerce_bool(v) {
@@ -944,6 +943,20 @@ fn from_table(table: &toml::Table) -> Config {
                             &format!("vr.{key}"),
                             v,
                             &format!("use a list of 7 numbers from {lo} to {hi}"),
+                        ),
+                    }
+                }
+                if let Some(v) = t.get("diorama_mode") {
+                    match v.as_str() {
+                        Some(m) if DIORAMA_MODE_VALUES.contains(&m) => {
+                            cfg.vr_diorama_mode = Some(m.to_string());
+                        }
+                        _ => ignore(
+                            &mut ignored,
+                            "vr.diorama_mode",
+                            v,
+                            "use \"off\", \"on\", \"on_static\", \"passthrough\" or \
+                             \"passthrough_static\"",
                         ),
                     }
                 }
@@ -1009,25 +1022,6 @@ pub fn save_vr_bool(key: &str, on: bool) -> Result<(), String> {
     write_table(&with_vr_bool(table, key, on)?)
 }
 
-/// Writes a `[vr]` on/off key whose default is off
-/// (`diorama_passthrough`): `true` when on, removed when off.
-pub fn save_vr_bool_default_off(key: &str, on: bool) -> Result<(), String> {
-    let mut table = read_table()?;
-    if on {
-        let vr = table
-            .entry("vr")
-            .or_insert_with(|| toml::Value::Table(toml::Table::new()));
-        let toml::Value::Table(vr) = vr else {
-            return Err("[vr] is not a table in pw64.toml; not saved".to_string());
-        };
-        vr.insert(key.into(), toml::Value::Boolean(true));
-        write_table(&table)
-    } else {
-        // Off is the default: the same edit as a default-on key turned on.
-        write_table(&with_vr_bool(table, key, true)?)
-    }
-}
-
 /// [`save_vr_bool`]'s table edit (separate from the file I/O for tests).
 fn with_vr_bool(mut table: toml::Table, key: &str, on: bool) -> Result<toml::Table, String> {
     let vr = table
@@ -1089,6 +1083,22 @@ fn with_vr_offsets(
 /// `[vr] horizon_lock` values (`vr::HorizonLock`).
 pub const HORIZON_LOCK_VALUES: [&str; 3] = ["off", "bank", "full"];
 
+/// `[vr] diorama_mode` values (`vr::DioramaMode`).
+pub const DIORAMA_MODE_VALUES: [&str; 5] = [
+    "off",
+    "on",
+    "on_static",
+    "passthrough",
+    "passthrough_static",
+];
+
+/// Writes `[vr] diorama_mode`; the default (`"off"`) removes the key, and
+/// `[vr]` when nothing else is in it.
+pub fn save_vr_diorama_mode(value: &str) -> Result<(), String> {
+    let table = read_table()?;
+    write_table(&with_vr_choice(table, "diorama_mode", value, "off")?)
+}
+
 /// Writes `[vr] horizon_lock`; the default (`"bank"`) removes the key,
 /// and `[vr]` when nothing else is in it.
 pub fn save_vr_horizon_lock(value: &str) -> Result<(), String> {
@@ -1098,17 +1108,28 @@ pub fn save_vr_horizon_lock(value: &str) -> Result<(), String> {
 
 /// [`save_vr_horizon_lock`]'s table edit (separate from the file I/O for
 /// tests).
-fn with_vr_horizon_lock(mut table: toml::Table, value: &str) -> Result<toml::Table, String> {
+fn with_vr_horizon_lock(table: toml::Table, value: &str) -> Result<toml::Table, String> {
+    with_vr_choice(table, "horizon_lock", value, "bank")
+}
+
+/// Sets the `[vr]` text key `key` to `value`, or removes it when that is
+/// its `default`.
+fn with_vr_choice(
+    mut table: toml::Table,
+    key: &str,
+    value: &str,
+    default: &str,
+) -> Result<toml::Table, String> {
     let vr = table
         .entry("vr")
         .or_insert_with(|| toml::Value::Table(toml::Table::new()));
     let toml::Value::Table(vr) = vr else {
         return Err("[vr] is not a table in pw64.toml; not saved".to_string());
     };
-    if value == "bank" {
-        vr.remove("horizon_lock");
+    if value == default {
+        vr.remove(key);
     } else {
-        vr.insert("horizon_lock".into(), toml::Value::String(value.into()));
+        vr.insert(key.into(), toml::Value::String(value.into()));
     }
     if vr.is_empty() {
         table.remove("vr");
@@ -2003,6 +2024,16 @@ mod tests {
             (2.25, Some(fp))
         );
         assert!(with_vr_offsets(t, &[0.0; 7], &[0.0; 7]).unwrap().is_empty());
+        // `[vr] diorama_mode`: one of five words; saved unless off.
+        let c = parse("[vr]\ndiorama_mode = \"passthrough_static\"\n").unwrap();
+        assert_eq!(c.vr_diorama_mode.as_deref(), Some("passthrough_static"));
+        let c = parse("[vr]\ndiorama_mode = \"sideways\"\n").unwrap();
+        assert_eq!(c.vr_diorama_mode, None);
+        assert_eq!(c.ignored, vec!["vr.diorama_mode"]);
+        let t = with_vr_choice(toml::Table::new(), "diorama_mode", "on_static", "off").unwrap();
+        assert_eq!(from_table(&t).vr_diorama_mode.as_deref(), Some("on_static"));
+        let t = with_vr_choice(t, "diorama_mode", "off", "off").unwrap();
+        assert!(t.is_empty());
         let c = parse("[vr]\ngyro_windscreen = \"maybe\"\n").unwrap();
         assert_eq!(c.vr_gyro_windscreen, None);
         assert_eq!(c.ignored, vec!["vr.gyro_windscreen"]);
