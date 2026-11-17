@@ -260,8 +260,9 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   then turns slowly (dt x 0.75) and level. **At rest** (mode 3, the
   game's sweep in and orbit): held still 1 s, then a snap to a fixed 3 m
   shot from the crash camera's side; raised only when occluded.
-- **Hang glider**: first person from the eyes, (0, bar.y x 0.2 + 0.3,
-  bar.z x 0.85 + 0.5) in the glider frame (bar = the control bar corner
+- **Hang glider**: first person from the eyes, (0, bar.y x 0.2 + 0.2,
+  bar.z x 0.85 + 0.4) in the glider frame (0.1 m back and down from the
+  first tuning, headset) (bar = the control bar corner
   `unk27C`), level; tries before: 1 m behind at sail height (the game's),
   0.5 m lower and further back. Chase 50% closer (offset, 0.35 s delay,
   0.9-5 m clamps).
@@ -303,12 +304,48 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   person. Drawn in the main pass only, it was invisible on the headset:
   the first-person near plane is 3 m (camera.c).
   Headset: "really helped with immersion and not feeling nauseous". The
-  eye is 0.25 m further back than the game's (`PW64_VR_GYRO_EYE_BACK_M`,
-  gyrocopterEnterLeave; it was too close to the windscreen). The
+  eye is 0.15 m further back than the game's (`PW64_VR_GYRO_EYE_BACK_M`,
+  gyrocopterEnterLeave; the game's was too close to the windscreen, 0.25 m
+  a little far) and centred across the cockpit. The
   windscreen is part 9 of all six pilots' models (the only translucent
   part, `PW64_GYRO_WINDSCREEN_PART`); VR HUD > Gyrocopter windscreen
   (`[vr] gyro_windscreen`, `pw64_vr_gyro_windscreen`) hides it in first
   person, never from outside.
+- **Dashboard gauges** (gyrocopter first person, VR HUD > Throttle and map:
+  on the dashboard / with the gauges, `[vr] dash_gauges`, default on). The
+  game names a point on the dashboard's surface for each gauge every frame
+  (`pw64_vr_dash_set`; gyrocopter: `pw64_vr_gyro_dash`, per pilot model,
+  from the ROM's models: on the dashboard's middle line, 1 cm above the
+  surface, the throttle on the middle line, its top about 2 degrees below
+  the dashboard's tip (the windscreen's lower edge) as seen from that
+  pilot's eye; the map a row lower on the left side, 15 cm from the middle,
+  20 cm in the Hawk's and Robin's wider cockpits: in the middle the pilots'
+  right hand covered it a lot; 8 cm further forward in the Goose's and
+  Ibis's, whose knees came up there). At the end of the world view
+  `pw64_vr_dash_tag` sends them in the camera's space with the model's
+  right axis (`DASH_TAG`, nine floats; `Frame::dash`), so they stay on the
+  dashboard however the camera turns. The renderer draws each element in
+  `StereoEye::hud_dash` (`DashSlot`: point, offset, size; vr.rs
+  `DASH_SLOTS`) on a flat panel at its point (`DashPanel`, shader
+  `u.vr.w == 3`: facing the eye, level with the vehicle): the throttle at
+  2 mm per N64 px (12 cm wide), the map (radar, 70 x 70 px) at 1.4 mm
+  (10 cm). Drawn with the world's last pass (the cockpit's, after the
+  near-list depth clear) and depth tested as if 20% nearer
+  (`DashPanel::DEPTH_PULL`), so the pilot's hands pass in front and the
+  dashboard's own surface never hides them; drawn over everything in the
+  HUD pass, the hand went behind the gauge (headset). A first try offset
+  the gauges along one panel through a single point (5 cm up, map below):
+  up the panel is not along the sloping dashboard, so they sat off its
+  surface and too low.
+- **Rocket belt first person**: the eye 0.25 m further back than the
+  game's (`PW64_VR_RB_EYE_BACK_M`, rocketBeltEnterLeave; headset).
+- **Cannonball gauges** in VR, around the heading strip at the bottom
+  (`pw64_vr_hud_push/pop`: the HUD view matrix moved around their uvVtx
+  draws; offsets `PW64_VR_CB_*_DX/DY` in pw64_native.h, placed for the
+  default spread): the power bar left of it and the elevation meter right
+  of it, bottoms level with the strip's; the shots left (their own HUD
+  element now, "Shots", `cb_shots`, id 13; drawn with the power bar
+  before) centred just above it.
 - **Gyrocopter fuel gauge** in VR: moved for good to between the altimeter
   and the altitude (sea level) readout on the HUD sphere
   (`PW64_VR_GYRO_FUEL_X/Y`, 207, 53 in HUD px, y up; the flat game's

@@ -124,6 +124,9 @@ pub struct Config {
     /// `[vr] gyro_windscreen`: the gyrocopter's windscreen in VR first
     /// person (`None` = default, shown).
     pub vr_gyro_windscreen: Option<bool>,
+    /// `[vr] dash_gauges`: the throttle and the map on the cockpit's
+    /// dashboard in first person (`None` = default, on).
+    pub vr_dash_gauges: Option<bool>,
     /// Keys skipped at load (wrong type or invalid value; see `ignored_keys`).
     pub ignored: Vec<String>,
 }
@@ -893,10 +896,14 @@ fn from_table(table: &toml::Table) -> Config {
                         ),
                     }
                 }
-                if let Some(v) = t.get("gyro_windscreen") {
+                for (key, slot) in [
+                    ("gyro_windscreen", &mut cfg.vr_gyro_windscreen),
+                    ("dash_gauges", &mut cfg.vr_dash_gauges),
+                ] {
+                    let Some(v) = t.get(key) else { continue };
                     match coerce_bool(v) {
-                        Some(b) => cfg.vr_gyro_windscreen = Some(b),
-                        None => ignore(&mut ignored, "vr.gyro_windscreen", v, "use true or false"),
+                        Some(b) => *slot = Some(b),
+                        None => ignore(&mut ignored, &format!("vr.{key}"), v, "use true or false"),
                     }
                 }
                 if let Some(h) = t.get("hud_hidden") {
@@ -940,16 +947,16 @@ pub fn save_vr_hud_hidden(names: &[&str]) -> Result<(), String> {
     write_table(&with_vr_hud_hidden(table, names)?)
 }
 
-/// Writes `[vr] gyro_windscreen` (shown, the default, removes the key, and
-/// `[vr]` when nothing else is in it).
-pub fn save_vr_gyro_windscreen(on: bool) -> Result<(), String> {
+/// Writes a `[vr]` on/off key whose default is on (`gyro_windscreen`,
+/// `dash_gauges`): on removes the key, and `[vr]` when nothing else is
+/// in it.
+pub fn save_vr_bool(key: &str, on: bool) -> Result<(), String> {
     let table = read_table()?;
-    write_table(&with_vr_gyro_windscreen(table, on)?)
+    write_table(&with_vr_bool(table, key, on)?)
 }
 
-/// [`save_vr_gyro_windscreen`]'s table edit (separate from the file I/O for
-/// tests).
-fn with_vr_gyro_windscreen(mut table: toml::Table, on: bool) -> Result<toml::Table, String> {
+/// [`save_vr_bool`]'s table edit (separate from the file I/O for tests).
+fn with_vr_bool(mut table: toml::Table, key: &str, on: bool) -> Result<toml::Table, String> {
     let vr = table
         .entry("vr")
         .or_insert_with(|| toml::Value::Table(toml::Table::new()));
@@ -957,9 +964,9 @@ fn with_vr_gyro_windscreen(mut table: toml::Table, on: bool) -> Result<toml::Tab
         return Err("[vr] is not a table in pw64.toml; not saved".to_string());
     };
     if on {
-        vr.remove("gyro_windscreen");
+        vr.remove(key);
     } else {
-        vr.insert("gyro_windscreen".into(), toml::Value::Boolean(false));
+        vr.insert(key.into(), toml::Value::Boolean(false));
     }
     if vr.is_empty() {
         table.remove("vr");
@@ -1811,20 +1818,27 @@ mod tests {
         assert_eq!(c.ignored, vec!["vr.hud_distance"]);
     }
 
-    /// `[vr] gyro_windscreen`: parses (junk reported), round-trips, and
-    /// shown (the default) removes the key and an empty `[vr]`.
+    /// `[vr] gyro_windscreen` / `dash_gauges`: parse (junk reported),
+    /// round-trip, and on (the default) removes the key and an empty `[vr]`.
     #[test]
-    fn vr_gyro_windscreen_round_trip() {
+    fn vr_bools_round_trip() {
         assert_eq!(parse("").unwrap().vr_gyro_windscreen, None);
         let c = parse("[vr]\ngyro_windscreen = \"maybe\"\n").unwrap();
         assert_eq!(c.vr_gyro_windscreen, None);
         assert_eq!(c.ignored, vec!["vr.gyro_windscreen"]);
-        let t = with_vr_gyro_windscreen(toml::Table::new(), false).unwrap();
+        let t = with_vr_bool(toml::Table::new(), "gyro_windscreen", false).unwrap();
         assert_eq!(from_table(&t).vr_gyro_windscreen, Some(false));
-        let t = with_vr_gyro_windscreen(t, true).unwrap();
+        let t = with_vr_bool(t, "dash_gauges", false).unwrap();
+        let c = from_table(&t);
+        assert_eq!(
+            (c.vr_gyro_windscreen, c.vr_dash_gauges),
+            (Some(false), Some(false))
+        );
+        let t = with_vr_bool(t, "gyro_windscreen", true).unwrap();
+        let t = with_vr_bool(t, "dash_gauges", true).unwrap();
         assert!(!t.contains_key("vr"));
         let t: toml::Table = toml::from_str("[vr]\nhud_size = 1.0\n").unwrap();
-        let t = with_vr_gyro_windscreen(t, true).unwrap();
+        let t = with_vr_bool(t, "gyro_windscreen", true).unwrap();
         assert!(t.contains_key("vr"), "other [vr] keys kept");
     }
 

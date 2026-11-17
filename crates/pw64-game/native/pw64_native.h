@@ -114,8 +114,14 @@ extern int pw64_vr_gyro_windscreen;
  * translucent part; pw64-extract --models, models 0x127-0x133). */
 #define PW64_GYRO_WINDSCREEN_PART 9
 /* Birdman64VR: the gyrocopter's first-person eye this much further back
- * than the game's (code_7CF30.c.patch gyrocopterEnterLeave), metres. */
-#define PW64_VR_GYRO_EYE_BACK_M 0.25f
+ * than the game's (code_7CF30.c.patch gyrocopterEnterLeave), metres: the
+ * game's was too close to the windscreen, 0.25 m back was a little far, so
+ * 0.1 m forward again (headset). Centred across the cockpit too (the
+ * game's is up to 1.3 cm to the right). */
+#define PW64_VR_GYRO_EYE_BACK_M 0.15f
+/* Birdman64VR: the rocket belt's first-person eye this much further back
+ * than the game's (code_AC1A0.c.patch rocketBeltEnterLeave), metres. */
+#define PW64_VR_RB_EYE_BACK_M 0.25f
 /* Birdman64VR: the gyrocopter's fuel gauge in VR (hud.c.patch
  * hudDrawGyrocopter; the flat game's is at 98, 37), N64 HUD px, y up: on
  * the HUD sphere at the default spread (275%) its centre sits midway
@@ -123,6 +129,30 @@ extern int pw64_vr_gyro_windscreen;
  * below it, horizontally between their centres. */
 #define PW64_VR_GYRO_FUEL_X 207
 #define PW64_VR_GYRO_FUEL_Y 53
+/* Birdman64VR, same file: the cockpit dashboard's points of the vehicle in
+ * first person, one per dashboard gauge (2: throttle, map; model units,
+ * model frame), sent to the renderer each frame (VR HUD > Throttle and
+ * map); objId < 0 or points NULL: none. */
+void pw64_vr_dash_set(int objId, const float (*points)[3]);
+/* The gyrocopter's dashboard on (`on`) or off for dobj `objId` with model
+ * `modelId` (code_7CF30.c.patch, every frame). */
+void pw64_vr_gyro_dash(int objId, int modelId, int on);
+/* Birdman64VR, same file: a HUD part moved in VR by (dx, dy) N64 HUD px,
+ * y up (the view matrix around its uvVtx draws); push before, pop after. */
+void pw64_vr_hud_push(float dx, float dy);
+void pw64_vr_hud_pop(void);
+/* The cannonball's gauges around the heading strip at the bottom, on the
+ * HUD sphere at the default spread (275%; the strip is x 27-285, y 23-42):
+ * the power bar left of it and the elevation meter right of it, 8
+ * px-angles away, bottoms level with the strip's; the shots left centred
+ * just above it (their row is 16 px per shot wide, so x depends on the
+ * count: PW64_VR_CB_SHOTS_DX - 8 per shot after the first). */
+#define PW64_VR_CB_POWER_DX 65.0f
+#define PW64_VR_CB_POWER_DY -52.0f
+#define PW64_VR_CB_ELEVATION_DX -64.5f
+#define PW64_VR_CB_ELEVATION_DY -44.0f
+#define PW64_VR_CB_SHOTS_DX 120.5f
+#define PW64_VR_CB_SHOTS_DY -170.5f
 /* Birdman64VR, same file: outside a test's flight, a world view with
  * terrain is shown as a small model of the island (the "diorama": menus,
  * title fly-over, results, replays). 1 for such a channel
@@ -221,6 +251,7 @@ void pw64_hud_tag(int on);
 #define PW64_HUD_CB_POWER 10
 #define PW64_HUD_CB_HEADING 11
 #define PW64_HUD_CB_ELEVATION 12
+#define PW64_HUD_CB_SHOTS 13
 extern int pw64_hud_elem;
 void pw64_hud_element(int id);
 void pw64_hud_emit_element(int id);

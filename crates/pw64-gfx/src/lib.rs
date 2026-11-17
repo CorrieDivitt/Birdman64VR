@@ -22,11 +22,12 @@ pub mod renderer;
 pub mod shader;
 pub mod texture;
 
-pub use frame::{Anchor, Diorama, Frame, N64_HEIGHT, N64_WIDTH, Wide};
+pub use frame::{Anchor, Dash, Diorama, Frame, N64_HEIGHT, N64_WIDTH, Wide};
 pub use interp::Interpreter;
 pub use memory::{Memory, VecMemory};
 pub use renderer::{
-    FbOp, HudSphere, RenderOptions, Renderer, StereoClip, StereoEye, TexFilter, Widescreen,
+    DashSlot, FbOp, HudSphere, RenderOptions, Renderer, StereoClip, StereoEye, TexFilter,
+    Widescreen,
 };
 
 /// Device descriptor for a [`Renderer`] device. Optional features, each

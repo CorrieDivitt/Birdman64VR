@@ -1,6 +1,18 @@
 --- a/src/app/code_AC1A0.c
 +++ b/src/app/code_AC1A0.c
-@@ -145,6 +145,11 @@ void func_80325100(RocketBeltData* rbData) {
+@@ -129,6 +129,11 @@ void rocketBeltEnterLeave(RocketBeltData* rbData) {
+     rbData->camera->unk68.x = rbData->unk2B0;
+     rbData->camera->unk68.y = rbData->unk2B4;
+     rbData->camera->unk68.z = rbData->unk2B8;
++    // Birdman64VR: first person this much further back in the headset (in
++    // the pilot's frame, y forward; camera.c mode 1).
++    if (pw64_widescreen_aspect < 0.0f) {
++        rbData->camera->unk68.y -= PW64_VR_RB_EYE_BACK_M;
++    }
+     rbData->camera->unk74 = 0.0f;
+     rbData->camera->unk1B4 = 6.0f;
+     uvModelGetProps(rbData->modelId, MODEL_PROP_UNK1(&rbData->camera->unk8), MODEL_PROP_END);
+@@ -145,6 +150,11 @@ void func_80325100(RocketBeltData* rbData) {
      shadow_80334C70();
  }
  
@@ -12,7 +24,7 @@
  void rocketBeltMovementFrame(RocketBeltData* rbData, u8 gameState) {
      f32 spB4;
      f32 var_fv0_3;
-@@ -175,7 +180,11 @@ void rocketBeltMovementFrame(RocketBeltData* rbData, u8 gameState) {
+@@ -175,7 +185,11 @@ void rocketBeltMovementFrame(RocketBeltData* rbData, u8 gameState) {
          rbData->unk68 = stickX;
          rbData->unk6C = stickY;
          if ((rbData->unk8 > 0.0f) || (buttons & (A_BUTTON | B_BUTTON))) {
@@ -25,7 +37,7 @@
          }
  
          rbData->unk70 = func_80313F08(&D_80371070, ABS_NOEQ(stickX));
-@@ -214,14 +223,23 @@ void rocketBeltMovementFrame(RocketBeltData* rbData, u8 gameState) {
+@@ -214,14 +228,23 @@ void rocketBeltMovementFrame(RocketBeltData* rbData, u8 gameState) {
              rbData->unk78 = 0.0f;
          }
          if ((demoButtonPress(rbData->contIdx, R_TRIG) != 0) && (gameState != GAME_STATE_RESULTS)) {
@@ -51,7 +63,7 @@
              rbData->unk60 = 0.8f;
              if (gameState != GAME_STATE_RESULTS) {
                  sndPlaySfxVolPitchPan(SFX_UI_CAMERA_MOVE, 0.3f, 0.65f, 0.0f);
-@@ -369,11 +387,14 @@ void rocketBeltMovementFrame(RocketBeltData* rbData, u8 gameState) {
+@@ -369,11 +392,14 @@ void rocketBeltMovementFrame(RocketBeltData* rbData, u8 gameState) {
                  } else {
                      hud->speed = rbData->unk1F4 * 3.6f * 0.7f;
                  }
@@ -68,7 +80,7 @@
                  } else {
                      if ((rbData->unkF8 <= 0.0f) && (rbData->unkEC == 0)) {
                          hudWarningText(TEXT_FUEL_OUT, 1.5f, 8.0f);
-@@ -851,3 +872,8 @@ void func_80326E40(RocketBeltData* rbData) {
+@@ -851,3 +877,13 @@ void func_80326E40(RocketBeltData* rbData) {
      }
      uvDobjState(rbData->objId, rbData->unk2);
 +    // PW64 split-screen: the first-person near draw and pilot hide apply to

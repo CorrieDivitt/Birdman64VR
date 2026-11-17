@@ -139,6 +139,7 @@ fn frame(
         chains: HashMap::new(),
         views: Vec::new(),
         diorama: None,
+        dash: None,
     }
 }
 

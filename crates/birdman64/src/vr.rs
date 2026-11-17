@@ -194,8 +194,36 @@ pub(crate) fn gyro_windscreen() -> bool {
 pub(crate) fn set_gyro_windscreen(on: bool) {
     GYRO_WINDSCREEN.store(if on { 1 } else { 2 }, Ordering::Relaxed);
     HUD_CHANGED.store(true, Ordering::Relaxed);
-    if let Err(e) = crate::config::save_vr_gyro_windscreen(on) {
+    if let Err(e) = crate::config::save_vr_bool("gyro_windscreen", on) {
         eprintln!("[vr] windscreen choice not saved: {e}");
+    }
+}
+
+/// The throttle and the map (radar) on the cockpit's dashboard in first
+/// person, where the game gives one (`[vr] dash_gauges`, the settings' VR
+/// HUD page; the gyrocopter): 0 = not loaded yet, 1 = on, 2 = off (on the
+/// sphere).
+static DASH_GAUGES: AtomicU8 = AtomicU8::new(0);
+
+/// Whether the throttle and the map sit on the cockpit's dashboard.
+pub(crate) fn dash_gauges() -> bool {
+    match DASH_GAUGES.load(Ordering::Relaxed) {
+        0 => {
+            let on = crate::config::get().vr_dash_gauges.unwrap_or(true);
+            DASH_GAUGES.store(if on { 1 } else { 2 }, Ordering::Relaxed);
+            on
+        }
+        v => v == 1,
+    }
+}
+
+/// Puts the throttle and the map on the dashboard or back on the sphere
+/// and saves the choice.
+pub(crate) fn set_dash_gauges(on: bool) {
+    DASH_GAUGES.store(if on { 1 } else { 2 }, Ordering::Relaxed);
+    HUD_CHANGED.store(true, Ordering::Relaxed);
+    if let Err(e) = crate::config::save_vr_bool("dash_gauges", on) {
+        eprintln!("[vr] dashboard choice not saved: {e}");
     }
 }
 
@@ -719,8 +747,33 @@ mod real {
             background: None,
             hud_sphere: Some(hud_sphere),
             hud_hidden: super::hud_hidden(),
+            hud_dash: if super::dash_gauges() {
+                &DASH_SLOTS
+            } else {
+                &[]
+            },
         }
     }
+
+    /// The gauges on the cockpit's dashboard ([`pw64_gfx::DashSlot`]; the
+    /// game sends a point on the dashboard's surface for each,
+    /// `pw64_vr_gyro_dash`): the throttle (`hud_edit::ELEMENTS` id 3, about
+    /// 62 x 32 N64 px, 12 x 6 cm) just below the dashboard's tip, the map
+    /// (radar, id 6, 70 x 70 px, 10 cm across) lower, on the left side.
+    const DASH_SLOTS: [pw64_gfx::DashSlot; 2] = [
+        pw64_gfx::DashSlot {
+            elem: 3,
+            point: 0,
+            offset: [0.0; 2],
+            m_per_px: 0.002,
+        },
+        pw64_gfx::DashSlot {
+            elem: 6,
+            point: 1,
+            offset: [0.0; 2],
+            m_per_px: 0.0014,
+        },
+    ];
 
     /// The flight HUD on a sphere around the player ([`pw64_gfx::HudSphere`],
     /// placed by [`super::HudLayout`]): the size of an N64 pixel at size 1,
@@ -1841,6 +1894,20 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         /// The eye matrices: the world straight ahead lands in the middle
         /// of a symmetric eye with reversed depth; the N64 screen lands on
         /// the panel, its top-left corner up and to the left.
+        /// The dashboard slots name the throttle and the map by their
+        /// `hud_edit::ELEMENTS` ids.
+        #[test]
+        fn dash_slots_are_throttle_and_map() {
+            let ids: Vec<u8> = super::DASH_SLOTS.iter().map(|s| s.elem).collect();
+            assert_eq!(
+                ids,
+                [
+                    crate::hud_edit::element_id("throttle").unwrap(),
+                    crate::hud_edit::element_id("radar").unwrap()
+                ]
+            );
+        }
+
         #[test]
         fn stereo_eye_matrices() {
             let fov = std::f32::consts::FRAC_PI_4;

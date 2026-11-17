@@ -273,6 +273,25 @@ pub struct Frame {
     /// Birdman64VR: the world view is to be shown as a small model of the
     /// island (outside flight; `pw64_vr_diorama` on the C side).
     pub diorama: Option<Diorama>,
+    /// Birdman64VR: the cockpit's dashboard in first person
+    /// (`pw64_vr_dash_tag`), where a flight gauge can sit instead of the
+    /// HUD sphere ([`crate::StereoEye::hud_dash`]).
+    pub dash: Option<Dash>,
+}
+
+/// Birdman64VR: points on the vehicle's dashboard, one per dashboard gauge
+/// ([`crate::DashSlot::point`]), as the game camera sees them (x right, y
+/// up, -z forward, game units = metres; the same space as
+/// [`Frame::views`]), with the vehicle's right axis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Dash {
+    pub points: [[f32; 3]; Dash::POINTS],
+    pub right: [f32; 3],
+}
+
+impl Dash {
+    /// How many points the game sends (`PW64_DASH_POINTS`).
+    pub const POINTS: usize = 2;
 }
 
 /// Birdman64VR: what the game told the renderer about a world view shown
