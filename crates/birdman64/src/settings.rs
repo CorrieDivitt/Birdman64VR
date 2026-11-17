@@ -252,6 +252,10 @@ const VR_HIDDEN_GRAPHICS: [Opt; 10] = [
     Opt::TexFilter,
 ];
 
+/// `VEHICLE_GYROCOPTER` (decomp): the vehicle with the windscreen and
+/// dashboard rows on the VR HUD page.
+const VEHICLE_GYROCOPTER: u8 = 2;
+
 /// How many pages (`Page::index` is the slot).
 const N_PAGES: usize = 6;
 
@@ -508,6 +512,9 @@ pub struct Overlay {
     /// process-wide VR mode under other tests.
     #[cfg(test)]
     force_vr: bool,
+    /// Tests: the vehicle flown (`hud_vehicle`; Some(-1) = a menu).
+    #[cfg(test)]
+    force_vehicle: Option<i32>,
     renderer: Option<EguiRenderer>,
     /// Cleared by Escape / B / Start / Close / the window's X; the window
     /// closes the overlay when `render` returns false.
@@ -729,6 +736,8 @@ impl Overlay {
         Self {
             #[cfg(test)]
             force_vr: false,
+            #[cfg(test)]
+            force_vehicle: None,
             ctx: egui::Context::default(),
             renderer: None,
             show: false,
@@ -1800,6 +1809,16 @@ impl Overlay {
     /// Every selectable row of the current page, in navigation order
     /// (U2 pages). `ui_rows` draws exactly these, so keyboard/pad selection
     /// and mouse clicks stay in sync.
+    /// The vehicle being flown in VR (`VEHICLE_*`), `None` in a menu: the VR
+    /// HUD page then offers every option (p9).
+    fn hud_vehicle(&self) -> Option<u8> {
+        #[cfg(test)]
+        if let Some(v) = self.force_vehicle {
+            return u8::try_from(v).ok();
+        }
+        pw64_game::vr_flight_vehicle()
+    }
+
     /// The pages are laid out for the headset (`VR_HIDDEN_*`, VR HUD page).
     fn in_vr(&self) -> bool {
         #[cfg(test)]
@@ -1940,15 +1959,23 @@ impl Overlay {
             ],
             // Performance overlay: the counter first (the simple case), then
             // the opt-in extras.
+            // p9: in a flight only what the vehicle has (its HUD elements,
+            // the gyrocopter's windscreen and dashboard rows); in a menu
+            // everything.
             Page::VrHud => {
-                let mut rows = vec![
-                    Row::HudDistance,
-                    Row::HudSpread,
-                    Row::HudSize,
-                    Row::GyroWindscreen,
-                    Row::DashGauges,
-                ];
-                rows.extend(crate::hud_edit::ELEMENTS.iter().map(|e| Row::HudShow(e.0)));
+                let vehicle = self.hud_vehicle();
+                let gyro = vehicle.is_none_or(|v| v == VEHICLE_GYROCOPTER);
+                let mut rows = vec![Row::HudDistance, Row::HudSpread, Row::HudSize];
+                if gyro {
+                    rows.extend([Row::GyroWindscreen, Row::DashGauges]);
+                }
+                let elems = vehicle.map(crate::hud_edit::vehicle_elements);
+                rows.extend(
+                    crate::hud_edit::ELEMENTS
+                        .iter()
+                        .filter(|e| elems.is_none_or(|v| v.contains(&e.0)))
+                        .map(|e| Row::HudShow(e.0)),
+                );
                 rows.push(Row::Back);
                 rows
             }
@@ -2311,27 +2338,35 @@ impl Overlay {
                 } else {
                     "hidden"
                 };
-                self.text_row(
-                    ui,
-                    at(Row::GyroWindscreen),
-                    &format!("Gyrocopter windscreen: {ws}"),
-                );
+                // Gyrocopter rows: only there in a menu or in the gyrocopter.
+                if rows.contains(&Row::GyroWindscreen) {
+                    self.text_row(
+                        ui,
+                        at(Row::GyroWindscreen),
+                        &format!("Gyrocopter windscreen: {ws}"),
+                    );
+                }
                 let dash = if crate::vr::dash_gauges() {
                     "on the dashboard"
                 } else {
                     "with the gauges"
                 };
-                self.text_row(
-                    ui,
-                    at(Row::DashGauges),
-                    &format!("Throttle and map: {dash}"),
-                );
+                if rows.contains(&Row::DashGauges) {
+                    self.text_row(
+                        ui,
+                        at(Row::DashGauges),
+                        &format!("Throttle and map: {dash}"),
+                    );
+                }
                 ui.add_space(4.0);
                 let hidden = crate::vr::hud_hidden();
                 for &(id, _, name) in &crate::hud_edit::ELEMENTS {
                     let shown = hidden & (1 << id) == 0;
                     let text = format!("{name}: {}", if shown { "shown" } else { "hidden" });
-                    self.text_row(ui, at(Row::HudShow(id)), &text);
+                    // p9: only this vehicle's elements in a flight.
+                    if rows.contains(&Row::HudShow(id)) {
+                        self.text_row(ui, at(Row::HudShow(id)), &text);
+                    }
                 }
                 ui.add_space(4.0);
                 self.text_row(ui, at(Row::Back), "\u{2039} Back");
@@ -5040,6 +5075,44 @@ mod tests {
             assert_eq!(o.rows().contains(&Row::Opt(Opt::Widescreen)), !vr);
             assert_eq!(o.rows().contains(&Row::Opt(Opt::TexFilter)), !vr);
             assert!(o.rows().contains(&Row::Opt(Opt::Msaa)));
+        }
+    }
+
+    /// p9: in a flight the VR HUD page offers only the vehicle's options
+    /// (no fuel gauge in the hang glider, the windscreen only in the
+    /// gyrocopter); in a menu all of them. Every variant draws.
+    #[test]
+    fn vr_hud_page_follows_the_vehicle() {
+        let mut o = Overlay::new();
+        o.force_vr = true;
+        o.page = Page::VrHud;
+        let rows = |o: &mut Overlay, v: i32| {
+            o.force_vehicle = Some(v);
+            let ctx = egui::Context::default();
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| o.ui_rows(ui));
+            });
+            o.rows()
+        };
+        let menu = rows(&mut o, -1);
+        assert!(menu.contains(&Row::GyroWindscreen) && menu.contains(&Row::HudShow(4)));
+        assert_eq!(
+            menu.iter().filter(|r| matches!(r, Row::HudShow(_))).count(),
+            crate::hud_edit::ELEMENTS.len()
+        );
+        let glider = rows(&mut o, 0);
+        assert!(!glider.contains(&Row::HudShow(4)), "no fuel gauge");
+        assert!(!glider.contains(&Row::GyroWindscreen) && !glider.contains(&Row::DashGauges));
+        assert!(glider.contains(&Row::HudShow(8)), "photos");
+        let gyro = rows(&mut o, 2);
+        assert!(gyro.contains(&Row::GyroWindscreen) && gyro.contains(&Row::DashGauges));
+        assert!(gyro.contains(&Row::HudShow(3)) && gyro.contains(&Row::HudShow(4)));
+        let cannon = rows(&mut o, 3);
+        assert!(cannon.contains(&Row::HudShow(13)) && !cannon.contains(&Row::HudShow(2)));
+        for v in 1..=6 {
+            let r = rows(&mut o, v);
+            assert!(r.contains(&Row::HudDistance) && r.contains(&Row::Back));
+            assert!(r.contains(&Row::HudShow(9)), "messages for every vehicle");
         }
     }
 

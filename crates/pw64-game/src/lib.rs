@@ -65,6 +65,8 @@ unsafe extern "C" {
     /// native/src/pw64_widescreen.c: the gyrocopter's windscreen in VR
     /// first person, 0 = hidden.
     static mut pw64_vr_gyro_windscreen: i32;
+    /// native/src/pw64_widescreen.c: the vehicle flown in VR, -1 none.
+    fn pw64_vr_flight_vehicle() -> i32;
 }
 
 /// Infinite LOD (models always at their most detailed level) and infinite
@@ -292,6 +294,22 @@ pub fn set_vr_hud_rad_per_px(rad: f32) {
     if let Some(g) = dylib::try_game() {
         unsafe { *g.vr_hud_rad_per_px = rad };
     }
+}
+
+/// Birdman64VR: the vehicle being flown in VR (`VEHICLE_*`: 0 hang glider,
+/// 1 rocket belt, 2 gyrocopter, 3 cannonball, 4 sky diving, 5 jumble
+/// hopper, 6 birdman), `None` outside a flight or VR (or before the game
+/// module loads). For the VR HUD page (p9).
+pub fn vr_flight_vehicle() -> Option<u8> {
+    #[cfg(feature = "static")]
+    // SAFETY: reads the game's state (plain ints); called any time.
+    let v = unsafe { pw64_vr_flight_vehicle() };
+    #[cfg(feature = "dylib")]
+    // SAFETY: same function, exported by the loaded game module.
+    let v = dylib::try_game().map_or(-1, |g| unsafe { (g.vr_flight_vehicle)() });
+    #[cfg(not(any(feature = "static", feature = "dylib")))]
+    let v = -1;
+    u8::try_from(v).ok()
 }
 
 /// Birdman64VR: whether the gyrocopter's windscreen shows in VR first

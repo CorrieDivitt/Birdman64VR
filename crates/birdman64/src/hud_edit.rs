@@ -37,6 +37,25 @@ pub const ELEMENTS: [(u8, &str, &str); 13] = [
     (13, "cb_shots", "Shots"),
 ];
 
+/// Birdman64VR (p9): the [`ELEMENTS`] each vehicle's flight HUD draws
+/// (decomp hud.c `hudDraw<Vehicle>`), `VEHICLE_*` order: 0 hang glider,
+/// 1 rocket belt, 2 gyrocopter, 3 cannonball, 4 sky diving, 5 jumble
+/// hopper, 6 birdman. Messages (warnings, start text) show for every
+/// vehicle; the cannonball's own gauges while aiming, the usual ones in
+/// flight. The VR HUD page offers only these in a flight.
+pub fn vehicle_elements(vehicle: u8) -> &'static [u8] {
+    match vehicle {
+        0 => &[1, 2, 5, 6, 7, 8, 9],
+        1 => &[1, 2, 4, 5, 6, 7, 9],
+        2 => &[1, 2, 3, 4, 5, 6, 7, 9],
+        3 => &[1, 5, 6, 7, 9, 10, 11, 12, 13],
+        4 => &[2, 5, 6, 7, 9],
+        5 => &[1, 2, 5, 6, 7, 9],
+        6 => &[1, 5, 7, 8, 9],
+        _ => &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+    }
+}
+
 /// The id of a `[hud]` key.
 pub fn element_id(name: &str) -> Option<u8> {
     ELEMENTS.iter().find(|e| e.1 == name).map(|e| e.0)
