@@ -629,6 +629,13 @@ for both, each with and without passthrough.
   (UP tag) is not 1: R on the pad still gives the game's first-person
   view, full size. No horizon lock and no chase-distance stick in this
   view; the HUD sphere stays.
+- No flight HUD while the mode is not off (the user, round 3), in the
+  model view and in the game's first-person view (R) alike:
+  `StereoEye::hide_hud` drops every draw after the world inside the game's
+  HUD bracket (`DrawCall::hud`, `pw64_hud_tag` around `hudMainRender`,
+  which also flushes the HUD's queued text), except the full-screen fades.
+  The pause menu (test_menu.c, its own frames and text flush) is outside
+  that bracket and stays; the photo blink is the headset's own.
 - Log: `diorama mode on (<choice>): vehicle …, bounds …` / `diorama mode
   off`.
 - Open: the game still fogs and picks detail by its own chase camera.

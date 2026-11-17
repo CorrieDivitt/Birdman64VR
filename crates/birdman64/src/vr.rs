@@ -1043,6 +1043,7 @@ mod real {
             },
             sight: None,
             hide_env: false,
+            hide_hud: false,
         }
     }
 
@@ -1781,6 +1782,11 @@ mod real {
                 // p12: the island model in the player's room.
                 if matrices.clip.is_some() && super::passthrough_on() {
                     matrices.background = Some(MODEL_BACKGROUND_ROOM);
+                }
+                // Diorama mode: no flight HUD while it is on, in the model
+                // view and in the game's first-person view alike.
+                if frame.diorama.is_none() && mode != super::DioramaMode::Off {
+                    matrices.hide_hud = true;
                 }
                 // Horizon lock, in flight: the world level, the vehicle
                 // (and its cockpit, in camera space) banking around the

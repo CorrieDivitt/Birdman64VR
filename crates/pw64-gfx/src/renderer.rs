@@ -188,6 +188,11 @@ pub struct StereoEye {
     /// any other backdrop drawn with neither depth test nor write), so the
     /// background shows around the land.
     pub hide_env: bool,
+    /// Birdman64VR, diorama mode: leave out the flight HUD (every draw in
+    /// the game's HUD bracket, [`DrawCall::hud`]: gauges, reticles and the
+    /// HUD's text). The game's full-screen fades and its pause menu (drawn
+    /// outside that bracket) stay.
+    pub hide_hud: bool,
 }
 
 /// Birdman64VR: where one HUD element sits on the dashboard
@@ -282,6 +287,18 @@ const EYE_FADE: Mat4 = [
     [0.0, 0.0, 1.0, 0.0],
     [0.0, 0.0, 0.0, 1.0],
 ];
+
+/// Birdman64VR, diorama mode ([`StereoEye::hide_hud`]): `d` is a flight-HUD
+/// draw after the world starts and not one of the game's full-screen fades
+/// (`fade`), so it is left out.
+fn hud_hidden_whole(
+    eye: &StereoEye,
+    d: &crate::frame::DrawCall,
+    fade: bool,
+    after_world: bool,
+) -> bool {
+    eye.hide_hud && after_world && d.view == 0 && d.hud && !fade
+}
 
 /// The flight HUD on the inside of a sphere around the player
 /// ([`StereoEye::hud_sphere`]): an N64 screen point `(x, y)` is seen at
@@ -1689,6 +1706,10 @@ impl Renderer {
             {
                 continue;
             }
+            // Diorama mode: no flight HUD.
+            if hud_hidden_whole(eye, d, fade, i > first_world) {
+                continue;
+            }
             // Diorama mode: no sky and no sea at all.
             if eye.hide_env && d.env {
                 continue;
@@ -2408,6 +2429,50 @@ mod tests {
         assert!(Frame::default().is_blank());
     }
 
+    /// Birdman64VR diorama mode: only the flight HUD's draws are left out,
+    /// and only when asked; fades, the world and other 2D (the pause menu)
+    /// stay.
+    #[test]
+    fn diorama_mode_hides_only_the_flight_hud() {
+        let mut eye = StereoEye {
+            world: matrix::IDENTITY,
+            hud: matrix::IDENTITY,
+            clip: None,
+            background: None,
+            hud_sphere: None,
+            hud_hidden: 0,
+            hud_dash: &[],
+            sight: None,
+            hide_env: false,
+            hide_hud: false,
+        };
+        let mut d = red_green_frame().draws[0].clone();
+        d.view = 0;
+        d.hud = true;
+        assert!(!super::hud_hidden_whole(&eye, &d, false, true));
+        eye.hide_hud = true;
+        assert!(super::hud_hidden_whole(&eye, &d, false, true));
+        assert!(
+            !super::hud_hidden_whole(&eye, &d, true, true),
+            "a fade stays"
+        );
+        assert!(
+            !super::hud_hidden_whole(&eye, &d, false, false),
+            "before the world"
+        );
+        d.hud = false;
+        assert!(
+            !super::hud_hidden_whole(&eye, &d, false, true),
+            "pause menu stays"
+        );
+        d.hud = true;
+        d.view = 1;
+        assert!(
+            !super::hud_hidden_whole(&eye, &d, false, true),
+            "the world stays"
+        );
+    }
+
     /// Birdman64VR: a world view drawn through `render_stereo` with an eye
     /// matrix that repeats the game's own projection, viewport and screen
     /// transform gives the flat picture; and a narrower eye shows the same
@@ -2532,6 +2597,7 @@ mod tests {
             hud_dash: &[],
             sight: None,
             hide_env: false,
+            hide_hud: false,
         };
         r.render_stereo(&frame, &view, (w, h), &eye);
         let stereo = read_rgba(&device, &queue, &tex);
