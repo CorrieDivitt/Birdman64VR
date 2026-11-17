@@ -427,11 +427,12 @@ drives two VR things (input.rs `right_stick`: each source's raw stick,
 gilrs pads, the Android/iOS pad, the Touch controllers; the furthest pushed
 wins; dead zone 0.2):
 
-- **Chase distance, in flight:** up brings the chase camera nearer, down
-  takes it further (4 m/s), per vehicle, -2 to +15 m from the game's own
-  spot, saved when the stick is let go (`[vr] chase_offsets`, seven numbers
-  in `VEHICLE_*` order). Only in chase views: the "UP" tag's fifth value is
-  the player camera's mode (camera.c 0, 4, 7, 9). A camera-space
+- **Camera distance, in flight:** up brings the camera nearer, down takes
+  it further, per vehicle, saved when the stick is let go: chase views
+  (camera.c modes 0, 4, 7, 9) 4 m/s, -2 to +30 m (`[vr] chase_offsets`);
+  first person (mode 1) 2 m/s, 1 m either way (`[vr]
+  first_person_offsets`); seven numbers each in `VEHICLE_*` order
+  (`vr::ViewKind`). The "UP" tag's fifth value is the player camera's mode. A camera-space
   translation along the view in front of `StereoEye::world` (the vehicle
   stays centred; the game's ground collision does not know about it).
 - **The island model, in the menus:** left/right turns it about its
@@ -439,6 +440,8 @@ wins; dead zone 0.2):
   0.6 rad), between the island's frame and its placement (`diorama_eye`
   `spin`; the cut to its cylinder stays in the island's own frame). Not on
   the title or a badge celebration. Kept until the app restarts.
+- **L / R zoom the island model** in the menus (player 1's buttons,
+  `input::p1_buttons`; e^0.7 per second, 0.5x to 2.5x).
 - Sky diving has no horizon lock either (the "UP" tag's fourth value).
 
 ## Transitions (w8)
@@ -454,6 +457,19 @@ wins; dead zone 0.2):
   world starts, `Wide::Stretch`) were dropped in stereo: now drawn over the
   whole eye (`EYE_FADE`, 3x the eye in N64 clip space, no depth test, last
   pass), not on the HUD sphere.
+
+## Island model sky, photo shutter (polish)
+
+- The island model has no sky: the game's sky dome is centred on its
+  camera, so pieces of it fell inside the model's cylinder (a ragged sky
+  behind the island). World draws with neither depth test nor write are
+  skipped when `StereoEye::clip` is set.
+- Taking a photo: the shutter's two bars (hud.c `hudDrawCamera`) were a
+  black square on the HUD sphere; in VR one full-screen fill instead
+  (`pw64_vr_shutter`, alpha by how far it closed), drawn over the whole eye
+  like the game's fades. The photo the game renders into a small viewport
+  (perspective draws outside the world view, `elem` 0: clip w not 1) is not
+  shown in the headset.
 
 ## Horizon lock (c5)
 

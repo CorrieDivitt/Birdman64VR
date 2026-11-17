@@ -199,45 +199,71 @@ pub(crate) fn set_gyro_windscreen(on: bool) {
     }
 }
 
-/// p8: how much further back (metres; negative nearer) each vehicle's chase
-/// camera sits in VR, set with the right stick (`[vr] chase_offsets`, one
-/// per `VEHICLE_*`). `None` until loaded.
-static CHASE: std::sync::Mutex<Option<[f32; 7]>> = std::sync::Mutex::new(None);
+/// p8: how much further back (metres; negative nearer) each vehicle's
+/// camera sits in VR, set with the right stick, one per `VEHICLE_*`: chase
+/// views (`[vr] chase_offsets`) and first person (`[vr]
+/// first_person_offsets`). `None` until loaded.
+static OFFSETS: std::sync::Mutex<Option<[[f32; 7]; 2]>> = std::sync::Mutex::new(None);
 
-/// The chase offset range, metres: nearer than 2 m in front of the game's
-/// own spot runs into the vehicle; 15 m back is far enough.
-pub(crate) const CHASE_RANGE: (f32, f32) = (-2.0, 15.0);
+/// Which camera an offset is for ([`OFFSETS`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ViewKind {
+    Chase,
+    FirstPerson,
+}
 
-fn chase_table() -> std::sync::MutexGuard<'static, Option<[f32; 7]>> {
-    let mut t = CHASE.lock().unwrap_or_else(|e| e.into_inner());
+impl ViewKind {
+    /// The offset range, metres back: chase nearer than 2 m in front of the
+    /// game's own spot runs into the vehicle, 30 m back is far enough; first
+    /// person 1 m either way (the user, in the headset).
+    pub(crate) fn range(self) -> (f32, f32) {
+        match self {
+            ViewKind::Chase => (-2.0, 30.0),
+            ViewKind::FirstPerson => (-1.0, 1.0),
+        }
+    }
+}
+
+fn offset_table() -> std::sync::MutexGuard<'static, Option<[[f32; 7]; 2]>> {
+    let mut t = OFFSETS.lock().unwrap_or_else(|e| e.into_inner());
     if t.is_none() {
-        *t = Some(crate::config::get().vr_chase_offsets.unwrap_or([0.0; 7]));
+        let c = crate::config::get();
+        *t = Some([
+            c.vr_chase_offsets.unwrap_or([0.0; 7]),
+            c.vr_first_person_offsets.unwrap_or([0.0; 7]),
+        ]);
     }
     t
 }
 
-/// The chase camera's offset for `vehicle` (metres back).
-pub(crate) fn chase_offset(vehicle: u8) -> f32 {
-    chase_table().map_or(0.0, |t| t.get(vehicle as usize).copied().unwrap_or(0.0))
+/// The camera offset for `vehicle` in `kind` (metres back).
+pub(crate) fn view_offset(kind: ViewKind, vehicle: u8) -> f32 {
+    offset_table().map_or(0.0, |t| {
+        t[kind as usize]
+            .get(vehicle as usize)
+            .copied()
+            .unwrap_or(0.0)
+    })
 }
 
-/// Moves `vehicle`'s chase camera by `d` metres (back), within
-/// [`CHASE_RANGE`]; [`save_chase`] writes it.
-pub(crate) fn nudge_chase(vehicle: u8, d: f32) {
-    if let Some(t) = chase_table().as_mut()
-        && let Some(o) = t.get_mut(vehicle as usize)
+/// Moves `vehicle`'s `kind` camera by `d` metres (back), within its range;
+/// [`save_offsets`] writes it.
+pub(crate) fn nudge_offset(kind: ViewKind, vehicle: u8, d: f32) {
+    let (lo, hi) = kind.range();
+    if let Some(t) = offset_table().as_mut()
+        && let Some(o) = t[kind as usize].get_mut(vehicle as usize)
     {
-        *o = (*o + d).clamp(CHASE_RANGE.0, CHASE_RANGE.1);
+        *o = (*o + d).clamp(lo, hi);
     }
 }
 
-/// Saves the chase offsets (`[vr] chase_offsets`).
-pub(crate) fn save_chase() {
-    let t = *chase_table();
-    if let Some(t) = t
-        && let Err(e) = crate::config::save_vr_chase_offsets(&t)
+/// Saves the camera offsets (`[vr] chase_offsets`, `first_person_offsets`).
+pub(crate) fn save_offsets() {
+    let t = *offset_table();
+    if let Some([chase, fp]) = t
+        && let Err(e) = crate::config::save_vr_offsets(&chase, &fp)
     {
-        eprintln!("[vr] chase distances not saved: {e}");
+        eprintln!("[vr] camera distances not saved: {e}");
     }
 }
 
@@ -1014,11 +1040,12 @@ mod real {
     /// Cut to that cylinder and a little above the highest terrain, which
     /// leaves out the far sea and the sky dome.
     /// `spin`: the island model's turn (radians about its vertical axis)
-    /// and tilt (radians, far side up) from the right stick (p8).
+    /// and tilt (radians, far side up) from the right stick, and its zoom
+    /// (L / R) (p8).
     pub(super) fn diorama_eye(
         pose: &EyePose,
         d: &pw64_gfx::Diorama,
-        spin: [f32; 2],
+        spin: [f32; 3],
     ) -> pw64_gfx::StereoEye {
         use pw64_gfx::matrix::mul;
         // The title: full size, following the game camera (which the
@@ -1052,7 +1079,7 @@ mod real {
         let [x0, y0, _, x1, y1, z1] = d.bounds;
         let radius = 0.5 * (x1 - x0).max(y1 - y0).max(1.0);
         let top = z1.max(0.0) + 0.15 * radius;
-        let s = MODEL_DIAMETER_M / (2.0 * radius);
+        let s = MODEL_DIAMETER_M / (2.0 * radius) * spin[2];
         // Game world → relative to the island's middle at sea level.
         let centre: Mat4 = [
             [1.0, 0.0, 0.0, 0.0],
@@ -1121,9 +1148,9 @@ mod real {
         /// 2D screens change their draw count often).
         flat_lines: u32,
         /// p8: the island model's turn and tilt from the right stick
-        /// (radians), when the stick was last read, and a chase distance
-        /// change not saved yet.
-        spin: [f32; 2],
+        /// (radians) and its zoom (L / R), when the stick was last read,
+        /// and a camera distance change not saved yet.
+        spin: [f32; 3],
         stick_at: Instant,
         chase_dirty: bool,
         /// The last stereo frame was the island model ([`diorama_eye`]).
@@ -1204,7 +1231,7 @@ mod real {
                     void: false,
                     flat_logged: None,
                     flat_lines: 0,
-                    spin: [0.0; 2],
+                    spin: [0.0, 0.0, 1.0],
                     stick_at: Instant::now(),
                     chase_dirty: false,
                     model: false,
@@ -1428,30 +1455,44 @@ mod real {
                 let m = (v.abs() - STICK_DEADZONE).max(0.0) / (1.0 - STICK_DEADZONE);
                 m.copysign(v)
             });
-            let chase = frame
+            let camera = frame
                 .up
-                .filter(|u| CHASE_MODES.contains(&(u[4] as i32)))
-                .and_then(|_| pw64_game::vr_flight_vehicle())
-                .filter(|_| frame.diorama.is_none());
+                .filter(|_| frame.diorama.is_none())
+                .and_then(|u| match u[4] as i32 {
+                    m if CHASE_MODES.contains(&m) => Some(super::ViewKind::Chase),
+                    1 => Some(super::ViewKind::FirstPerson),
+                    _ => None,
+                })
+                .zip(pw64_game::vr_flight_vehicle());
             match &frame.diorama {
                 Some(d) if !d.title && !d.celebration => {
                     self.spin[0] += stick[0] * SPIN_RAD_PER_S * dt;
                     self.spin[1] =
                         (self.spin[1] + stick[1] * TILT_RAD_PER_S * dt).clamp(-TILT_MAX, TILT_MAX);
+                    // L / R: zoom out / in.
+                    let b = crate::input::p1_buttons();
+                    let dir = f32::from(u8::from(b & crate::input::CONT_R != 0))
+                        - f32::from(u8::from(b & crate::input::CONT_L != 0));
+                    self.spin[2] = (self.spin[2] * (dir * ZOOM_RATE * dt).exp())
+                        .clamp(ZOOM_RANGE.0, ZOOM_RANGE.1);
                 }
                 _ => {}
             }
-            if let Some(v) = chase {
+            if let Some((kind, v)) = camera {
                 if stick[1] != 0.0 {
-                    // Up: nearer.
-                    super::nudge_chase(v, -stick[1] * CHASE_M_PER_S * dt);
+                    // Up: nearer / forward.
+                    let speed = match kind {
+                        super::ViewKind::Chase => CHASE_M_PER_S,
+                        super::ViewKind::FirstPerson => CHASE_M_PER_S * 0.5,
+                    };
+                    super::nudge_offset(kind, v, -stick[1] * speed * dt);
                     self.chase_dirty = true;
                 } else if self.chase_dirty {
                     self.chase_dirty = false;
-                    super::save_chase();
+                    super::save_offsets();
                 }
             }
-            let chase_back = chase.map(super::chase_offset);
+            let chase_back = camera.map(|(kind, v)| super::view_offset(kind, v));
             // Horizon lock, in flight (one rotation for both eyes); the
             // fixed sights on the HUD sphere turn by it too.
             let horizon = frame
@@ -1477,9 +1518,9 @@ mod real {
                     matrices.world = pw64_gfx::matrix::mul(r, &matrices.world);
                     matrices.sight = Some(std::array::from_fn(|k| [r[k][0], r[k][1], r[k][2]]));
                 }
-                // p8: the chase camera that much further back along its
-                // view (camera space, -z forward; before the horizon lock's
-                // turn, so the vehicle stays centred).
+                // p8: the camera that much further back (or forward) along
+                // its view (camera space, -z forward; before the horizon
+                // lock's turn, so the vehicle stays centred).
                 if let Some(back) = chase_back.filter(|b| *b != 0.0) {
                     let mut t = pw64_gfx::matrix::IDENTITY;
                     t[3][2] = -back;
@@ -1785,6 +1826,10 @@ fn fs() -> @location(0) vec4<f32> {
     const TILT_MAX: f32 = 0.6;
     const CHASE_M_PER_S: f32 = 4.0;
     const CHASE_MODES: [i32; 4] = [0, 4, 7, 9];
+    /// The island model's zoom with L / R: rate (e-folds per second) and
+    /// range.
+    const ZOOM_RATE: f32 = 0.7;
+    const ZOOM_RANGE: (f32, f32) = (0.5, 2.5);
 
     /// w8: how long the fade in from black takes after the headset's view
     /// changes kind (flight, island model, title, flat screens).
@@ -2442,7 +2487,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 title_phase: -1,
                 vehicle: -1,
             };
-            let eye = super::diorama_eye(&pose, &d, [0.0; 2]);
+            let eye = super::diorama_eye(&pose, &d, [0.0, 0.0, 1.0]);
             let apply = |m: &super::Mat4, p: [f32; 4]| -> [f32; 4] {
                 [0, 1, 2, 3].map(|j| (0..4).map(|k| p[k] * m[k][j]).sum())
             };
@@ -2498,7 +2543,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 title_phase: 1,
                 vehicle: -1,
             };
-            let eye = super::diorama_eye(&pose, &d, [0.0; 2]);
+            let eye = super::diorama_eye(&pose, &d, [0.0, 0.0, 1.0]);
             let flight = super::stereo_eye(&pose).world;
             let apply = |m: &super::Mat4, p: [f32; 4]| -> [f32; 4] {
                 [0, 1, 2, 3].map(|j| (0..4).map(|k| p[k] * m[k][j]).sum())
@@ -2538,7 +2583,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 title_phase: -1,
                 vehicle: 0,
             };
-            let eye = super::diorama_eye(&pose, &d, [0.0; 2]);
+            let eye = super::diorama_eye(&pose, &d, [0.0, 0.0, 1.0]);
             let flight = super::stereo_eye(&pose).world;
             let near = |a: &super::Mat4, b: &super::Mat4| {
                 (0..4).all(|i| (0..4).all(|j| (a[i][j] - b[i][j]).abs() < 1e-4))

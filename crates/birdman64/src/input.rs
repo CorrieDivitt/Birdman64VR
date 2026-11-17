@@ -1720,6 +1720,15 @@ static SOURCES: Mutex<Sources> = Mutex::new(Sources {
 /// the island model's turn in the menus.
 static RIGHT_STICK: Mutex<[[f32; 2]; 3]> = Mutex::new([[0.0; 2]; 3]);
 
+/// Player 1's N64 buttons as last published (Birdman64VR, p8).
+static P1_BUTTONS: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+
+/// Player 1's N64 buttons (`CONT_*`) as the game gets them; 0 while the
+/// settings overlay owns input.
+pub fn p1_buttons() -> u16 {
+    P1_BUTTONS.load(Ordering::Relaxed)
+}
+
 /// [`RIGHT_STICK`] slots.
 pub(crate) const STICK_GILRS: usize = 0;
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -1799,6 +1808,10 @@ fn publish(s: &mut Sources) {
     reassign(s, p2.as_ref());
     let [p, p2_pad] = route(s, p2.as_ref(), FOCUSED.load(Ordering::Relaxed));
     log_game_pad(s, &p, p2.is_some());
+    // Birdman64VR (p8): player 1's buttons for the VR code (the island
+    // model's zoom on L / R); none while the overlay owns input.
+    let owned = crate::settings::is_open() || GAME_BLOCKED.load(Ordering::Relaxed);
+    P1_BUTTONS.store(if owned { 0 } else { p.button }, Ordering::Relaxed);
     // Always kept current: the first-run setup screen (firstrun.rs, U13)
     // polls it too, before the game or the overlay exist.
     *OVERLAY_PAD.lock().unwrap() = s.nav();

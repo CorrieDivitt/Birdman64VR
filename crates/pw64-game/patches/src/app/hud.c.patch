@@ -137,12 +137,18 @@
 +        if (pw64_widescreen_aspect > 4.0f / 3.0f) {
 +            x = (s32)(x * pw64_widescreen_aspect * 0.75f);
 +        }
++        // Birdman64VR: a blink over the whole view (two bars on the HUD
++        // sphere were a black square in front of the player).
++        if (pw64_widescreen_aspect < 0.0f) {
++            pw64_vr_shutter(x);
++        } else {
 +        pw64_hud_set_anchor('L');
 +        // PW64 fill screen: the shutter must cover row 0 too (the world
 +        // shows through the letterbox rows it would otherwise leave open).
 +        uvVtxRect(0, pw64_fill_screen ? SCREEN_HEIGHT : SCREEN_HEIGHT - 1, x, 0);
 +        pw64_hud_set_anchor('R');
 +        uvVtxRect(SCREEN_WIDTH - 1 - x, pw64_fill_screen ? SCREEN_HEIGHT : SCREEN_HEIGHT - 1, SCREEN_WIDTH - 1, 0);
++        }
 +        // PW64 rate: the shutter lasted CAMERA_SHUTTER_FRAMES frames -> REF frames.
 +        // Never below 0: the high bits are the HUD_CAM_RENDER_* flags.
 +        hud->cameraState -= pw64_ticks(&sPw64ShutterAcc);

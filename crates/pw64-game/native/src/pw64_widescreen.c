@@ -13,6 +13,7 @@
  *    not to draw this frame (pw64_fill_frame, reset per uvGfxBegin).
  */
 #include <ultra64.h>
+#include <uv_geometry.h>
 #include <uv_graphics.h>
 #include <uv_math.h>
 #include <uv_matrix.h>
@@ -95,6 +96,25 @@ float pw64_vr_aim_reticle_x(float flat, float down) {
     pw64_vr_aim_angles(down, &right, &below);
     /* hudDrawAimReticle: sprite centre column 160 + reticleX. */
     return pw64_round(right / r);
+}
+
+void pw64_vr_shutter(int x) {
+    int a = (x * 255) / (SCREEN_WIDTH / 2);
+    if (a > 255) {
+        a = 255;
+    }
+    /* Full width and untextured: the renderer draws it over the whole eye
+     * (pw64-gfx EYE_FADE), like the game's own fades. */
+    uvGfxStatePush();
+    uvGfxSetFlags(GFX_STATE_XLU | GFX_STATE_TEXTURE_NONE);
+    uvGfxClearFlags(GFX_STATE_ZBUFFER);
+    uvVtxBeginPoly();
+    uvVtx(0, 0, 0, 0, 0, 0, 0, 0, (u8)a);
+    uvVtx(SCREEN_WIDTH, 0, 0, 0, 0, 0, 0, 0, (u8)a);
+    uvVtx(SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0, 0, 0, 0, (u8)a);
+    uvVtx(0, SCREEN_HEIGHT, 0, 0, 0, 0, 0, 0, (u8)a);
+    uvVtxEndPoly();
+    uvGfxStatePop();
 }
 
 int pw64_vr_flight_vehicle(void) {
