@@ -860,8 +860,10 @@ mod real {
     const HUD_RAD_PER_PX: f32 = 0.0034;
 
     /// The island model (outside flight, [`pw64_gfx::Diorama`]): how wide
-    /// it is, in metres.
-    const MODEL_DIAMETER_M: f32 = 2.2;
+    /// it is, in metres. 2.2, then 25% bigger (the user, in the headset: a
+    /// zoom towards it; the centre stays, so its near edge comes to about
+    /// the player's chest, 0.65 m below the eyes).
+    const MODEL_DIAMETER_M: f32 = 2.75;
     /// Where its centre (the island's middle at sea level) sits in the
     /// seated space, in metres: on a table below the menus, about where a
     /// desk would be (from about 0.3 to 2.5 m ahead). The first try, 3 m
@@ -1340,9 +1342,15 @@ mod real {
                 .diorama
                 .is_none()
                 .then(|| {
-                    frame
-                        .up
-                        .and_then(|u| horizon_correction(u, super::horizon_lock()))
+                    frame.up.and_then(|u| {
+                        // The cannonball's first person: bank only (the
+                        // arc is the flight; a pitch lock would hide it).
+                        let mode = match super::horizon_lock() {
+                            super::HorizonLock::Full if u[3] == 1.0 => super::HorizonLock::Bank,
+                            m => m,
+                        };
+                        horizon_correction([u[0], u[1], u[2]], mode)
+                    })
                 })
                 .flatten();
             let r = horizon.unwrap_or(pw64_gfx::matrix::IDENTITY);

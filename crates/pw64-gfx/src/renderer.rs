@@ -1626,6 +1626,14 @@ impl Renderer {
         // the land), then the panel.
         let mut passes: Vec<Vec<usize>> = vec![Vec::new()];
         let mut panel = Vec::new();
+        // First person in a cockpit (the frame has dashboard points): how
+        // far the windscreen is, for the fixed sights (below). The first
+        // point sits just below the glass's lower edge; game units are
+        // metres.
+        let glass = frame.dash.as_ref().map(|d| {
+            let p = d.points[0];
+            (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt().max(0.3) + 0.05
+        });
         // Each draw's pipeline: its own, except a dashboard gauge's, which
         // is depth tested against the cockpit (see below).
         let mut keys: Vec<PipelineKey> = frame.draws.iter().map(|d| d.pipeline).collect();
@@ -1690,10 +1698,27 @@ impl Renderer {
                     ];
                 } else {
                     let shift = centre.map_or([0.0; 2], |c| h.shift(c));
+                    // The cockpit's fixed sights (the gyrocopter's aim
+                    // reticle: elements that never move, `elem` 0) sit on
+                    // the windscreen, as far as the dashboard's tip, and
+                    // over it: seen at 10 m through the glass they looked
+                    // hidden behind it. Same direction and size (the
+                    // sphere's angles do not depend on its radius).
+                    let radius = match glass {
+                        Some(g) if d.elem == 0 => {
+                            keys[i].depth = crate::rdp::DepthState {
+                                test: false,
+                                write: false,
+                                decal: false,
+                            };
+                            g
+                        }
+                        _ => h.radius,
+                    };
                     u.vr = [1.0, 0.0, 0.0, 2.0];
                     u.eye = h.eye;
                     u.clip = [
-                        [h.rad_per_px, h.radius, shift[0], shift[1]],
+                        [h.rad_per_px, radius, shift[0], shift[1]],
                         [0.0; 4],
                         [0.0; 4],
                         [0.0; 4],
