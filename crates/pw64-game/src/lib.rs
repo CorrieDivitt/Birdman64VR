@@ -67,6 +67,9 @@ unsafe extern "C" {
     static mut pw64_vr_gyro_windscreen: i32;
     /// native/src/pw64_widescreen.c: the vehicle flown in VR, -1 none.
     fn pw64_vr_flight_vehicle() -> i32;
+    /// native/src/pw64_widescreen.c: the headset's horizon lock rotation
+    /// (row vectors, camera space), identity = none.
+    static mut pw64_vr_horizon: [f32; 9];
 }
 
 /// Infinite LOD (models always at their most detailed level) and infinite
@@ -310,6 +313,25 @@ pub fn vr_flight_vehicle() -> Option<u8> {
     #[cfg(not(any(feature = "static", feature = "dylib")))]
     let v = -1;
     u8::try_from(v).ok()
+}
+
+/// Birdman64VR: the rotation (3x3, row vectors, camera space: x right, y
+/// up, -z forward) the headset levels the world with (horizon lock), so the
+/// C side can put the gyrocopter's aim reticle where the missiles fly
+/// (pw64_widescreen.c `pw64_vr_aim_reticle_x/y`). Identity = no lock. May be
+/// called any time (each game frame).
+pub fn set_vr_horizon(m: [f32; 9]) {
+    // SAFETY: plain C floats; the game reads them on its own thread (a torn
+    // read mixes two frames' rotations for one frame).
+    #[cfg(feature = "static")]
+    unsafe {
+        *core::ptr::addr_of_mut!(pw64_vr_horizon) = m
+    };
+    // SAFETY: same global, exported by the loaded game module.
+    #[cfg(feature = "dylib")]
+    if let Some(g) = dylib::try_game() {
+        unsafe { *g.vr_horizon = m };
+    }
 }
 
 /// Birdman64VR: whether the gyrocopter's windscreen shows in VR first

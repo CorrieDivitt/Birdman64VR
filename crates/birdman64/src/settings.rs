@@ -159,6 +159,9 @@ enum Row {
     HudDistance,
     HudSpread,
     HudSize,
+    /// VR HUD page: horizon lock (comfort, c5): off / bank / bank and
+    /// pitch (`vr::horizon_lock`), cycled with confirm or left / right.
+    HorizonLock,
     /// VR HUD page: the gyrocopter's windscreen in first person, shown /
     /// hidden (`vr::gyro_windscreen`).
     GyroWindscreen,
@@ -255,6 +258,18 @@ const VR_HIDDEN_GRAPHICS: [Opt; 10] = [
 /// `VEHICLE_GYROCOPTER` (decomp): the vehicle with the windscreen and
 /// dashboard rows on the VR HUD page.
 const VEHICLE_GYROCOPTER: u8 = 2;
+
+/// Steps the horizon lock by `d` (wrapping) and saves it.
+fn step_horizon_lock(d: i32) {
+    use crate::vr::HorizonLock;
+    let all = HorizonLock::ALL;
+    let i = all
+        .iter()
+        .position(|m| *m == crate::vr::horizon_lock())
+        .unwrap_or(1) as i32;
+    let n = all.len() as i32;
+    crate::vr::set_horizon_lock(all[(i + d).rem_euclid(n) as usize]);
+}
 
 /// How many pages (`Page::index` is the slot).
 const N_PAGES: usize = 6;
@@ -1965,7 +1980,12 @@ impl Overlay {
             Page::VrHud => {
                 let vehicle = self.hud_vehicle();
                 let gyro = vehicle.is_none_or(|v| v == VEHICLE_GYROCOPTER);
-                let mut rows = vec![Row::HudDistance, Row::HudSpread, Row::HudSize];
+                let mut rows = vec![
+                    Row::HorizonLock,
+                    Row::HudDistance,
+                    Row::HudSpread,
+                    Row::HudSize,
+                ];
                 if gyro {
                     rows.extend([Row::GyroWindscreen, Row::DashGauges]);
                 }
@@ -2317,6 +2337,12 @@ impl Overlay {
                 self.text_row(ui, at(Row::Back), "\u{2039} Back");
             }
             Page::VrHud => {
+                self.text_row(
+                    ui,
+                    at(Row::HorizonLock),
+                    &format!("Horizon lock: {}", crate::vr::horizon_lock().label()),
+                );
+                ui.add_space(4.0);
                 let l = crate::vr::hud_layout();
                 self.text_row(
                     ui,
@@ -2940,6 +2966,7 @@ impl Overlay {
             }
             Row::VrHudPage => self.enter_page(Page::VrHud, Row::VrHudPage),
             Row::HudDistance | Row::HudSpread | Row::HudSize => self.change(1, true),
+            Row::HorizonLock => step_horizon_lock(1),
             Row::GyroWindscreen => crate::vr::set_gyro_windscreen(!crate::vr::gyro_windscreen()),
             Row::DashGauges => crate::vr::set_dash_gauges(!crate::vr::dash_gauges()),
             Row::HudShow(id) => {
@@ -3229,6 +3256,7 @@ impl Overlay {
                 }
                 crate::vr::set_hud_layout(l);
             }
+            Row::HorizonLock => step_horizon_lock(d),
             // Left / right flip a VR HUD row too.
             Row::GyroWindscreen => crate::vr::set_gyro_windscreen(!crate::vr::gyro_windscreen()),
             Row::DashGauges => crate::vr::set_dash_gauges(!crate::vr::dash_gauges()),
@@ -4059,6 +4087,11 @@ fn help(row: Row) -> &'static str {
              ones; 100% is the flat game's layout."
         }
         Row::HudSize => "How big the gauges are.",
+        Row::HorizonLock => {
+            "Comfort: keeps the horizon level while you fly, so the vehicle banks around \
+             you instead of the world tilting. Bank and pitch also keeps the view from \
+             pitching. Off is the original camera."
+        }
         Row::DashGauges => {
             "In first person, the throttle and the map sit on the gyrocopter's dashboard \
              instead of around you with the other gauges."

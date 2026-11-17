@@ -127,6 +127,9 @@ pub struct Config {
     /// `[vr] dash_gauges`: the throttle and the map on the cockpit's
     /// dashboard in first person (`None` = default, on).
     pub vr_dash_gauges: Option<bool>,
+    /// `[vr] horizon_lock`: `"off"`, `"bank"` or `"full"` (bank and
+    /// pitch); `None` = default, bank (`vr::HorizonLock`).
+    pub vr_horizon_lock: Option<String>,
     /// Keys skipped at load (wrong type or invalid value; see `ignored_keys`).
     pub ignored: Vec<String>,
 }
@@ -906,6 +909,19 @@ fn from_table(table: &toml::Table) -> Config {
                         None => ignore(&mut ignored, &format!("vr.{key}"), v, "use true or false"),
                     }
                 }
+                if let Some(v) = t.get("horizon_lock") {
+                    match v.as_str() {
+                        Some(m) if HORIZON_LOCK_VALUES.contains(&m) => {
+                            cfg.vr_horizon_lock = Some(m.to_string());
+                        }
+                        _ => ignore(
+                            &mut ignored,
+                            "vr.horizon_lock",
+                            v,
+                            "use \"off\", \"bank\" or \"full\"",
+                        ),
+                    }
+                }
                 if let Some(h) = t.get("hud_hidden") {
                     match h.as_array() {
                         Some(a) => {
@@ -967,6 +983,36 @@ fn with_vr_bool(mut table: toml::Table, key: &str, on: bool) -> Result<toml::Tab
         vr.remove(key);
     } else {
         vr.insert(key.into(), toml::Value::Boolean(false));
+    }
+    if vr.is_empty() {
+        table.remove("vr");
+    }
+    Ok(table)
+}
+
+/// `[vr] horizon_lock` values (`vr::HorizonLock`).
+pub const HORIZON_LOCK_VALUES: [&str; 3] = ["off", "bank", "full"];
+
+/// Writes `[vr] horizon_lock`; the default (`"bank"`) removes the key,
+/// and `[vr]` when nothing else is in it.
+pub fn save_vr_horizon_lock(value: &str) -> Result<(), String> {
+    let table = read_table()?;
+    write_table(&with_vr_horizon_lock(table, value)?)
+}
+
+/// [`save_vr_horizon_lock`]'s table edit (separate from the file I/O for
+/// tests).
+fn with_vr_horizon_lock(mut table: toml::Table, value: &str) -> Result<toml::Table, String> {
+    let vr = table
+        .entry("vr")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let toml::Value::Table(vr) = vr else {
+        return Err("[vr] is not a table in pw64.toml; not saved".to_string());
+    };
+    if value == "bank" {
+        vr.remove("horizon_lock");
+    } else {
+        vr.insert("horizon_lock".into(), toml::Value::String(value.into()));
     }
     if vr.is_empty() {
         table.remove("vr");
@@ -1823,6 +1869,19 @@ mod tests {
     #[test]
     fn vr_bools_round_trip() {
         assert_eq!(parse("").unwrap().vr_gyro_windscreen, None);
+        // `[vr] horizon_lock`: the three values, junk reported, the
+        // default saved as no key.
+        assert_eq!(parse("").unwrap().vr_horizon_lock, None);
+        let c = parse("[vr]\nhorizon_lock = \"full\"\n").unwrap();
+        assert_eq!(c.vr_horizon_lock.as_deref(), Some("full"));
+        let c = parse("[vr]\nhorizon_lock = \"sideways\"\n").unwrap();
+        assert_eq!(
+            (c.vr_horizon_lock, c.ignored),
+            (None, vec!["vr.horizon_lock".to_string()])
+        );
+        let t = with_vr_horizon_lock(toml::Table::new(), "off").unwrap();
+        assert_eq!(from_table(&t).vr_horizon_lock.as_deref(), Some("off"));
+        assert!(with_vr_horizon_lock(t, "bank").unwrap().is_empty());
         let c = parse("[vr]\ngyro_windscreen = \"maybe\"\n").unwrap();
         assert_eq!(c.vr_gyro_windscreen, None);
         assert_eq!(c.ignored, vec!["vr.gyro_windscreen"]);

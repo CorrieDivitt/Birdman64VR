@@ -106,6 +106,14 @@ extern float pw64_vr_hud_rad_per_px;
  * `down` radians below the view's centre, the direction the missiles fly;
  * otherwise `flat`, the game's value. */
 float pw64_vr_aim_reticle_y(float flat, float down);
+/* ...and its column offset (0 without the horizon lock). Both follow the
+ * headset's horizon lock rotation, `pw64_vr_horizon` (Rust-set, 9 floats,
+ * row vectors in camera space). */
+float pw64_vr_aim_reticle_x(float flat, float down);
+extern float pw64_vr_horizon[9];
+/* The gyrocopter's missiles leave 6 degrees below the camera's forward
+ * line (func_802F7178). */
+#define PW64_VR_GYRO_AIM_DOWN 0.10471974f
 /* Birdman64VR, same file (c11): `buttons` without the four C buttons in VR,
  * unchanged otherwise. Head tracking does the looking, so each vehicle's
  * flight controls drop the C-button look (and the rocket belt's camera

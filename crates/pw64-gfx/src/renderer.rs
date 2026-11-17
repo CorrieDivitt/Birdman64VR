@@ -2571,6 +2571,7 @@ mod tests {
             views: Vec::new(),
             diorama: None,
             dash: None,
+            up: None,
         }
     }
 

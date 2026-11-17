@@ -420,6 +420,29 @@ spike_build.sh).
 | Jumble hopper | speed, timer, altimeter, map, altitude, messages |
 | Birdman | speed, altimeter, altitude, photos, messages |
 
+## Horizon lock (c5)
+
+Comfort: in flight the world stays level and the vehicle (its cockpit
+included) banks around the player. VR HUD page > Horizon lock: off / bank
+(default; the view still pitches with the vehicle) / bank and pitch
+(`[vr] horizon_lock = "off" | "bank" | "full"`, `vr::HorizonLock`).
+
+- C: `pw64_vr_up_tag` (pw64_widescreen.c), at the end of a flight's world
+  view: the world's up in camera space from the channel's camera matrix
+  (`unk110` rows right, forward, up; their z), `G_NOOP` "UP" tag, three
+  floats → `pw64_gfx::Frame::up`.
+- vr.rs `horizon_correction(up, mode)`: bank turns about the view's
+  forward axis until up has no sideways part; full turns up onto straight up
+  (Rodrigues; upside down falls back to bank; looking straight up or down
+  has no bank). Put in front of `StereoEye::world` (camera space), so the
+  world, the cockpit and the dashboard gauges turn together; the HUD sphere
+  stays with the seat. Not for the title or the island model.
+- The gyrocopter's reticle: Rust hands the rotation to C each frame
+  (`pw64_game::set_vr_horizon`, `pw64_vr_horizon[9]`); `pw64_vr_aim_reticle_x/y`
+  turn the missile direction (6 degrees below the camera's forward line,
+  `PW64_VR_GYRO_AIM_DOWN`) by it and place the reticle there, every frame
+  (code_7CF30.c.patch, where the HUD copies the reticle).
+
 ## Touch controllers (q3)
 
 The Touch controllers are one more gamepad for player 1, laid out like a

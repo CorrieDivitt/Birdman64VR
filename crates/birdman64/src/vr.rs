@@ -199,6 +199,76 @@ pub(crate) fn set_gyro_windscreen(on: bool) {
     }
 }
 
+/// Horizon lock (c5, comfort): in flight the world stays level and the
+/// vehicle banks (and pitches) around the player, instead of the view
+/// rolling with it (`[vr] horizon_lock`, the settings' VR HUD page).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HorizonLock {
+    Off,
+    /// The horizon stays level; the view still pitches with the vehicle
+    /// (where it is heading stays ahead). The default.
+    Bank,
+    /// Level in both: the view keeps only the vehicle's heading.
+    Full,
+}
+
+impl HorizonLock {
+    pub(crate) const ALL: [HorizonLock; 3] =
+        [HorizonLock::Off, HorizonLock::Bank, HorizonLock::Full];
+
+    fn config(self) -> &'static str {
+        match self {
+            HorizonLock::Off => "off",
+            HorizonLock::Bank => "bank",
+            HorizonLock::Full => "full",
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            HorizonLock::Off => "off",
+            HorizonLock::Bank => "bank",
+            HorizonLock::Full => "bank and pitch",
+        }
+    }
+}
+
+/// 0 = not loaded yet, else 1 + the index in [`HorizonLock::ALL`].
+static HORIZON_LOCK: AtomicU8 = AtomicU8::new(0);
+
+/// The horizon lock setting.
+pub(crate) fn horizon_lock() -> HorizonLock {
+    match HORIZON_LOCK.load(Ordering::Relaxed) {
+        0 => {
+            let cfg = crate::config::get().vr_horizon_lock.clone();
+            let mode = HorizonLock::ALL
+                .into_iter()
+                .find(|m| cfg.as_deref() == Some(m.config()))
+                .unwrap_or(HorizonLock::Bank);
+            set_horizon_lock_live(mode);
+            mode
+        }
+        v => HorizonLock::ALL[(v - 1) as usize % 3],
+    }
+}
+
+fn set_horizon_lock_live(mode: HorizonLock) {
+    let i = HorizonLock::ALL
+        .iter()
+        .position(|m| *m == mode)
+        .unwrap_or(1);
+    HORIZON_LOCK.store(i as u8 + 1, Ordering::Relaxed);
+}
+
+/// Sets the horizon lock (live from the next game frame) and saves it.
+pub(crate) fn set_horizon_lock(mode: HorizonLock) {
+    set_horizon_lock_live(mode);
+    HUD_CHANGED.store(true, Ordering::Relaxed);
+    if let Err(e) = crate::config::save_vr_horizon_lock(mode.config()) {
+        eprintln!("[vr] horizon lock choice not saved: {e}");
+    }
+}
+
 /// The throttle and the map (radar) on the cockpit's dashboard in first
 /// person, where the game gives one (`[vr] dash_gauges`, the settings' VR
 /// HUD page; the gyrocopter): 0 = not loaded yet, 1 = on, 2 = off (on the
@@ -812,6 +882,63 @@ mod real {
     const TITLE_BACK_M: f32 = 1.0;
     const TITLE_UP_M: f32 = -1.25;
 
+    /// Horizon lock (c5): the camera-space rotation (row vectors, as
+    /// [`pw64_gfx::StereoEye::world`]) that levels the view, from `up`,
+    /// the game world's up in camera space (x right, y up, -z forward;
+    /// [`pw64_gfx::Frame::up`]). Bank: about the view's forward axis until
+    /// up has no sideways part (the view still pitches). Full: the
+    /// shortest turn of up onto straight up (only the heading is left).
+    /// `None`: off, or no correction to make.
+    pub(super) fn horizon_correction(up: [f32; 3], mode: super::HorizonLock) -> Option<Mat4> {
+        use super::HorizonLock;
+        let len = (up[0] * up[0] + up[1] * up[1] + up[2] * up[2]).sqrt();
+        if len < 1e-6 || mode == HorizonLock::Off {
+            return None;
+        }
+        let u = up.map(|c| c / len);
+        let bank = || {
+            // Looking (nearly) straight up or down: no bank to speak of.
+            let h = u[0].hypot(u[1]);
+            (h > 0.05).then(|| {
+                let (s, c) = (u[0] / h, u[1] / h);
+                [
+                    [c, s, 0.0, 0.0],
+                    [-s, c, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            })
+        };
+        if mode == HorizonLock::Bank {
+            return bank();
+        }
+        // Rodrigues: axis k = u x y (normalised), angle between u and y.
+        let k = [-u[2], 0.0, u[0]];
+        let sin = k[0].hypot(k[2]);
+        let cos = u[1];
+        if sin < 1e-4 {
+            // Already level, or upside down (no unique turn): bank only.
+            return if cos > 0.0 { None } else { bank() };
+        }
+        let k = k.map(|c| c / sin);
+        let turn = |v: [f32; 3]| {
+            let kv = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
+            let kx = [
+                k[1] * v[2] - k[2] * v[1],
+                k[2] * v[0] - k[0] * v[2],
+                k[0] * v[1] - k[1] * v[0],
+            ];
+            std::array::from_fn::<f32, 3, _>(|i| v[i] * cos + kx[i] * sin + k[i] * kv * (1.0 - cos))
+        };
+        let [x, y, z] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]].map(turn);
+        Some([
+            [x[0], x[1], x[2], 0.0],
+            [y[0], y[1], y[2], 0.0],
+            [z[0], z[1], z[2], 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ])
+    }
+
     /// A camera world matrix (rows right, forward, up, position; z up)
     /// turned level: facing the same way, no pitch or roll.
     fn level(camera: [[f32; 3]; 4]) -> [[f32; 3]; 4] {
@@ -1207,12 +1334,31 @@ mod real {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .unwrap_or_default();
+            // Horizon lock, in flight (one rotation for both eyes); the C
+            // side places the gyrocopter's reticle by it too.
+            let horizon = frame
+                .diorama
+                .is_none()
+                .then(|| {
+                    frame
+                        .up
+                        .and_then(|u| horizon_correction(u, super::horizon_lock()))
+                })
+                .flatten();
+            let r = horizon.unwrap_or(pw64_gfx::matrix::IDENTITY);
+            pw64_game::set_vr_horizon(std::array::from_fn(|i| r[i / 3][i % 3]));
             for (eye, pose) in poses.iter().enumerate() {
                 let seated = seat.seated(pose);
-                let matrices = match &frame.diorama {
+                let mut matrices = match &frame.diorama {
                     Some(d) => diorama_eye(&seated, d),
                     None => stereo_eye(&seated),
                 };
+                // Horizon lock, in flight: the world level, the vehicle
+                // (and its cockpit, in camera space) banking around the
+                // player. The HUD sphere stays with the seat.
+                if let Some(r) = &horizon {
+                    matrices.world = pw64_gfx::matrix::mul(r, &matrices.world);
+                }
                 renderer.render_stereo(frame, &views[back][eye], self.eye_size, &matrices);
             }
             self.eye_serial += 1;
@@ -2217,6 +2363,42 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             };
             assert!(near(&eye.world, &flight));
             assert!(eye.clip.is_none() && eye.hud_sphere.is_none());
+        }
+
+        /// Horizon lock: the correction turns the world's up onto the
+        /// view's up: bank removes only the sideways tilt (pitch stays),
+        /// full removes both; off or already level changes nothing; upside
+        /// down falls back to bank.
+        #[test]
+        fn horizon_correction_levels_the_world() {
+            use super::super::HorizonLock;
+            let apply = |m: &super::Mat4, v: [f32; 3]| -> [f32; 3] {
+                std::array::from_fn(|i| v[0] * m[0][i] + v[1] * m[1][i] + v[2] * m[2][i])
+            };
+            let close = |a: [f32; 3], b: [f32; 3]| (0..3).all(|i| (a[i] - b[i]).abs() < 1e-4);
+            let (s30, c30) = (0.5f32, 0.75f32.sqrt());
+            // Banked 30 degrees, level pitch.
+            let up = [s30, c30, 0.0];
+            let r = super::horizon_correction(up, HorizonLock::Bank).unwrap();
+            assert!(close(apply(&r, up), [0.0, 1.0, 0.0]));
+            assert!(
+                close(apply(&r, [0.0, 0.0, -1.0]), [0.0, 0.0, -1.0]),
+                "forward kept"
+            );
+            // Banked and pitched: bank keeps the pitch, full removes it.
+            let up = [s30 * c30, c30 * c30, s30];
+            let r = super::horizon_correction(up, HorizonLock::Bank).unwrap();
+            let b = apply(&r, up);
+            assert!(b[0].abs() < 1e-4 && (b[2] - s30).abs() < 1e-4, "{b:?}");
+            let r = super::horizon_correction(up, HorizonLock::Full).unwrap();
+            assert!(close(apply(&r, up), [0.0, 1.0, 0.0]));
+            // A rotation: lengths kept.
+            let v = apply(&r, [1.0, 0.0, 0.0]);
+            assert!((v[0] * v[0] + v[1] * v[1] + v[2] * v[2] - 1.0).abs() < 1e-4);
+            assert!(super::horizon_correction(up, HorizonLock::Off).is_none());
+            assert!(super::horizon_correction([0.0, 1.0, 0.0], HorizonLock::Full).is_none());
+            let r = super::horizon_correction([0.1, -1.0, 0.0], HorizonLock::Full).unwrap();
+            assert!(apply(&r, [0.1, -1.0, 0.0])[1] > 0.99);
         }
 
         /// Every shader parses and validates (no GPU needed).
