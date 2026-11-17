@@ -183,6 +183,11 @@ pub struct StereoEye {
     /// at. Turned on the sphere: moved in N64 pixels instead, the game
     /// clipped them at its screen's edges.
     pub sight: Option<[[f32; 3]; 3]>,
+    /// Birdman64VR, diorama passthrough: leave out the world's environment
+    /// (the sky dome and the camera-following sea, [`DrawCall::env`], and
+    /// any other backdrop drawn with neither depth test nor write), so the
+    /// background shows around the land.
+    pub hide_env: bool,
 }
 
 /// Birdman64VR: where one HUD element sits on the dashboard
@@ -1677,11 +1682,15 @@ impl Renderer {
             // its camera, so parts of it fell inside the model's cylinder
             // (a ragged piece of sky behind the island). It is the world
             // drawn with neither depth test nor depth write.
-            if eye.clip.is_some()
+            if (eye.clip.is_some() || eye.hide_env)
                 && d.view != 0
                 && !d.pipeline.depth.test
                 && !d.pipeline.depth.write
             {
+                continue;
+            }
+            // Diorama passthrough: no sky and no sea at all.
+            if eye.hide_env && d.env {
                 continue;
             }
             // In flight, 3D draws outside the world view that are no HUD
@@ -2522,6 +2531,7 @@ mod tests {
             hud_hidden: 0,
             hud_dash: &[],
             sight: None,
+            hide_env: false,
         };
         r.render_stereo(&frame, &view, (w, h), &eye);
         let stereo = read_rgba(&device, &queue, &tex);
@@ -2647,6 +2657,7 @@ mod tests {
             vanchor: VAnchor::Middle,
             stretch_y: [0.0; 2],
             hud: false,
+            env: false,
             split: None,
             elem: 0,
             view: 0,
@@ -2664,6 +2675,7 @@ mod tests {
             dash: None,
             up: None,
             shutter: false,
+            table: None,
         }
     }
 
@@ -2983,6 +2995,7 @@ mod tests {
             scissor: [0.0, 0.0, 320.0, 240.0],
             split: Some(view),
             hud: true,
+            env: false,
             ..base.clone()
         };
         let size = (640, 480); // 2 target px per N64 px, view 20..620 × 16..230
@@ -3047,6 +3060,7 @@ mod tests {
             scissor: [0.0, 0.0, 320.0, 240.0],
             split: Some(view),
             hud: true,
+            env: false,
             ..base.clone()
         };
         let size = (640, 480);
@@ -3100,6 +3114,7 @@ mod tests {
             scissor: [10.0, 8.0, 159.0, 222.0],
             split: Some(left),
             hud: false,
+            env: false,
             ..base.clone()
         };
         let px = |s: [f32; 4], x: f32, w: f32| ((x * s[0] + s[1]) + 1.0) / 2.0 * w;

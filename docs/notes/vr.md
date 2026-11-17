@@ -598,6 +598,30 @@ composition layer; the app never sees camera images.
 - Decided (the user): menus only. Not the paused game or the settings
   overlay in flight.
 
+## Diorama passthrough (p14, experiment)
+Setting on the main page under Passthrough (`Row::DioramaPassthrough`,
+`[vr] diorama_passthrough`, default off, Quest only): a flight in third
+person is a model in the player's room, with no sky and no sea.
+- C: `pw64_vr_table_tag` ("TB", 21 floats at the end of a flight's
+  full-width world view: camera matrix, the vehicle's position from the
+  player camera's `unk80`, the terrain's bounds) → `Frame::table`; always
+  sent in a VR flight. `pw64_env_tag(1/0)` brackets `_uvEnvDraw` in
+  chan.c.patch ("PWN1"/"PWN0") → `DrawCall::env`: the sky dome and the
+  camera-following sea model.
+- vr.rs `table_eye`: world → relative to the vehicle → scaled by the
+  menus' model scale fully zoomed in (`MODEL_DIAMETER_M / island size ×
+  ZOOM_RANGE.1`) times the stick's zoom (1 to `TABLE_ZOOM_MAX` 2: 50%
+  closer), game north away, level, the vehicle held at `TABLE_VEHICLE_M`
+  (1 m ahead, 0.25 m below eye level). `StereoEye::hide_env` drops the env
+  draws and depthless backdrops; background transparent. Used when the
+  setting is on, the headset can do passthrough and the player camera's
+  mode (UP tag) is not 1: R on the pad still gives the game's first-person
+  view, full size and fully virtual. `Source::scene` 5 → passthrough on
+  (`in_room`), fade on the change. No horizon lock and no chase-distance
+  stick in this view; the HUD sphere stays.
+- Log: `diorama passthrough on: vehicle …, bounds …` / `off`.
+- Open: the game still fogs and picks detail by its own chase camera.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`

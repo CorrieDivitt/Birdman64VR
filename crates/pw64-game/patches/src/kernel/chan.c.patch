@@ -57,7 +57,7 @@
      func_80206318(temp_s0);
      uvGfxMtxProj(temp_s0->unk50);
      uvGfxPushMtxUnk(&temp_s0->unk190);
-@@ -213,6 +220,12 @@ void uvChan_80204FE4(s32 arg0) {
+@@ -213,7 +220,15 @@ void uvChan_80204FE4(s32 arg0) {
      if (!(temp_s0->unk0 & 4)) {
          uvGfx_80222A98();
      }
@@ -70,7 +70,10 @@
 
      gSPClipRatio(gGfxDisplayListHead++, FRUSTRATIO_1);
 
-@@ -259,7 +272,7 @@ void uvChan_80204FE4(s32 arg0) {
++    pw64_env_tag(1); // Birdman64VR: the sky and the sea (pw64_widescreen.c)
+     _uvEnvDraw(arg0, temp_s0->unk2);
++    pw64_env_tag(0);
+@@ -259,7 +274,7 @@ void uvChan_80204FE4(s32 arg0) {
          if (spC0 < uvtr->unk24) {
              spC0 = 1e11f;
          }
@@ -79,7 +82,7 @@
          uvGfxMtxProj(temp_s0->unk50);
          uvTerra_8022EE90(temp_s0, uvtr, spC0);
          uvGfxSetFogFactor(0.0f);
-@@ -269,7 +282,10 @@ void uvChan_80204FE4(s32 arg0) {
+@@ -269,7 +284,10 @@ void uvChan_80204FE4(s32 arg0) {
          uvChan_80205CE4(temp_s0, 1, spC0 - uvtr->unk24, 1e12f);
          uvGfxResetState();
          uvGfx_80222A98();
@@ -91,7 +94,7 @@
          uvGfxMtxProj(temp_s0->unk50);
          uvTerra_8022EFB4(temp_s0, uvtr, spC0);
          if (spA0 != D_80263058) {
-@@ -292,6 +308,8 @@ void uvChan_80204FE4(s32 arg0) {
+@@ -292,6 +310,8 @@ void uvChan_80204FE4(s32 arg0) {
      if (temp_s0->unk39C != NULL) {
          temp_s0->unk39C();
      }
@@ -100,7 +103,7 @@
  }
 
  void uvChan_80205724(s32 arg0, s32 arg1, Mtx4F* arg2) {
-@@ -320,15 +338,15 @@ void _uvSortAdd(s32 arg0, f32 arg1, void* arg2, UnkStruct_80204D94* arg3, f32 ar
+@@ -320,15 +340,15 @@ void _uvSortAdd(s32 arg0, f32 arg1, void* arg2, UnkStruct_80204D94* arg3, f32 ar
      va_list args;
 
      if (arg0 > 0) {

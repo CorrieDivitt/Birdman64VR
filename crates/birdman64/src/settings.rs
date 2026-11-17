@@ -156,6 +156,10 @@ enum Row {
     /// Main (in VR on a headset that can, under VR Comfort): the menus in
     /// the player's own room, on / off (`vr::passthrough`, p12).
     Passthrough,
+    /// Main (same condition, under Passthrough): flights in third person
+    /// as a model in the player's room, on / off
+    /// (`vr::diorama_passthrough`).
+    DioramaPassthrough,
     /// VR HUD page: show or hide one flight-HUD element in the headset
     /// (`hud_edit::ELEMENTS` id).
     HudShow(u8),
@@ -1917,6 +1921,7 @@ impl Overlay {
                     rows.insert(at + 2, Row::VrComfortPage);
                     if self.passthrough_offered() {
                         rows.insert(at + 3, Row::Passthrough);
+                        rows.insert(at + 4, Row::DioramaPassthrough);
                     }
                     rows.retain(|r| !VR_HIDDEN_MAIN.contains(r));
                 }
@@ -2121,6 +2126,14 @@ impl Overlay {
                         "Passthrough: off"
                     };
                     self.text_row(ui, at(Row::Passthrough), label);
+                }
+                if rows.contains(&Row::DioramaPassthrough) {
+                    let label = if crate::vr::diorama_passthrough() {
+                        "Diorama passthrough: on"
+                    } else {
+                        "Diorama passthrough: off"
+                    };
+                    self.text_row(ui, at(Row::DioramaPassthrough), label);
                 }
                 // Not in VR (`rows`): `at` would panic on a missing row.
                 if rows.contains(&Row::SplitScreen) {
@@ -3003,6 +3016,9 @@ impl Overlay {
             Row::HudDistance | Row::HudSpread | Row::HudSize => self.change(1, true),
             Row::HorizonLock => step_horizon_lock(1),
             Row::Passthrough => crate::vr::set_passthrough(!crate::vr::passthrough()),
+            Row::DioramaPassthrough => {
+                crate::vr::set_diorama_passthrough(!crate::vr::diorama_passthrough());
+            }
             Row::GyroWindscreen => crate::vr::set_gyro_windscreen(!crate::vr::gyro_windscreen()),
             Row::DashGauges => crate::vr::set_dash_gauges(!crate::vr::dash_gauges()),
             Row::HudShow(id) => {
@@ -3294,6 +3310,9 @@ impl Overlay {
             }
             Row::HorizonLock => step_horizon_lock(d),
             Row::Passthrough => crate::vr::set_passthrough(!crate::vr::passthrough()),
+            Row::DioramaPassthrough => {
+                crate::vr::set_diorama_passthrough(!crate::vr::diorama_passthrough());
+            }
             // Left / right flip a VR HUD row too.
             Row::GyroWindscreen => crate::vr::set_gyro_windscreen(!crate::vr::gyro_windscreen()),
             Row::DashGauges => crate::vr::set_dash_gauges(!crate::vr::dash_gauges()),
@@ -4117,6 +4136,11 @@ fn help(row: Row) -> &'static str {
         }
         Row::VrHudPage => "Where the flight gauges sit in the headset, and which ones show.",
         Row::VrComfortPage => "Settings that make flying in the headset easier on the stomach.",
+        Row::DioramaPassthrough => {
+            "Fly in third person over a small model of the island in your own room: no sky \
+             and no sea, the land slides past under your vehicle. Right stick up brings it \
+             closer. The first-person view stays fully virtual."
+        }
         Row::Passthrough => {
             "Show the menus and the island model in your own room. Off: in a dim virtual \
              room. Flights are always fully virtual."
@@ -5154,6 +5178,7 @@ mod tests {
             if vr {
                 let i = main.iter().position(|r| *r == Row::VrComfortPage).unwrap();
                 assert_eq!(main[i + 1], Row::Passthrough);
+                assert_eq!(main[i + 2], Row::DioramaPassthrough);
             }
             o.page = Page::Graphics;
             assert_eq!(o.rows().contains(&Row::Opt(Opt::Widescreen)), !vr);

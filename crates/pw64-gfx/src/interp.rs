@@ -165,6 +165,11 @@ pub struct Interpreter {
     split_x: [f32; 2],
     /// Birdman64VR: the island model's values as their tags arrive.
     diorama_in: [f32; 22],
+    /// [`TABLE_TAG`] values so far.
+    table_in: [f32; 21],
+    /// Inside a world view's environment draws (`ENV_TAG_ON/OFF`); reset
+    /// per run.
+    backdrop: bool,
     /// Birdman64VR: the dashboard's values as their tags arrive.
     dash_in: [f32; (crate::Dash::POINTS + 1) * 3],
     /// [`UP_TAG`] values so far.
@@ -216,6 +221,15 @@ pub const UP_TAG: u32 = 0x55_5000;
 /// Birdman64VR `G_NOOP` w0 marker ("SH" in bits 8-23): a photo was taken
 /// (`pw64_vr_shutter`, [`Frame::shutter`]).
 pub const SHUTTER_TAG: u32 = 0x53_4800;
+/// Birdman64VR `G_NOOP` w0 marker ("TB" in bits 8-23, the value's index in
+/// the low byte): a flight's camera matrix, vehicle position and island
+/// bounds, 21 f32 in w1 (`pw64_vr_table_tag`, [`Frame::table`]).
+pub const TABLE_TAG: u32 = 0x54_4200;
+/// `G_NOOP` w1 environment marker on/off ("PWN1"/"PWN0", `pw64_env_tag`):
+/// the following draws are a world view's sky and sea
+/// ([`DrawCall::env`]).
+pub const ENV_TAG_ON: u32 = 0x5057_4E31;
+pub const ENV_TAG_OFF: u32 = 0x5057_4E30;
 /// `G_NOOP` w1 HUD anchor marker: "PWA" + `L`/`C`/`R` in the low byte;
 /// applies to the following draws (see [`Anchor`]).
 pub const ANCHOR_TAG: u32 = 0x5057_4100;
@@ -346,6 +360,8 @@ impl Interpreter {
             hud: false,
             split_x: [0.0; 2],
             diorama_in: [0.0; 22],
+            table_in: [0.0; 21],
+            backdrop: false,
             dash_in: [0.0; (crate::Dash::POINTS + 1) * 3],
             up_in: [0.0; 5],
             split: None,
@@ -385,6 +401,7 @@ impl Interpreter {
             dash: None,
             up: None,
             shutter: false,
+            table: None,
         };
         self.run_into(mem, dl, &mut frame);
         frame
@@ -418,6 +435,7 @@ impl Interpreter {
         frame.dash = None;
         frame.up = None;
         frame.shutter = false;
+        frame.table = None;
         std::mem::swap(&mut self.frame, frame);
         self.execute(mem, dl);
         std::mem::swap(&mut self.frame, frame);
@@ -535,7 +553,18 @@ impl Interpreter {
                     }
                 }
             }
+            // Birdman64VR flight-as-a-model data (pw64_vr_table_tag): floats.
+            op::G_NOOP if w0 & 0xFF_FF00 == TABLE_TAG => {
+                let i = (w0 & 0xFF) as usize;
+                if i < self.table_in.len() {
+                    self.table_in[i] = f32::from_bits(w1);
+                    if i == self.table_in.len() - 1 {
+                        self.frame.table = Some(crate::Table::from_values(&self.table_in));
+                    }
+                }
+            }
             // Birdman64VR: a photo was taken (pw64_vr_shutter).
+            // (w0's low 24 bits are 0 in the w1 tags below.)
             op::G_NOOP if w0 & 0xFF_FF00 == SHUTTER_TAG => self.frame.shutter = true,
             // Widescreen world-view markers (native game, pw64_widescreen.c).
             op::G_NOOP if w1 == WIDE_TAG_ON || w1 == WIDE_TAG_OFF => {
@@ -549,6 +578,9 @@ impl Interpreter {
             }
             // Flight-HUD on/off (pw64_hud_tag): brackets the following
             // draws so the renderer can drift + dim them (OLED care).
+            op::G_NOOP if w1 == ENV_TAG_ON || w1 == ENV_TAG_OFF => {
+                self.backdrop = w1 == ENV_TAG_ON;
+            }
             op::G_NOOP if w1 == HUD_TAG_ON || w1 == HUD_TAG_OFF => {
                 self.hud = w1 == HUD_TAG_ON;
             }
@@ -1180,6 +1212,7 @@ impl Interpreter {
             && last.anchor == self.anchor
             && last.vanchor == self.vanchor
             && last.hud == self.hud
+            && last.env == self.backdrop
             && last.split == self.split
             && last.elem == self.elem
             && last.view == view
@@ -1203,6 +1236,7 @@ impl Interpreter {
             vanchor: self.vanchor,
             stretch_y,
             hud: self.hud,
+            env: self.backdrop,
             split: self.split,
             elem: self.elem,
             view,
@@ -1567,6 +1601,27 @@ mod tests {
         let mut it = Interpreter::new();
         assert!(it.run(&mem, tagged).shutter);
         assert!(!it.run(&mem, plain).shutter);
+    }
+
+    /// Birdman64VR diorama passthrough (`pw64_vr_table_tag`): 21 float
+    /// words make `Frame::table`.
+    #[test]
+    fn table_tag_values() {
+        let mut mem = VecMemory::default();
+        let v: [f32; 21] = std::array::from_fn(|i| i as f32 + 0.5);
+        let mut cmds: Vec<(u32, u32)> = v
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (0xC000_0000 | TABLE_TAG | i as u32, f.to_bits()))
+            .collect();
+        cmds.push((0xB800_0000, 0));
+        let dl = mem.push_words(&words(&cmds));
+        let t = Interpreter::new().run(&mem, dl).table.unwrap();
+        assert_eq!(t.camera[3], [9.5, 10.5, 11.5]);
+        assert_eq!(t.vehicle, [12.5, 13.5, 14.5]);
+        assert_eq!(t.bounds, [15.5, 16.5, 17.5, 18.5, 19.5, 20.5]);
+        let dl = mem.push_words(&words(&[(0xB800_0000, 0)]));
+        assert_eq!(Interpreter::new().run(&mem, dl).table, None);
     }
 
     #[test]

@@ -95,6 +95,11 @@ unsigned int pw64_rsp(void);
 extern float pw64_widescreen_aspect;
 float pw64_widescreen_xscale(const void* chan);
 void pw64_widescreen_tag(const void* chan, int on);
+/* Birdman64VR, same file: brackets a world view's environment draws (sky
+ * dome and the camera-following sea, chan.c.patch around _uvEnvDraw) so
+ * the renderer can leave them out (diorama passthrough: the player's room
+ * shows instead). Emitted always; ignored unless asked for. */
+void pw64_env_tag(int on);
 /* Birdman64VR (same file; VR = pw64_widescreen_aspect < 0): 1 while the
  * world is shown in stereo, i.e. in VR during a test's flight. */
 int pw64_vr_flight(void);

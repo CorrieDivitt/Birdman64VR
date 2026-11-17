@@ -127,6 +127,9 @@ pub struct Config {
     /// `[vr] passthrough`: the menus in the player's own room where the
     /// headset can show it (Quest; `None` = default, on).
     pub vr_passthrough: Option<bool>,
+    /// `[vr] diorama_passthrough`: flights in third person as a model in
+    /// the player's room (`None` = default, off).
+    pub vr_diorama_passthrough: Option<bool>,
     /// `[vr] dash_gauges`: the throttle and the map on the cockpit's
     /// dashboard in first person (`None` = default, on).
     pub vr_dash_gauges: Option<bool>,
@@ -912,6 +915,7 @@ fn from_table(table: &toml::Table) -> Config {
                     ("gyro_windscreen", &mut cfg.vr_gyro_windscreen),
                     ("dash_gauges", &mut cfg.vr_dash_gauges),
                     ("passthrough", &mut cfg.vr_passthrough),
+                    ("diorama_passthrough", &mut cfg.vr_diorama_passthrough),
                 ] {
                     let Some(v) = t.get(key) else { continue };
                     match coerce_bool(v) {
@@ -1003,6 +1007,25 @@ pub fn save_vr_hud_hidden(names: &[&str]) -> Result<(), String> {
 pub fn save_vr_bool(key: &str, on: bool) -> Result<(), String> {
     let table = read_table()?;
     write_table(&with_vr_bool(table, key, on)?)
+}
+
+/// Writes a `[vr]` on/off key whose default is off
+/// (`diorama_passthrough`): `true` when on, removed when off.
+pub fn save_vr_bool_default_off(key: &str, on: bool) -> Result<(), String> {
+    let mut table = read_table()?;
+    if on {
+        let vr = table
+            .entry("vr")
+            .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+        let toml::Value::Table(vr) = vr else {
+            return Err("[vr] is not a table in pw64.toml; not saved".to_string());
+        };
+        vr.insert(key.into(), toml::Value::Boolean(true));
+        write_table(&table)
+    } else {
+        // Off is the default: the same edit as a default-on key turned on.
+        write_table(&with_vr_bool(table, key, true)?)
+    }
 }
 
 /// [`save_vr_bool`]'s table edit (separate from the file I/O for tests).
