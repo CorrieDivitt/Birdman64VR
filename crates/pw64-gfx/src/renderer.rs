@@ -162,9 +162,12 @@ pub struct StereoEye {
     pub hud: Mat4,
     /// Birdman64VR island model: drop the world outside this cylinder.
     pub clip: Option<StereoClip>,
-    /// The picture's background (linear RGB); `None` = the colour the game
-    /// cleared the screen with.
-    pub background: Option<[f64; 3]>,
+    /// The picture's background (linear RGB and alpha); `None` = the
+    /// colour the game cleared the screen with. Alpha 0 with black leaves
+    /// the picture transparent around what is drawn (premultiplied: opaque
+    /// draws write alpha 1, blended ones their own), for a headset showing
+    /// the player's room behind it.
+    pub background: Option<[f64; 4]>,
     /// Birdman64VR, in flight: the 2D draws on a sphere around the player
     /// instead of the flat panel `hud`.
     pub hud_sphere: Option<HudSphere>,
@@ -1807,7 +1810,7 @@ impl Renderer {
         // The game's own screen clear, if it made one before the world.
         let clear = eye
             .background
-            .map(|[r, g, b]| wgpu::Color { r, g, b, a: 1.0 });
+            .map(|[r, g, b, a]| wgpu::Color { r, g, b, a });
         let clear = clear.unwrap_or_else(|| {
             frame.draws[..first_world]
                 .iter()

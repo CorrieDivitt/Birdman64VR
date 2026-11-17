@@ -12,6 +12,7 @@
 mod controllers;
 mod gpu;
 pub mod math;
+mod passthrough;
 mod session;
 
 pub use controllers::PadState;

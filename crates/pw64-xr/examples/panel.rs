@@ -82,16 +82,19 @@ fn main() {
             world: false,
             panel: Some(panel),
             eyes: None,
+            passthrough: false,
         },
         "both" => Layers {
             world: true,
             panel: Some(panel),
             eyes: None,
+            passthrough: false,
         },
         "world" => Layers {
             world: true,
             panel: None,
             eyes: None,
+            passthrough: false,
         },
         other => {
             eprintln!("unknown mode {other:?}: use quad, both or world");

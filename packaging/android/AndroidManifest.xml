@@ -31,9 +31,12 @@
 
     <!-- Quest: a VR app (head tracking required), and what the Khronos
          OpenXR loader needs to find the headset's runtime (the entries its
-         AAR would merge in under Gradle). -->
+         AAR would merge in under Gradle). PASSTHROUGH: without it the
+         runtime does not offer XR_FB_passthrough (the room behind the
+         menus); not required, so headsets without it still install. -->
     <!--QUEST
     <uses-feature android:name="android.hardware.vr.headtracking" android:required="true" android:version="1" />
+    <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="false" />
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
     <queries>

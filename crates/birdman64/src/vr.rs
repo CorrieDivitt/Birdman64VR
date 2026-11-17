@@ -946,7 +946,20 @@ mod real {
     /// clear it: their lower edge about 13 degrees below eye level.
     const MODEL_PANEL_UP_M: f32 = 0.5;
     /// Around the model: a dim, slightly blue room.
-    const MODEL_BACKGROUND: [f64; 3] = [0.012, 0.016, 0.026];
+    const MODEL_BACKGROUND: [f64; 4] = [0.012, 0.016, 0.026, 1.0];
+    /// ...or, where the headset can show it (passthrough, p12), the
+    /// player's own room: nothing (transparent black, premultiplied).
+    const MODEL_BACKGROUND_ROOM: [f64; 4] = [0.0; 4];
+    /// The headset can show the player's room behind the picture
+    /// (`XrContext::passthrough_available`; headset thread → window
+    /// thread, which then leaves the island model's background clear).
+    static PASSTHROUGH: AtomicBool = AtomicBool::new(false);
+
+    /// The views shown in the player's room where the headset can
+    /// (`Source::scene`): the flat screens and the island model.
+    fn in_room(scene: u8) -> bool {
+        matches!(scene, 0 | 2)
+    }
 
     /// The title view: how far behind and above (negative: below) the game camera, in game
     /// metres.
@@ -1511,6 +1524,10 @@ mod real {
                     Some(d) => diorama_eye(&seated, d, self.spin),
                     None => stereo_eye(&seated),
                 };
+                // p12: the island model in the player's room.
+                if matrices.clip.is_some() && PASSTHROUGH.load(Ordering::Relaxed) {
+                    matrices.background = Some(MODEL_BACKGROUND_ROOM);
+                }
                 // Horizon lock, in flight: the world level, the vehicle
                 // (and its cockpit, in camera space) banking around the
                 // player. The HUD sphere stays with the seat.
@@ -1881,7 +1898,7 @@ fn key(c: vec3<f32>) -> f32 {
 @fragment
 fn fs(v: V) -> @location(0) vec4<f32> {
     let p = textureSample(t, s, v.uv);
-    let c = p.rgb;
+    let c = PICTURE;
     let col = SRGB_DECODE;
     return OUT;
 }
@@ -1898,10 +1915,22 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         /// A flat game screen over the room: its black background keyed
         /// out (premultiplied).
         Keyed,
+        /// An eye picture with a transparent background (the island model
+        /// in the player's room, p12) over nothing: premultiplied in the
+        /// picture's encoding, so colours are decoded unmultiplied (else
+        /// soft edges come out dark).
+        Cutout,
     }
 
     pub(super) fn shader(decode: bool, blend: PanelBlend) -> String {
         SHADER
+            .replace(
+                "PICTURE",
+                match blend {
+                    PanelBlend::Cutout => "p.rgb / max(p.a, 0.001)",
+                    _ => "p.rgb",
+                },
+            )
             .replace("SRGB_DECODE", if decode { "decode(c)" } else { "c" })
             .replace(
                 "OUT",
@@ -1909,6 +1938,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     PanelBlend::Opaque => "vec4<f32>(col, 1.0)",
                     PanelBlend::Over => "vec4<f32>(col, p.a)",
                     PanelBlend::Keyed => "vec4<f32>(col * key(c), key(c))",
+                    PanelBlend::Cutout => "vec4<f32>(col * p.a, p.a)",
                 },
             )
     }
@@ -2003,11 +2033,15 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         };
         // `keyed`: a flat game screen (no stereo world) with its black
         // background keyed out, so it floats in the room.
-        let (pipeline, over, keyed) = (
+        // `cutout`: an eye picture with a transparent background, in the
+        // player's room (p12).
+        let (pipeline, over, keyed, cutout) = (
             make(PanelBlend::Opaque),
             make(PanelBlend::Over),
             make(PanelBlend::Keyed),
+            make(PanelBlend::Cutout),
         );
+        PASSTHROUGH.store(xr.passthrough_available(), Ordering::Relaxed);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("vr panel"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -2114,6 +2148,8 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     // prediction made one frame ago, or older ones (game
                     // late, paused, loading); the runtime reprojects.
                     eyes: world.get().map(|w| w.1),
+                    // p12: the menus in the player's room.
+                    passthrough: in_room(s.scene),
                 }
             };
             if super::RECENTRE.swap(false, Ordering::Relaxed) {
@@ -2214,11 +2250,18 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                             depth_slice: None,
                             resolve_target: None,
                             ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color {
-                                    r: 0.0,
-                                    g: 0.002,
-                                    b: 0.006,
-                                    a: 1.0,
+                                // The dim room, or nothing: the player's
+                                // own room shows where the picture is
+                                // clear (p12).
+                                load: wgpu::LoadOp::Clear(if frame.passthrough {
+                                    wgpu::Color::TRANSPARENT
+                                } else {
+                                    wgpu::Color {
+                                        r: 0.0,
+                                        g: 0.002,
+                                        b: 0.006,
+                                        a: 1.0,
+                                    }
                                 }),
                                 store: wgpu::StoreOp::Store,
                             },
@@ -2230,7 +2273,11 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     // The stereo world: this eye's picture, then the panel
                     // over it where the window drew something.
                     if let (Some((set, _, _)), Some((_, groups))) = (world, &*eye_bound) {
-                        pass.set_pipeline(&pipeline);
+                        pass.set_pipeline(if frame.passthrough {
+                            &cutout
+                        } else {
+                            &pipeline
+                        });
                         pass.set_bind_group(0, &groups[set][i], &[]);
                         pass.draw(0..6, 0..1);
                     }
@@ -2270,6 +2317,8 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             for line in xr.take_log() {
                 log(&line, true);
             }
+            // (A failure to start it ends passthrough: the dim room again.)
+            PASSTHROUGH.store(xr.passthrough_available(), Ordering::Relaxed);
             // The Touch controllers: a pad for player 1 (input/xr_pad.rs).
             let pad = xr.pad();
             if pad.active != touch_active {
@@ -2628,6 +2677,19 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             assert!(apply(&r, [0.1, -1.0, 0.0])[1] > 0.99);
         }
 
+        /// p12: the room shows behind the flat screens and the island
+        /// model, never in flight, the title or a celebration; and a
+        /// cutout picture is decoded unmultiplied.
+        #[test]
+        fn the_room_shows_behind_menus_only() {
+            assert!(super::in_room(0) && super::in_room(2));
+            assert!(!super::in_room(1) && !super::in_room(3) && !super::in_room(4));
+            let cut = super::shader(true, super::PanelBlend::Cutout);
+            assert!(cut.contains("p.rgb / max(p.a, 0.001)") && cut.contains("col * p.a, p.a"));
+            assert!(!super::shader(true, super::PanelBlend::Opaque).contains("max(p.a"));
+            assert_eq!(super::MODEL_BACKGROUND_ROOM[3], 0.0);
+        }
+
         /// Every shader parses and validates (no GPU needed).
         #[test]
         fn shaders_are_valid_wgsl() {
@@ -2637,6 +2699,8 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 super::shader(true, super::PanelBlend::Opaque),
                 super::shader(true, super::PanelBlend::Over),
                 super::shader(true, super::PanelBlend::Keyed),
+                super::shader(true, super::PanelBlend::Cutout),
+                super::shader(false, super::PanelBlend::Cutout),
                 super::BAR_SHADER.to_string(),
             ];
             for source in sources {
