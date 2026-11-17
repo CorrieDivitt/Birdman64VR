@@ -1623,7 +1623,9 @@ impl App {
             input::set_touch(crate::touch::TouchPad::IDLE);
         }
         #[cfg(any(target_os = "android", target_os = "ios"))]
-        if !settings::is_open() && !headless {
+        // Birdman64VR: never in VR (no touchscreen in a headset; they would
+        // sit on the menu panel).
+        if !settings::is_open() && !headless && !crate::vr::active() {
             // A relayout mid-touch drops the fingers: republish, or what
             // they held would stay held in the game.
             if self.touch.set_layout(touch_layout(g))

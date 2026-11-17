@@ -219,6 +219,30 @@ impl Page {
     }
 }
 
+/// Birdman64VR: Main page rows that have no use in the headset: the
+/// touch controls (no touchscreen) and split-screen (VR is single-player).
+const VR_HIDDEN_MAIN: [Row; 3] = [Row::TouchLayout, Row::TouchHidden, Row::SplitScreen];
+
+/// Birdman64VR: Graphics options that do nothing in the headset. The window
+/// ones (display mode, fullscreen resolution, V-Sync: the headset paces the
+/// game), the screen-shape ones (widescreen, fill screen: the headset has its
+/// own field of view), the flat picture's scale and its filter (the eyes are
+/// drawn at the headset's own size; only the menu panel used them) and OLED
+/// care (the Quest 3 has LCD screens). Still shown: frame rate, texture
+/// filtering and packs, MSAA (the eye pictures use it), full-detail models
+/// and view distance.
+const VR_HIDDEN_GRAPHICS: [Opt; 9] = [
+    Opt::DisplayMode,
+    Opt::Resolution,
+    Opt::Vsync,
+    Opt::Widescreen,
+    Opt::FillScreen,
+    Opt::Scale,
+    Opt::Filter,
+    Opt::OledDrift,
+    Opt::OledBrightness,
+];
+
 /// How many pages (`Page::index` is the slot).
 const N_PAGES: usize = 6;
 
@@ -1804,8 +1828,11 @@ impl Overlay {
                     .unwrap_or(2);
                 rows.insert(at, Row::HudLayout);
                 // Birdman64VR: the headset's HUD choices, under Move HUD.
+                // No touch controls (no touchscreen) and no split-screen
+                // (VR is single-player) in the headset.
                 if crate::vr::active() {
                     rows.insert(at + 1, Row::VrHudPage);
+                    rows.retain(|r| !VR_HIDDEN_MAIN.contains(r));
                 }
                 rows
             }
@@ -1835,6 +1862,10 @@ impl Overlay {
                 // U16: the restart banner's "Restart now" row, first on the
                 // page so it sits directly under the banner text (which only
                 // shows while changes are pending).
+                // Birdman64VR: only what changes the picture in the headset.
+                if crate::vr::active() {
+                    rows.retain(|r| !matches!(r, Row::Opt(o) if VR_HIDDEN_GRAPHICS.contains(o)));
+                }
                 if !self.pending_restart().is_empty() {
                     rows.insert(0, Row::RestartNow);
                 }

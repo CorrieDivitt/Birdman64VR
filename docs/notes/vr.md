@@ -420,6 +420,20 @@ The Touch controllers have one menu button (the right one is the
 system's): the left stick press stands in for View. No d-pad (by default
 it only doubles the stick).
 
+## Menus in VR (p10)
+
+The settings overlay drops what has no use in the headset (`settings.rs`
+`VR_HIDDEN_MAIN`, `VR_HIDDEN_GRAPHICS`; the flat game keeps everything):
+Main loses Move touch controls, the touch buttons switch and Split-screen;
+Graphics loses display mode, resolution, V-Sync (the headset paces the
+game), widescreen and fill screen (the headset's own field of view), scale
+and its filter (the eyes are drawn at the headset's size; only the menu
+panel used them) and OLED care (LCD screens). Kept: frame rate, texture
+filtering and packs, MSAA (the eye pictures use it), full-detail models and
+view distance. The on-screen touch controls are never drawn in VR
+(window.rs), and the title menu has no Players item in VR (its original two
+items and box; title_screen.c.patch `sPw64Items`).
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`

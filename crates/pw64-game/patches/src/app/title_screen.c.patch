@@ -14,11 +14,14 @@
 +static s32 sPw64MenuDy; // the extra item's row height (box grows down)
 +static s32 sPw64HintW;  // the hint's width (font 6, measured at menu creation)
 +static const char sPw64Hint[] = "Connect a second controller";
++// Birdman64VR: VR is single-player, so the headset's title menu keeps the
++// original two items (no Players item, the box at its original size).
++static s32 sPw64Items = 3;
 +
 +// The Players item shows the current mode; re-encoded whenever it changed
 +// (the item itself, or the settings row via pw64_split_poll).
 +static void pw64_title_players_label(void) {
-+    if (sPw64PlayersShown != pw64_split) {
++    if (sPw64Items > PW64_MENU_PLAYERS && sPw64PlayersShown != pw64_split) {
 +        sPw64PlayersShown = pw64_split;
 +        pw64_text_encode_style(pw64_split ? "2 Players" : "1 Player", sPw64PlayersStr,
 +                               ARRAY_COUNT(sPw64PlayersStr), 1);
@@ -32,7 +35,7 @@
 +#define PW64_HINT_X ((SCREEN_WIDTH - sPw64HintW) / 2)
 +#define PW64_HINT_Y (76 - 2 * sPw64MenuDy - 4)
 +static s32 pw64_title_hint_on(void) {
-+    return pw64_split && pw64_split_hint;
++    return sPw64Items == 3 && pw64_split && pw64_split_hint;
 +}
 +
 +static void pw64_title_hint_box(void) {
@@ -69,9 +72,10 @@
 +    // PW64 split-screen: three items, the menu grown down by one row.
 +    uvFontSet(6);
 +    uvFontScale(1.0f, 1.0f);
-+    sPw64MenuDy = uvFontHeight() + 1;
++    sPw64Items = (pw64_widescreen_aspect < 0.0f) ? 2 : 3;
++    sPw64MenuDy = (sPw64Items == 3) ? uvFontHeight() + 1 : 0;
 +    sPw64HintW = uvFontWidth(sPw64Hint);
-+    menuCreateItems(102, 60 - sPw64MenuDy, 6, 1.0f, 1.0f, sMainMenuItems, 3);
++    menuCreateItems(102, 60 - sPw64MenuDy, 6, 1.0f, 1.0f, sMainMenuItems, sPw64Items);
 +    sPw64PlayersShown = -1;
 +    pw64_title_players_label();
 @@ -327,1 +327,4 @@
