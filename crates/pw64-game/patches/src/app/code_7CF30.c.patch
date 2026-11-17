@@ -16,6 +16,12 @@
 +    if (pw64_widescreen_aspect < 0.0f) {
 +        gcData->camera->unk68.x = 0.0f;
 +        gcData->camera->unk68.y -= PW64_VR_GYRO_EYE_BACK_M;
++        // Chase (camera.c mode 0): straight behind at the gyrocopter's height,
++        // no look down (the game sits 1.2 m above), and further back; the
++        // distance clamp's far end (unk58) moves back with it.
++        gcData->camera->unk60 -= PW64_VR_GYRO_CHASE_BACK_M;
++        gcData->camera->unk64 = 0.0f;
++        gcData->camera->unk58 += PW64_VR_GYRO_CHASE_BACK_M;
 +    }
      camera_802D45C4(gcData->camera, gcData->unk68);
  }

@@ -233,10 +233,18 @@ which is dizzying as the player's head. Confirmed on the headset
   In VR the camera does not drop (it starts at the drop's end) and the
   scene turns around the island at a quarter of the speed
   (title_screen.c.patch); the headset follows that camera at full size,
-  level, 5 m behind and 3 m below it, so the logo floats above the menu.
+  level, 3 m behind and 1 m below it (first 5 m and 3 m; moved 2 m forward
+  and 2 m up in the headset), so the logo floats above the menu.
   The view recentres as the title starts. Tries before: a view fixed at
   the drop's end (still turned with the scene), a slowed drop from 12 m
   behind (still a big motion, the logo behind the menu).
+- **Blank frames between screens** (title to file select and other
+  cuts: about a second of loading): no world and no textured draw
+  (`Frame::is_blank`). The headset fell back to the panel, a big black
+  square in front of the player; now it keeps the last stereo picture
+  (reprojected by the runtime) with the panel clear over it until a frame
+  has something to show. Logged once per hold; a fall back to the panel
+  logs the frame's draws and textured draws.
 - **Data**: after the world tag, 21 G_NOOP words (`PW64_DIORAMA_TAG`):
   the camera's world matrix, the island's bounds, a title flag, the game
   state and the title's phase (logged: `[vr] game state N, title phase P`).
@@ -356,6 +364,15 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
   arms posed by the joint animation `unk590`).
 - **Open**: the cannonball landing pull-back is the game's (fine on the
   headset).
+
+### Gyrocopter chase in VR
+
+The chase camera (camera.c mode 0) follows a lagged copy of the
+gyrocopter's frame offset by (`unk5C`, `unk60`, `unk64`) = (0, -4.45, 1.2) m
+and looks at it, its distance clamped to `unk54`..`unk58` (1.8..7.9 m). In VR
+(code_7CF30.c.patch `gyrocopterEnterLeave`): 9.45 m behind
+(`PW64_VR_GYRO_CHASE_BACK_M` 5), level (z 0, no look down), the clamp's far
+end 5 m further out too.
 
 ### No C-button look in VR (c11)
 

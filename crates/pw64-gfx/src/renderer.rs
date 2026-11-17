@@ -2302,6 +2302,13 @@ mod tests {
         assert_eq!(px(48, 24), [0, 255, 0], "right: green over red");
     }
 
+    /// Birdman64VR: a frame with nothing drawn, or only flat colour, is
+    /// blank (the headset holds its last stereo picture over it).
+    #[test]
+    fn empty_frame_is_blank() {
+        assert!(Frame::default().is_blank());
+    }
+
     /// Birdman64VR: a world view drawn through `render_stereo` with an eye
     /// matrix that repeats the game's own projection, viewport and screen
     /// transform gives the flat picture; and a narrower eye shows the same
@@ -2355,6 +2362,7 @@ mod tests {
         interp.wide_tags = true;
         let frame = interp.run(&mem, dl);
         assert!(frame.has_world());
+        assert!(!frame.is_blank(), "a world view is not blank");
         assert_eq!(frame.views.len(), 1);
         assert!(frame.draws.iter().all(|d| d.view == 1));
         // A camera-space point comes back from its `pos`: the red quad's
