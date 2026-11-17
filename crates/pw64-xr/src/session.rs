@@ -193,6 +193,10 @@ pub struct Frame<'a> {
     /// Where the player sits this frame: draw the world for
     /// `seat.seated(pose)`, submit it for `pose`.
     pub seat: Seat,
+    /// The player's room is shown behind this frame's picture
+    /// ([`Layers::passthrough`], granted): leave the eye targets
+    /// transparent (premultiplied alpha) where it should show.
+    pub passthrough: bool,
 }
 
 /// Which layers a frame shows: the stereo world (drawn first, behind) and
@@ -207,6 +211,10 @@ pub struct Layers {
     /// stalls). The runtime shifts the picture to where the head really is
     /// (reprojection). `None`: this frame's prediction.
     pub eyes: Option<[EyePose; 2]>,
+    /// Show the player's room behind the picture, where the headset can
+    /// ([`XrContext::passthrough_available`]); [`Frame::passthrough`]
+    /// tells whether this frame does.
+    pub passthrough: bool,
 }
 
 /// Near and far planes of the eye projections, in metres.
@@ -239,6 +247,9 @@ struct Swapchain {
 /// Field order matters: the OpenXR objects drop before `gpu`, whose device
 /// they were created on.
 pub struct XrContext {
+    /// The room behind the picture (Quest; `None`: not available). First:
+    /// a child of the session.
+    passthrough: Option<crate::passthrough::Passthrough>,
     panel: Swapchain,
     /// Both eyes: one image with two array layers.
     eyes: Swapchain,
@@ -355,6 +366,10 @@ impl XrContext {
             }
             enabled.khr_android_create_instance = true;
         }
+        // Optional, standalone headsets only (Quest Link is left as it
+        // is): the room behind the menus. Quest offers it only to apps
+        // whose manifest has the PASSTHROUGH feature.
+        enabled.fb_passthrough = cfg!(target_os = "android") && available.fb_passthrough;
         // Optional: the runtime's clock, to see how far ahead it predicts
         // (`FrameTime::ahead_ns`).
         #[cfg(windows)]
@@ -413,6 +428,30 @@ impl XrContext {
         let head =
             session.create_reference_space(xr::ReferenceSpaceType::VIEW, xr::Posef::IDENTITY)?;
         let mut log = Vec::new();
+        let passthrough = if enabled.fb_passthrough {
+            match crate::passthrough::Passthrough::new(&instance, &session) {
+                Ok(p) => {
+                    log.push("passthrough: XR_FB_passthrough available, ready".into());
+                    Some(p)
+                }
+                Err(e) => {
+                    log.push(format!(
+                        "passthrough: XR_FB_passthrough available, but not created: {e}"
+                    ));
+                    None
+                }
+            }
+        } else {
+            log.push(
+                if available.fb_passthrough {
+                    "passthrough: XR_FB_passthrough available, not used on PC"
+                } else {
+                    "passthrough: XR_FB_passthrough not available"
+                }
+                .into(),
+            );
+            None
+        };
         let controllers = match crate::controllers::Controllers::new(&instance, &session) {
             Ok(c) => Some(c),
             Err(e) => {
@@ -450,6 +489,7 @@ impl XrContext {
         let eyes = create_swapchain(&session, &gpu.device, vk_format, format, eye, 2)?;
 
         Ok(Self {
+            passthrough,
             panel,
             eyes,
             space,
@@ -509,6 +549,38 @@ impl XrContext {
         }
         // Drops in field order: swapchains, space, session, instance, then
         // our references to the wgpu device.
+    }
+
+    /// The headset can show the player's room behind the picture
+    /// ([`Layers::passthrough`]).
+    pub fn passthrough_available(&self) -> bool {
+        self.passthrough.is_some()
+    }
+
+    /// Turns passthrough on or off for the frame being made; `true`: on.
+    /// A failure is logged and ends passthrough for this session.
+    fn set_passthrough(&mut self, on: bool) -> bool {
+        let Some(p) = &mut self.passthrough else {
+            return false;
+        };
+        if p.on() == on {
+            return on;
+        }
+        match p.set(on) {
+            Ok(()) => {
+                self.log
+                    .push(format!("passthrough {}", if on { "on" } else { "off" }));
+                on
+            }
+            Err(e) => {
+                self.log.push(format!(
+                    "passthrough: turning it {} failed ({e}); not used any more",
+                    if on { "on" } else { "off" }
+                ));
+                self.passthrough = None;
+                false
+            }
+        }
     }
 
     /// One eye's render size in pixels (the runtime's recommendation).
@@ -571,6 +643,12 @@ impl XrContext {
                             self.running = true;
                         }
                         xr::SessionState::STOPPING => {
+                            // Started again by the first frame that
+                            // wants it after the session resumes.
+                            if let Some(p) = self.passthrough.as_mut().filter(|p| p.on()) {
+                                p.stopped();
+                                self.log.push("passthrough off (session stopping)".into());
+                            }
                             self.session.end()?;
                             self.running = false;
                         }
@@ -656,6 +734,7 @@ impl XrContext {
             }
         }
         let layers = layers();
+        let passthrough = self.set_passthrough(layers.passthrough);
         let waiting = std::time::Instant::now();
         let _queue = queue_lock.map(|m| m.lock().unwrap_or_else(|e| e.into_inner()));
         self.queue_wait = waiting.elapsed();
@@ -727,6 +806,7 @@ impl XrContext {
             eyes,
             next_eyes,
             seat: self.seat,
+            passthrough,
         });
         if eye_image.is_some() {
             self.eyes.handle.release_image()?;
@@ -757,6 +837,12 @@ impl XrContext {
         });
         let world_layer = projection_views.as_ref().map(|views| {
             xr::CompositionLayerProjection::new()
+                // Over the room: by the picture's alpha (premultiplied).
+                .layer_flags(if passthrough {
+                    xr::CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA
+                } else {
+                    xr::CompositionLayerFlags::EMPTY
+                })
                 .space(&self.space)
                 .views(views)
         });
@@ -780,8 +866,17 @@ impl XrContext {
                     height: panel.width_m * h as f32 / w as f32,
                 })
         });
-        // Back to front: the world, then the panel over it.
+        // Back to front: the room (passthrough), the world, then the
+        // panel over it.
+        let room_layer = self
+            .passthrough
+            .as_ref()
+            .filter(|_| passthrough)
+            .map(|p| p.layer());
         let mut submit: Vec<&xr::CompositionLayerBase<'_, xr::Vulkan>> = Vec::new();
+        if let Some(l) = &room_layer {
+            submit.push(l.base());
+        }
         if let Some(l) = &world_layer {
             submit.push(l);
         }

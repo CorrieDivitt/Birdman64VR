@@ -553,6 +553,40 @@ the headset. The on-screen touch controls are never drawn in VR
 (window.rs), and the title menu has no Players item in VR (its original two
 items and box; title_screen.c.patch `sPw64Items`).
 
+## Passthrough menus (p12, experiment)
+Quest only: the island model and the flat 2D screens in the player's own
+room instead of the dim blue one. The runtime draws the room into its own
+composition layer; the app never sees camera images.
+- Manifest (Quest flavour): `com.oculus.feature.PASSTHROUGH`, not
+  required. Without it the runtime does not list `XR_FB_passthrough`.
+- `pw64-xr/src/passthrough.rs`: the feature and one reconstruction layer,
+  created paused after the session; raw calls, because openxr 0.22's
+  `Passthrough::start()` calls `xrPassthroughPauseFB` and the crate does
+  not export its `CompositionLayerPassthroughFB` builder. Enabled only on
+  Android (`cfg!(target_os = "android")`): the PC version, Quest Link
+  included, is unchanged.
+- `Layers::passthrough` asks for it per frame; `XrContext::frame` starts or
+  pauses the feature and layer on a change (paused in flight: no cost),
+  submits the passthrough layer first and the eye layer with
+  `BLEND_TEXTURE_SOURCE_ALPHA` (premultiplied), and tells the draw callback
+  in `Frame::passthrough`. Paused on session STOPPING, started again by
+  the next frame that wants it. A failure is logged and ends it for the
+  session (the dim room again).
+- vr.rs: wanted for `Source::scene` 0 (flat screens) and 2 (island model),
+  `in_room`. The eye targets are then cleared transparent; the keyed flat
+  screens were premultiplied already. The island model's eye pictures are
+  cleared to transparent black (`MODEL_BACKGROUND_ROOM`,
+  `StereoEye::background` now has alpha) when `PASSTHROUGH` (headset
+  thread → window thread) says the headset can; the game's opaque draws
+  write alpha 1 and blended ones their own, so the picture is a
+  premultiplied cutout, drawn with `PanelBlend::Cutout` (decoded
+  unmultiplied, else soft edges go dark).
+- Log: `passthrough: XR_FB_passthrough available, ready` (or `not
+  available`, `not used on PC`, `not created`), then `passthrough on` /
+  `passthrough off` at each change.
+- Not done: the paused game and the settings overlay in flight; a setting
+  to turn it off.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`
