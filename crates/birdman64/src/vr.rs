@@ -680,6 +680,10 @@ mod real {
         /// A blank game frame with no stereo picture to keep (the game's
         /// start): the panel is clear and shown blended, i.e. nothing.
         blank: bool,
+        /// What kind of view the headset shows (w8, the fade on a change):
+        /// 0 flat screens, 1 flight, 2 island model, 3 title, 4 badge
+        /// celebration. Blank frames keep the one before.
+        scene: u8,
     }
 
     /// Where the eyes will be for the next headset frame (headset thread →
@@ -1258,7 +1262,9 @@ mod real {
                     // Nothing to hold (the game's start): show nothing
                     // rather than the panel's black picture.
                     self.void = true;
-                    self.source.lock().unwrap_or_else(|e| e.into_inner()).blank = true;
+                    let mut src = self.source.lock().unwrap_or_else(|e| e.into_inner());
+                    src.blank = true;
+                    src.scene = 0;
                     log("blank game frame: showing nothing", true);
                 }
                 return;
@@ -1275,7 +1281,10 @@ mod real {
                     self.stereo = false;
                     STEREO_LEAD_US.store(0, Ordering::Relaxed);
                     self.cue_to_eyes = [0; 256];
-                    self.source.lock().unwrap_or_else(|e| e.into_inner()).world = None;
+                    let mut src = self.source.lock().unwrap_or_else(|e| e.into_inner());
+                    src.world = None;
+                    src.scene = 0;
+                    drop(src);
                     // What the panel shows instead, for tracking down
                     // transitions that still look wrong.
                     let (draws, textured) = frame.map_or((0, 0), |f| {
@@ -1364,8 +1373,17 @@ mod real {
                 renderer.render_stereo(frame, &views[back][eye], self.eye_size, &matrices);
             }
             self.eye_serial += 1;
-            self.source.lock().unwrap_or_else(|e| e.into_inner()).world =
-                Some((back, poses, self.eye_serial));
+            {
+                let mut src = self.source.lock().unwrap_or_else(|e| e.into_inner());
+                src.world = Some((back, poses, self.eye_serial));
+                // w8: the kind of view, for the headset's fade on a change.
+                src.scene = match &frame.diorama {
+                    None => 1,
+                    Some(d) if d.title => 3,
+                    Some(d) if d.celebration => 4,
+                    Some(_) => 2,
+                };
+            }
             // The lead for the next cues: the slowest of the last 256 sets
             // (a few seconds) plus a millisecond, in whole milliseconds, at
             // least the panel's 6 ms and at most a frame less a millisecond.
@@ -1489,7 +1507,7 @@ mod real {
             let format = panel.texture().format();
             let bar = self
                 .probe
-                .get_or_insert_with(|| Bar::new(device, format, 1));
+                .get_or_insert_with(|| Bar::new(device, format, 1, false));
             // The panel fills the target: its half-extents are 1 in clip space.
             let mvp = math::translate_scale(
                 [(probe_phase() - 0.5) * 2.0, PROBE_Y_WINDOW * 2.0, 0.0],
@@ -1563,8 +1581,14 @@ fn fs() -> @location(0) vec4<f32> {
 ";
 
     impl Bar {
-        /// `slots`: how many rectangles with their own placement per frame.
-        fn new(device: &wgpu::Device, format: wgpu::TextureFormat, slots: usize) -> Self {
+        /// `slots`: how many rectangles with their own placement per frame;
+        /// `blend`: drawn by their alpha (the fade) or opaque (the probe).
+        fn new(
+            device: &wgpu::Device,
+            format: wgpu::TextureFormat,
+            slots: usize,
+            blend: bool,
+        ) -> Self {
             let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("vr probe"),
                 source: wgpu::ShaderSource::Wgsl(BAR_SHADER.into()),
@@ -1582,7 +1606,11 @@ fn fs() -> @location(0) vec4<f32> {
                     module: &module,
                     entry_point: Some("fs"),
                     compilation_options: Default::default(),
-                    targets: &[Some(format.into())],
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: blend.then_some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
                 }),
                 primitive: Default::default(),
                 depth_stencil: None,
@@ -1631,6 +1659,10 @@ fn fs() -> @location(0) vec4<f32> {
             pass.draw(0..6, 0..1);
         }
     }
+
+    /// w8: how long the fade in from black takes after the headset's view
+    /// changes kind (flight, island model, title, flat screens).
+    const FADE_IN: Duration = Duration::from_millis(300);
 
     /// The probe bars' size on the panel, in panel widths / heights, and
     /// their centre heights (panel centre 0, top edge 0.5).
@@ -1838,7 +1870,12 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         // Stereo report: headset frames that showed a new eye picture and
         // ones that showed the previous one again.
         let (mut eyes_new, mut eyes_repeated, mut last_serial) = (0u32, 0u32, 0u64);
-        let probe = probe_on().then(|| Bar::new(&device, xr.format(), 2));
+        let probe = probe_on().then(|| Bar::new(&device, xr.format(), 2, false));
+        // w8: a fade in from black when what the headset shows changes kind
+        // (`Source::scene`), instead of a hard cut; one slot per eye.
+        let fade = Bar::new(&device, xr.format(), 2, true);
+        let mut shown_scene = None::<u8>;
+        let mut scene_since = Instant::now();
         // For the current panel textures: (generation, aspect, bind groups
         // per texture and eye).
         let mut bound: Option<(u64, f32, [[wgpu::BindGroup; 2]; 2])> = None;
@@ -1862,6 +1899,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             // set alone.
             let world = std::cell::Cell::new(None::<(usize, [EyePose; 2], u64)>);
             let blank = std::cell::Cell::new(false);
+            let scene = std::cell::Cell::new(0u8);
             let choose = || {
                 let mut s = source.lock().unwrap_or_else(|e| e.into_inner());
                 let mut eye_bound = eye_bound.borrow_mut();
@@ -1897,6 +1935,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 }
                 world.set(s.world.filter(|_| eye_bound.is_some()));
                 blank.set(s.blank);
+                scene.set(s.scene);
                 Layers {
                     world: true,
                     panel: None,
@@ -1911,6 +1950,16 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             }
             let outcome = xr.frame(choose, Some(&pw64_gfx::QUEUE_GATE), |frame| {
                 let world = world.get();
+                // w8: the view's kind changed (not at the very start): fade
+                // in from black over FADE_IN.
+                if shown_scene != Some(scene.get()) {
+                    if shown_scene.is_some() {
+                        scene_since = Instant::now();
+                    }
+                    shown_scene = Some(scene.get());
+                }
+                let fade_alpha =
+                    1.0 - (scene_since.elapsed().as_secs_f32() / FADE_IN.as_secs_f32()).min(1.0);
                 let eye_bound = eye_bound.borrow();
                 // Stereo report: a new picture, or the last one again?
                 if let Some((_, _, serial)) = world {
@@ -2036,6 +2085,11 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                             let mvp = math::mul(&eye.projection, &math::mul(&eye.view, &model));
                             bar.draw(&queue, &mut pass, i, &mvp, [1.0, 0.45, 0.1, 1.0]);
                         }
+                    }
+                    // w8: fading in from black after a change of view.
+                    if fade_alpha > 0.0 {
+                        let all = math::translate_scale([0.0; 3], [2.0, 2.0, 1.0]);
+                        fade.draw(&queue, &mut pass, i, &all, [0.0, 0.0, 0.0, fade_alpha]);
                     }
                 }
                 // Directly: this thread holds the queue lock for the frame.

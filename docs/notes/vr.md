@@ -420,6 +420,20 @@ spike_build.sh).
 | Jumble hopper | speed, timer, altimeter, map, altitude, messages |
 | Birdman | speed, altimeter, altitude, photos, messages |
 
+## Transitions (w8)
+
+- **A fade in from black** (`FADE_IN` 0.3 s, headset thread) whenever the
+  kind of view changes: flat screens, flight, island model, title, badge
+  celebration (`Source::scene`, set by `Vr::world`; blank frames and holds
+  keep the one before). A black quad by its alpha over each eye, panel
+  included (`Bar` with blending). Cuts the game makes inside one kind (a
+  camera change in flight) stay as they are.
+- **The game's own full-screen fades in flight** (the crash fade to white
+  or black, sky diving's clouds; full-width untextured fills after the
+  world starts, `Wide::Stretch`) were dropped in stereo: now drawn over the
+  whole eye (`EYE_FADE`, 3x the eye in N64 clip space, no depth test, last
+  pass), not on the HUD sphere.
+
 ## Horizon lock (c5)
 
 Comfort: in flight the world stays level and the vehicle (its cockpit
