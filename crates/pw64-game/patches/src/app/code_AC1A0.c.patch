@@ -24,7 +24,10 @@
  void rocketBeltMovementFrame(RocketBeltData* rbData, u8 gameState) {
      f32 spB4;
      f32 var_fv0_3;
-@@ -175,7 +185,11 @@ void rocketBeltMovementFrame(RocketBeltData* rbData, u8 gameState) {
+@@ -173,9 +183,13 @@ void rocketBeltMovementFrame(RocketBeltData* rbData, u8 gameState) {
+-            buttons = demoGetButtons(rbData->contIdx);
++            buttons = pw64_vr_strip_c(demoGetButtons(rbData->contIdx)); // Birdman64VR c11: no C-button look in VR
+         }
          rbData->unk68 = stickX;
          rbData->unk6C = stickY;
          if ((rbData->unk8 > 0.0f) || (buttons & (A_BUTTON | B_BUTTON))) {
@@ -63,6 +66,34 @@
              rbData->unk60 = 0.8f;
              if (gameState != GAME_STATE_RESULTS) {
                  sndPlaySfxVolPitchPan(SFX_UI_CAMERA_MOVE, 0.3f, 0.65f, 0.0f);
+@@ -246,11 +269,11 @@
+                 spB4 = 0.0f;
+             }
+             rbData->unk88 = func_80313AF4(spB4, rbData->unk88, 3.0f);
+-            if (demoButtonPress(rbData->contIdx, D_CBUTTONS) != 0) {
++            if (pw64_vr_strip_c(D_CBUTTONS) && demoButtonPress(rbData->contIdx, D_CBUTTONS) != 0) { // c11: no camera height steps in VR
+                 if ((gameState != GAME_STATE_RESULTS) && (rbData->unk58 > -1.5707961f)) {
+                     sndPlaySfxVolPitchPan(SFX_UI_CAMERA_MOVE, 0.3f, 1.0f, 0.0f);
+                 }
+                 rbData->unk58 -= 0.39269903f;
+                 rbData->unk58 = MAX(rbData->unk58, -1.5707961f);
+             }
+-            if (demoButtonPress(rbData->contIdx, U_CBUTTONS) != 0) {
++            if (pw64_vr_strip_c(U_CBUTTONS) && demoButtonPress(rbData->contIdx, U_CBUTTONS) != 0) { // c11
+@@ -262,11 +285,11 @@
+             }
+             rbData->unk8C = -rbData->unk54;
+         } else {
+-            if (demoButtonPress(rbData->contIdx, U_CBUTTONS) != 0) {
++            if (pw64_vr_strip_c(U_CBUTTONS) && demoButtonPress(rbData->contIdx, U_CBUTTONS) != 0) { // c11
+                 if ((gameState != GAME_STATE_RESULTS) && (rbData->unk58 < 1.4835297f)) {
+                     sndPlaySfxVolPitchPan(SFX_UI_CAMERA_MOVE, 0.3f, 1.0f, 0.0f);
+                 }
+                 rbData->unk58 += 0.39269903f;
+                 rbData->unk58 = MIN(rbData->unk58, 1.5707961f);
+             }
+-            if (demoButtonPress(rbData->contIdx, D_CBUTTONS) != 0) {
++            if (pw64_vr_strip_c(D_CBUTTONS) && demoButtonPress(rbData->contIdx, D_CBUTTONS) != 0) { // c11
 @@ -369,11 +392,14 @@ void rocketBeltMovementFrame(RocketBeltData* rbData, u8 gameState) {
                  } else {
                      hud->speed = rbData->unk1F4 * 3.6f * 0.7f;

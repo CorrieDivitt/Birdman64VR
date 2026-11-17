@@ -1,0 +1,11 @@
+--- a/src/app/jumble_hopper.c
++++ b/src/app/jumble_hopper.c
+@@ -109,7 +109,7 @@
+         } else {
+             xAxisInputs = demoGetInputs(jhData->contIdx, INPUT_AXIS_X);
+             yAxisInputs = demoGetInputs(jhData->contIdx, INPUT_AXIS_Y);
+-            buttons = demoGetButtons(jhData->contIdx);
++            buttons = pw64_vr_strip_c(demoGetButtons(jhData->contIdx)); // Birdman64VR c11: no C-button look in VR
+         }
+         jhData->unk8 += D_8034F854;
+         jhData->unk10 = func_80313F08(&D_80368B20, FABS(yAxisInputs));
