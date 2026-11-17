@@ -72,6 +72,13 @@ float pw64_vr_aim_reticle_y(float flat, float down) {
     return (float)(int)(y < 0.0f ? y - 0.5f : y + 0.5f);
 }
 
+int pw64_vr_flight_vehicle(void) {
+    if (!pw64_vr_flight()) {
+        return -1;
+    }
+    return D_80362690->unkC[D_80362690->unk9C].veh;
+}
+
 int pw64_vr_strip_c(int buttons) {
     /* U_CBUTTONS | D_CBUTTONS | L_CBUTTONS | R_CBUTTONS */
     return pw64_widescreen_aspect < 0.0f ? buttons & ~0x000F : buttons;

@@ -111,6 +111,10 @@ float pw64_vr_aim_reticle_y(float flat, float down);
  * flight controls drop the C-button look (and the rocket belt's camera
  * height steps, the cannonball's aiming swing) in VR. */
 int pw64_vr_strip_c(int buttons);
+/* Birdman64VR, same file (p9): the vehicle being flown in VR (`VEHICLE_*`:
+ * 0 hang glider .. 6 birdman), -1 outside a flight (menus) or outside VR.
+ * Read by Rust (pw64_game::vr_flight_vehicle) for the VR HUD page. */
+int pw64_vr_flight_vehicle(void);
 /* Birdman64VR, same file: 1 = the gyrocopter's windscreen shows in VR
  * first person (Rust: VR HUD page, `[vr] gyro_windscreen`). Always shown
  * from outside. */

@@ -399,6 +399,27 @@ the cannon). The rocket belt's C up/down camera height steps (22.5 degrees,
 and are skipped in VR the same way; R's level/top-down toggle is unchanged.
 C buttons outside flight (map zoom, photo album, test menu) are untouched.
 
+## VR HUD page follows the vehicle (p9)
+
+In a flight the VR HUD page offers only what the vehicle has: its HUD
+elements (`hud_edit::vehicle_elements`, from decomp hud.c `hudDraw<Vehicle>`;
+messages for all) and, in the gyrocopter only, the windscreen and dashboard
+rows. In a menu (no flight) every option shows. The vehicle comes from
+`pw64_vr_flight_vehicle()` (pw64_widescreen.c: the player's `veh` while
+`pw64_vr_flight()`, else -1), called by `pw64_game::vr_flight_vehicle` when
+the page builds its rows (exported for the dylib in pw64-cbuild and
+spike_build.sh).
+
+| Vehicle | Elements |
+|---|---|
+| Hang glider | speed, timer, altimeter, map, altitude, photos, messages |
+| Rocket belt | speed, timer, fuel, altimeter, map, altitude, messages |
+| Gyrocopter | speed, timer, throttle, fuel, altimeter, map, altitude, messages |
+| Cannonball | speed, altimeter, map, altitude, messages, power, heading, elevation, shots |
+| Sky diving | timer, altimeter, map, altitude, messages |
+| Jumble hopper | speed, timer, altimeter, map, altitude, messages |
+| Birdman | speed, altimeter, altitude, photos, messages |
+
 ## Touch controllers (q3)
 
 The Touch controllers are one more gamepad for player 1, laid out like a
