@@ -357,6 +357,20 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
 - **Open**: the cannonball landing pull-back is the game's (fine on the
   headset).
 
+### No C-button look in VR (c11)
+
+Every vehicle turns the C buttons into a look (`camera->unk78/unk7C`: x0.5 in
+the chase modes, full in first-person mode 1, up to 90 degrees), added on top
+of head tracking. In VR `pw64_vr_strip_c()` (pw64_widescreen.c) clears the
+four C bits from each vehicle's `demoGetButtons()` read: birdman0.c,
+code_7CF30.c (gyrocopter; this also ends the missile lock-out, which needed the
+look within 7 degrees), code_AC1A0.c (rocket belt), hang_glider1.c,
+jumble_hopper.c, skydiving.c, cannonball.c (also the aiming view's swing around
+the cannon). The rocket belt's C up/down camera height steps (22.5 degrees,
+`unk58` -> chase `unk1B0`, first-person tilt `unk8C`) read `demoButtonPress`
+and are skipped in VR the same way; R's level/top-down toggle is unchanged.
+C buttons outside flight (map zoom, photo album, test menu) are untouched.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`

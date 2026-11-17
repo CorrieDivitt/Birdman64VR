@@ -31,7 +31,9 @@
  void gyrocopterMovementFrame(GyrocopterData* gcData, u8 gameState) {
      s32 pad[2];
      HUDState* hud;
-@@ -225,7 +239,11 @@ void gyrocopterMovementFrame(GyrocopterData* gcData, u8 gameState) {
+@@ -224,8 +238,12 @@ void gyrocopterMovementFrame(GyrocopterData* gcData, u8 gameState) {
+-            buttons = demoGetButtons(gcData->contIdx);
++            buttons = pw64_vr_strip_c(demoGetButtons(gcData->contIdx)); // Birdman64VR c11: no C-button look in VR
          }
  
          if ((gcData->elapsedTime > 0.0f) || (buttons & A_BUTTON)) {

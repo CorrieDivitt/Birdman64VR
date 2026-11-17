@@ -12,7 +12,7 @@
  void hangGliderMovementFrame(HangGliderData* hgData, u8 gameState) {
      s32 pad;
      HUDState* temp_a2;
-@@ -143,9 +148,17 @@ void hangGliderMovementFrame(HangGliderData* hgData, u8 gameState) {
+@@ -143,12 +148,16 @@ void hangGliderMovementFrame(HangGliderData* hgData, u8 gameState) {
          return;
      }
      if (fdr_802E6B5C() != 4) {
@@ -27,7 +27,11 @@
          if (gameState == GAME_STATE_RESULTS) {
              fdr_802E65AC(&hgData->unk10, &D_80362690->terraId, &stickX, &stickY, &buttons);
          } else {
-@@ -391,5 +404,8 @@ void hangGliderMovementFrame(HangGliderData* hgData, u8 gameState) {
+             stickX = demoGetInputs(hgData->contIdx, INPUT_AXIS_X);
+             stickY = demoGetInputs(hgData->contIdx, INPUT_AXIS_Y);
+-            buttons = demoGetButtons(hgData->contIdx);
++            buttons = pw64_vr_strip_c(demoGetButtons(hgData->contIdx)); // Birdman64VR c11: no C-button look in VR
+@@ -391,5 +400,8 @@ void hangGliderMovementFrame(HangGliderData* hgData, u8 gameState) {
                  }
              }
              uvDobjState(hgData->objId, hgData->unk2);
@@ -36,7 +40,7 @@
 +            pw64_dobj_near_set(hgData->objId, hgData->unk54 == 1, 0);
              hgData->camera->unk1A4 = hgData->unk18C.y;
              hgData->camera->unk78 = hgData->unk68;
-@@ -400,5 +416,17 @@ void hangGliderMovementFrame(HangGliderData* hgData, u8 gameState) {
+@@ -400,5 +412,19 @@ void hangGliderMovementFrame(HangGliderData* hgData, u8 gameState) {
              hgData->camera->unk68.y = hgData->unk268.y;
              hgData->camera->unk68.z = hgData->unk268.z;
              hgData->camera->unk74 = hgData->unk278;
@@ -56,7 +60,7 @@
 +            }
              hgData->camera->unk228 = hgData->unkF8;
              uvMat4Copy(&hgData->camera->unk80, &hgData->unk10);
-@@ -828,3 +853,8 @@ void hangGliderLoadPilot(u8 pilot, HangGliderData* hgData) {
+@@ -828,3 +854,8 @@ void hangGliderLoadPilot(u8 pilot, HangGliderData* hgData) {
          break;
      }
  }

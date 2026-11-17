@@ -106,6 +106,11 @@ extern float pw64_vr_hud_rad_per_px;
  * `down` radians below the view's centre, the direction the missiles fly;
  * otherwise `flat`, the game's value. */
 float pw64_vr_aim_reticle_y(float flat, float down);
+/* Birdman64VR, same file (c11): `buttons` without the four C buttons in VR,
+ * unchanged otherwise. Head tracking does the looking, so each vehicle's
+ * flight controls drop the C-button look (and the rocket belt's camera
+ * height steps, the cannonball's aiming swing) in VR. */
+int pw64_vr_strip_c(int buttons);
 /* Birdman64VR, same file: 1 = the gyrocopter's windscreen shows in VR
  * first person (Rust: VR HUD page, `[vr] gyro_windscreen`). Always shown
  * from outside. */

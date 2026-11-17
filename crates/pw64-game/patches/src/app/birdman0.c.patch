@@ -35,6 +35,15 @@
          if (D_80362690->unkC[D_80362690->unk9C].unk7B == 0) {
              func_80339E1C(bmData);
          }
+@@ -149,7 +161,7 @@
+         } else {
+             sp7C = demoGetInputs(bmData->contIdx, INPUT_AXIS_X);
+             sp78 = demoGetInputs(bmData->contIdx, INPUT_AXIS_Y);
+-            buttons = demoGetButtons(bmData->contIdx);
++            buttons = pw64_vr_strip_c(demoGetButtons(bmData->contIdx)); // Birdman64VR c11: no C-button look in VR
+             if (sp7C > 0.0f) {
+                 var_fv0 = sp7C;
+             } else {
 @@ -197,15 +209,31 @@
              bmData->unk2D4 = 1.5707f;
          }
