@@ -233,8 +233,8 @@ which is dizzying as the player's head. Confirmed on the headset
   In VR the camera does not drop (it starts at the drop's end) and the
   scene turns around the island at a quarter of the speed
   (title_screen.c.patch); the headset follows that camera at full size,
-  level, 3 m behind and 1 m below it (first 5 m and 3 m; moved 2 m forward
-  and 2 m up in the headset), so the logo floats above the menu.
+  level, 1 m behind and 1.25 m below it (first 5 m and 3 m; then 3 m and
+  1 m; tuned in the headset), so the logo floats above the menu.
   The view recentres as the title starts. Tries before: a view fixed at
   the drop's end (still turned with the scene), a slowed drop from 12 m
   behind (still a big motion, the logo behind the menu).

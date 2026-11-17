@@ -800,10 +800,10 @@ mod real {
     /// The title view: how far behind and above (negative: below) the game camera, in game
     /// metres.
     /// 12 m behind hid the logo behind the menu; 5 m, 3 m below it, so
-    /// the logo floats above the menu; then 2 m forward and 2 m up (the
-    /// user, in the headset).
-    const TITLE_BACK_M: f32 = 3.0;
-    const TITLE_UP_M: f32 = -1.0;
+    /// the logo floats above the menu; then 2 m forward and 2 m up, then
+    /// 2 m forward and 0.25 m down again (the user, in the headset).
+    const TITLE_BACK_M: f32 = 1.0;
+    const TITLE_UP_M: f32 = -1.25;
 
     /// A camera world matrix (rows right, forward, up, position; z up)
     /// turned level: facing the same way, no pitch or roll.
