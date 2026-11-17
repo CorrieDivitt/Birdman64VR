@@ -43,6 +43,11 @@ pub use mobile_pad::{
 };
 #[cfg(any(target_os = "android", target_os = "ios", test))]
 mod pad_axes;
+// Birdman64VR: the Touch controllers as an Xbox-style pad (q3).
+#[cfg(any(windows, target_os = "linux", target_os = "android"))]
+mod xr_pad;
+#[cfg(any(windows, target_os = "linux", target_os = "android"))]
+pub use xr_pad::set_xr_pad;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 mod touch_pad;
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -1063,6 +1068,10 @@ struct Sources {
     script2: Pad,
     /// Virtual pads from BLE (`ble.rs`); updated from the poll loop.
     ble: Pad,
+    /// Birdman64VR: the Touch controllers as a pad (`xr_pad`), and their
+    /// settings-overlay navigation state. Player 1 (VR is single-player).
+    xr: Pad,
+    xr_nav: Pad,
     /// Per player: buttons still held when the settings overlay closed
     /// (e.g. the A or Start that closed it): masked from the game until
     /// released, so the closing press doesn't leak into it as a fresh press.
@@ -1080,7 +1089,7 @@ impl Sources {
         if !FOCUSED.load(Ordering::Relaxed) {
             return IDLE;
         }
-        self.nav.merge(self.ble)
+        self.nav.merge(self.ble).merge(self.xr_nav)
     }
 }
 
@@ -1699,6 +1708,8 @@ static SOURCES: Mutex<Sources> = Mutex::new(Sources {
     script: IDLE,
     script2: IDLE,
     ble: IDLE,
+    xr: IDLE,
+    xr_nav: IDLE,
     suppressed: [0; 2],
     nav: IDLE,
 });
@@ -1729,6 +1740,8 @@ fn route(s: &Sources, p2: Option<&P2Input>, focused: bool) -> [Pad; 2] {
                 p[0] = p[0].merge(*pad);
             }
         }
+        // Touch controllers (VR): always P1.
+        p[0] = p[0].merge(s.xr);
         // ble pad: P2 if p2 == Ble, else P1.
         if matches!(p2, Some(P2Input::Ble)) {
             p[1] = p[1].merge(s.ble);
@@ -2934,6 +2947,8 @@ mod tests {
             script: IDLE,
             script2: IDLE,
             ble: IDLE,
+            xr: IDLE,
+            xr_nav: IDLE,
             suppressed: [CONT_START | CONT_A, 0], // as set by `overlay_toggled(false)`
             nav: IDLE,
         };
@@ -3250,6 +3265,8 @@ mod tests {
             script,
             script2,
             ble,
+            xr: IDLE,
+            xr_nav: IDLE,
             suppressed: [0; 2],
             nav: IDLE,
         }

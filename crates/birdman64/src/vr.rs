@@ -799,10 +799,11 @@ mod real {
 
     /// The title view: how far behind and above (negative: below) the game camera, in game
     /// metres.
-    /// 12 m behind hid the logo behind the menu; 5 m. 3 m below it, so
-    /// the logo floats above the menu.
-    const TITLE_BACK_M: f32 = 5.0;
-    const TITLE_UP_M: f32 = -3.0;
+    /// 12 m behind hid the logo behind the menu; 5 m, 3 m below it, so
+    /// the logo floats above the menu; then 2 m forward and 2 m up, then
+    /// 2 m forward and 0.25 m down again (the user, in the headset).
+    const TITLE_BACK_M: f32 = 1.0;
+    const TITLE_UP_M: f32 = -1.25;
 
     /// A camera world matrix (rows right, forward, up, position; z up)
     /// turned level: facing the same way, no pitch or roll.
@@ -904,6 +905,9 @@ mod real {
         eyes: Option<(wgpu::TextureFormat, [[wgpu::TextureView; 2]; 3])>,
         /// The headset shows the stereo world (the last game frame had one).
         stereo: bool,
+        /// Blank game frames ([`pw64_gfx::Frame::is_blank`], between
+        /// screens) are being skipped: the last stereo picture stays.
+        holding: bool,
         /// The last stereo frame was the island model ([`diorama_eye`]).
         model: bool,
         /// ...and the title screen (recentre when it starts).
@@ -978,6 +982,7 @@ mod real {
                     eye_size,
                     eyes: None,
                     stereo: false,
+                    holding: false,
                     model: false,
                     title: false,
                     state: None,
@@ -1069,6 +1074,18 @@ mod real {
             frame: Option<&pw64_gfx::Frame>,
         ) {
             let poses = *NEXT_EYES.lock().unwrap_or_else(|e| e.into_inner());
+            // Between screens the game shows blank frames (black fills,
+            // loads): keep the last stereo picture (the runtime reprojects
+            // it with the head) and the panel clear over it, rather than
+            // the panel's black picture, until there is something to show.
+            if self.stereo && frame.is_some_and(pw64_gfx::Frame::is_blank) {
+                if !self.holding {
+                    self.holding = true;
+                    log("blank game frame: holding the last stereo picture", true);
+                }
+                return;
+            }
+            self.holding = false;
             let (Some(frame), Some(poses)) =
                 (frame.filter(|f| stereo_on() && f.has_world()), poses)
             else {
@@ -1077,7 +1094,21 @@ mod real {
                     STEREO_LEAD_US.store(0, Ordering::Relaxed);
                     self.cue_to_eyes = [0; 256];
                     self.source.lock().unwrap_or_else(|e| e.into_inner()).world = None;
-                    log("stereo world off", true);
+                    // What the panel shows instead, for tracking down
+                    // transitions that still look wrong.
+                    let (draws, textured) = frame.map_or((0, 0), |f| {
+                        let t = f
+                            .draws
+                            .iter()
+                            .filter(|d| d.textures.iter().any(Option::is_some));
+                        (f.draws.len(), t.count())
+                    });
+                    log(
+                        &format!(
+                            "stereo world off: panel frame {draws} draws, {textured} textured"
+                        ),
+                        true,
+                    );
                 }
                 return;
             };
@@ -1570,6 +1601,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         let mut bound: Option<(u64, f32, [[wgpu::BindGroup; 2]; 2])> = None;
         // Session state, to pause the game when the player is away.
         let mut was_focused = false;
+        let mut touch_active = false;
         let mut last_outcome = None;
         let mut announced = false;
         // Hitch report: the longest gap between shown headset frames and
@@ -1765,6 +1797,20 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             for line in xr.take_log() {
                 log(&line, true);
             }
+            // The Touch controllers: a pad for player 1 (input/xr_pad.rs).
+            let pad = xr.pad();
+            if pad.active != touch_active {
+                touch_active = pad.active;
+                log(
+                    if touch_active {
+                        "Touch controllers on"
+                    } else {
+                        "Touch controllers off"
+                    },
+                    true,
+                );
+            }
+            crate::input::set_xr_pad(pad);
             let kind = outcome.as_ref().ok().copied();
             if kind.is_some() && kind != last_outcome {
                 last_outcome = kind;

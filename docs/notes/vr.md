@@ -233,10 +233,18 @@ which is dizzying as the player's head. Confirmed on the headset
   In VR the camera does not drop (it starts at the drop's end) and the
   scene turns around the island at a quarter of the speed
   (title_screen.c.patch); the headset follows that camera at full size,
-  level, 5 m behind and 3 m below it, so the logo floats above the menu.
+  level, 1 m behind and 1.25 m below it (first 5 m and 3 m; then 3 m and
+  1 m; tuned in the headset), so the logo floats above the menu.
   The view recentres as the title starts. Tries before: a view fixed at
   the drop's end (still turned with the scene), a slowed drop from 12 m
   behind (still a big motion, the logo behind the menu).
+- **Blank frames between screens** (title to file select and other
+  cuts: about a second of loading): no world and no textured draw
+  (`Frame::is_blank`). The headset fell back to the panel, a big black
+  square in front of the player; now it keeps the last stereo picture
+  (reprojected by the runtime) with the panel clear over it until a frame
+  has something to show. Logged once per hold; a fall back to the panel
+  logs the frame's draws and textured draws.
 - **Data**: after the world tag, 21 G_NOOP words (`PW64_DIORAMA_TAG`):
   the camera's world matrix, the island's bounds, a title flag, the game
   state and the title's phase (logged: `[vr] game state N, title phase P`).
@@ -357,6 +365,15 @@ turn slowly and level. All C side, VR only (`pw64_widescreen_aspect < 0`).
 - **Open**: the cannonball landing pull-back is the game's (fine on the
   headset).
 
+### Gyrocopter chase in VR
+
+The chase camera (camera.c mode 0) follows a lagged copy of the
+gyrocopter's frame offset by (`unk5C`, `unk60`, `unk64`) = (0, -4.45, 1.2) m
+and looks at it, its distance clamped to `unk54`..`unk58` (1.8..7.9 m). In VR
+(code_7CF30.c.patch `gyrocopterEnterLeave`): 9.45 m behind
+(`PW64_VR_GYRO_CHASE_BACK_M` 5), level (z 0, no look down), the clamp's far
+end 5 m further out too.
+
 ### No C-button look in VR (c11)
 
 Every vehicle turns the C buttons into a look (`camera->unk78/unk7C`: x0.5 in
@@ -370,6 +387,38 @@ the cannon). The rocket belt's C up/down camera height steps (22.5 degrees,
 `unk58` -> chase `unk1B0`, first-person tilt `unk8C`) read `demoButtonPress`
 and are skipped in VR the same way; R's level/top-down toggle is unchanged.
 C buttons outside flight (map zoom, photo album, test menu) are untouched.
+
+## Touch controllers (q3)
+
+The Touch controllers are one more gamepad for player 1, laid out like a
+modern Xbox / PlayStation pad, so every gamepad binding, the settings
+trigger, R3 recentre and rebinding work as with a real pad (a Bluetooth pad
+still works alongside; both merge).
+
+- `pw64-xr` `controllers.rs`: one action per physical input, suggested for
+  `/interaction_profiles/oculus/touch_controller` (the Quest maps Touch Pro
+  and Plus onto it), attached at session creation, synced once per headset
+  frame while the session is focused (`XrContext::pad`, `PadState`).
+  A refused action set is logged and the game runs on a pad.
+- `birdman64` `input/xr_pad.rs`: `PadState` to the Xbox pad's gilrs
+  buttons, then the `[input.gamepad]` bindings (own `Sources::xr` /
+  `xr_nav`, merged into player 1 in `route` and the overlay's nav pad).
+  Logged: `[vr] Touch controllers on/off`.
+
+| Touch | Xbox pad | N64 by default |
+|---|---|---|
+| A, B (right) | A, B | A, B |
+| X, Y (left) | X, Y | B, C-up |
+| Left / right stick | sticks | stick / C buttons |
+| Left / right trigger | LT, RT | Z, R |
+| Left / right grip | LB, RB | L, R |
+| Menu (left) | Menu (Start) | Start |
+| Right stick press | R3 | recentre |
+| Left stick press | View (Select) | settings |
+
+The Touch controllers have one menu button (the right one is the
+system's): the left stick press stands in for View. No d-pad (by default
+it only doubles the stick).
 
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.

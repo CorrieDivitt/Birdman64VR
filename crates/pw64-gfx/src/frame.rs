@@ -367,4 +367,17 @@ impl Frame {
             && self.draws.iter().any(|d| d.view != 0)
             && self.draws.iter().all(|d| d.split.is_none())
     }
+
+    /// Birdman64VR: nothing to see but flat colour: no world view and no
+    /// textured draw (no text, sprite or picture). The game's frames
+    /// between screens (loads, cuts) are like this: black fills. Shown on
+    /// the headset's panel they were a big black square in front of the
+    /// player, so the headset keeps its last stereo picture instead.
+    pub fn is_blank(&self) -> bool {
+        !self.has_world()
+            && self
+                .draws
+                .iter()
+                .all(|d| d.view == 0 && d.textures.iter().all(Option::is_none))
+    }
 }

@@ -124,6 +124,9 @@ extern int pw64_vr_gyro_windscreen;
  * 0.1 m forward again (headset). Centred across the cockpit too (the
  * game's is up to 1.3 cm to the right). */
 #define PW64_VR_GYRO_EYE_BACK_M 0.15f
+/* Birdman64VR: gyrocopter chase camera this much further back in VR (game:
+ * 4.45 m behind, 1.2 m up; VR: 9.45 m behind, level). */
+#define PW64_VR_GYRO_CHASE_BACK_M 5.0f
 /* Birdman64VR: the rocket belt's first-person eye this much further back
  * than the game's (code_AC1A0.c.patch rocketBeltEnterLeave), metres. */
 #define PW64_VR_RB_EYE_BACK_M 0.25f
