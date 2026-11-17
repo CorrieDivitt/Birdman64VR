@@ -2663,6 +2663,7 @@ mod tests {
             diorama: None,
             dash: None,
             up: None,
+            shutter: false,
         }
     }
 

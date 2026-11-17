@@ -141,6 +141,7 @@ fn frame(
         diorama: None,
         dash: None,
         up: None,
+        shutter: false,
     }
 }
 

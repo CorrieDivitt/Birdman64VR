@@ -464,10 +464,17 @@ wins; dead zone 0.2):
   camera, so pieces of it fell inside the model's cylinder (a ragged sky
   behind the island). World draws with neither depth test nor write are
   skipped when `StereoEye::clip` is set.
-- Taking a photo: the shutter's two bars (hud.c `hudDrawCamera`) were a
-  black square on the HUD sphere; in VR one full-screen fill instead
-  (`pw64_vr_shutter`, alpha by how far it closed), drawn over the whole eye
-  like the game's fades. The photo the game renders into a small viewport
+- Taking a photo (p13): the shutter's two bars (hud.c `hudDrawCamera`)
+  were a black square on the HUD sphere. The first replacement, one
+  full-screen fill for the game's three shutter frames drawn like the
+  game's fades, never showed in the headset (cause not found). Now the C
+  side only says that a photo was taken: `pw64_vr_shutter()`, called as the
+  shutter starts, emits a `G_NOOP` tag ("SH", `interp::SHUTTER_TAG` →
+  `Frame::shutter`); `Vr::world` notes the time (`SHUTTER_AT`, log `photo
+  shutter: blink`) and the headset thread blinks the whole eye with the
+  fade bar on its own clock: black over 70 ms, clear again over 130 ms
+  (`SHUTTER_CLOSE`, `SHUTTER_OPEN`). No bars are drawn in VR.
+  The photo the game renders into a small viewport
   (perspective draws outside the world view, `elem` 0: clip w not 1) is not
   shown in the headset.
 
@@ -584,8 +591,12 @@ composition layer; the app never sees camera images.
 - Log: `passthrough: XR_FB_passthrough available, ready` (or `not
   available`, `not used on PC`, `not created`), then `passthrough on` /
   `passthrough off` at each change.
-- Not done: the paused game and the settings overlay in flight; a setting
-  to turn it off.
+- Setting: Passthrough on / off on the settings' main page, right under
+  VR Comfort (`Row::Passthrough`, `[vr] passthrough`, default on); only
+  offered where the headset can (`vr::passthrough_available`), so never on
+  PC. Off: the dim blue room, as before.
+- Decided (the user): menus only. Not the paused game or the settings
+  overlay in flight.
 
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
