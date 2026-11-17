@@ -244,7 +244,18 @@ which is dizzying as the player's head. Confirmed on the headset
   square in front of the player; now it keeps the last stereo picture
   (reprojected by the runtime) with the panel clear over it until a frame
   has something to show. Logged once per hold; a fall back to the panel
-  logs the frame's draws and textured draws.
+  logs the frame's draws and textured draws. With no stereo picture to keep
+  (the game's start), a blank frame shows nothing: the panel is cleared and
+  drawn blended (`Vr::blank`, `Source::blank`). Each change of a flat
+  frame's makeup is logged (`flat game frame: N draws, M textured, blank
+  B`, at most 12 per stretch without a world).
+- **Flat game screens float in the room** (the level-load square): between
+  level select and the flight the game shows full 2D screens (logged 72/61,
+  170/153, 159/140 draws/textured) on a black background, which the opaque
+  panel showed as a black rectangle. The headset now draws the panel, when
+  there is no stereo world, with black keyed out (`PanelBlend::Keyed`:
+  alpha `smoothstep(0, 0.004, max(r, g, b))`, premultiplied), so the
+  screens' text and pictures float in the dark room.
 - **Data**: after the world tag, 21 G_NOOP words (`PW64_DIORAMA_TAG`):
   the camera's world matrix, the island's bounds, a title flag, the game
   state and the title's phase (logged: `[vr] game state N, title phase P`).
@@ -419,6 +430,23 @@ still works alongside; both merge).
 The Touch controllers have one menu button (the right one is the
 system's): the left stick press stands in for View. No d-pad (by default
 it only doubles the stick).
+
+## Menus in VR (p10)
+
+The settings overlay drops what has no use in the headset (`settings.rs`
+`VR_HIDDEN_MAIN`, `VR_HIDDEN_GRAPHICS`; the flat game keeps everything):
+Main loses Move touch controls, the touch buttons switch and Split-screen;
+Graphics loses display mode, resolution, V-Sync (the headset paces the
+game), widescreen and fill screen (the headset's own field of view), scale
+and its filter (the eyes are drawn at the headset's size; only the menu
+panel used them) and OLED care (LCD screens). Kept: frame rate, texture
+filtering and packs, MSAA (the eye pictures use it), full-detail models and
+view distance. Move HUD (the flat screen's HUD editor) and texture
+filtering are hidden too: VR always filters smoothly (window.rs,
+`apply_live`), as the N64 3-point filter's frame rate was unsustainable in
+the headset. The on-screen touch controls are never drawn in VR
+(window.rs), and the title menu has no Players item in VR (its original two
+items and box; title_screen.c.patch `sPw64Items`).
 
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.

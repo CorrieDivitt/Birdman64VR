@@ -1097,7 +1097,13 @@ impl App {
                 widescreen: widescreen
                     .filter(|_| self.vr.is_none())
                     .map_or(Widescreen::Off, Widescreen::Aspect),
-                filter: opts::tex_filter(),
+                // Birdman64VR: smooth in the headset (the N64 3-point
+                // filter's frame rate is unsustainable there; no setting).
+                filter: if self.vr.is_some() {
+                    pw64_gfx::TexFilter::Bilinear
+                } else {
+                    opts::tex_filter()
+                },
                 fill_view: opts::fill_screen() && self.vr.is_none(),
                 oled: Default::default(),
                 hud_offsets: opts::hud_offsets(),
@@ -1586,7 +1592,9 @@ impl App {
         // Birdman64VR, stereo world: the headset shows the game's world
         // itself; the panel starts out empty and only carries what is
         // drawn over the game below.
-        let stereo = panel_view.is_some() && self.vr.as_ref().is_some_and(|vr| vr.stereo());
+        // A blank game frame with nothing to keep (`Vr::blank`): clear too.
+        let stereo =
+            panel_view.is_some() && self.vr.as_ref().is_some_and(|vr| vr.stereo() || vr.blank());
         match &self.vr {
             Some(vr) if stereo => vr.clear_panel(&g.device, &g.queue, &view),
             _ => g.renderer.fb_present(self.shown, &view, g.filter),
@@ -1623,7 +1631,9 @@ impl App {
             input::set_touch(crate::touch::TouchPad::IDLE);
         }
         #[cfg(any(target_os = "android", target_os = "ios"))]
-        if !settings::is_open() && !headless {
+        // Birdman64VR: never in VR (no touchscreen in a headset; they would
+        // sit on the menu panel).
+        if !settings::is_open() && !headless && !crate::vr::active() {
             // A relayout mid-touch drops the fingers: republish, or what
             // they held would stay held in the game.
             if self.touch.set_layout(touch_layout(g))
