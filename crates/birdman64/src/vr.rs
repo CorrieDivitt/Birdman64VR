@@ -1520,18 +1520,46 @@ fn decode(c: vec3<f32>) -> vec3<f32> {
     return select(hi, lo, c <= vec3<f32>(0.04045));
 }
 
+// Birdman64VR: the game's black screen background keyed out (a flat
+// screen floats in the room instead of on a black rectangle); pure black
+// is transparent, anything brighter than a few 1/1000 opaque.
+fn key(c: vec3<f32>) -> f32 {
+    return smoothstep(0.0, 0.004, max(c.r, max(c.g, c.b)));
+}
+
 @fragment
 fn fs(v: V) -> @location(0) vec4<f32> {
     let p = textureSample(t, s, v.uv);
     let c = p.rgb;
-    return vec4<f32>(SRGB_DECODE, ALPHA);
+    let col = SRGB_DECODE;
+    return OUT;
 }
 ";
 
-    pub(super) fn shader(decode: bool, alpha: bool) -> String {
+    /// How the panel is drawn ([`shader`]).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(super) enum PanelBlend {
+        /// The whole picture (and the eye pictures of the stereo world).
+        Opaque,
+        /// Over the stereo world, by its alpha (premultiplied, as the UI
+        /// layers leave it).
+        Over,
+        /// A flat game screen over the room: its black background keyed
+        /// out (premultiplied).
+        Keyed,
+    }
+
+    pub(super) fn shader(decode: bool, blend: PanelBlend) -> String {
         SHADER
             .replace("SRGB_DECODE", if decode { "decode(c)" } else { "c" })
-            .replace("ALPHA", if alpha { "p.a" } else { "1.0" })
+            .replace(
+                "OUT",
+                match blend {
+                    PanelBlend::Opaque => "vec4<f32>(col, 1.0)",
+                    PanelBlend::Over => "vec4<f32>(col, p.a)",
+                    PanelBlend::Keyed => "vec4<f32>(col * key(c), key(c))",
+                },
+            )
     }
 
     fn mat_bytes(m: &Mat4) -> [u8; 64] {
@@ -1590,10 +1618,11 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         // `pipeline`: opaque (the panel as the whole picture, and the eye
         // pictures of the stereo world). `over`: the panel over the stereo
         // world, by its alpha (premultiplied, as the UI layers leave it).
-        let make = |alpha: bool| {
+        let make = |blend: PanelBlend| {
+            let alpha = blend != PanelBlend::Opaque;
             let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("vr panel"),
-                source: wgpu::ShaderSource::Wgsl(shader(xr.format().is_srgb(), alpha).into()),
+                source: wgpu::ShaderSource::Wgsl(shader(xr.format().is_srgb(), blend).into()),
             });
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("vr panel"),
@@ -1621,7 +1650,13 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 cache: None,
             })
         };
-        let (pipeline, over) = (make(false), make(true));
+        // `keyed`: a flat game screen (no stereo world) with its black
+        // background keyed out, so it floats in the room.
+        let (pipeline, over, keyed) = (
+            make(PanelBlend::Opaque),
+            make(PanelBlend::Over),
+            make(PanelBlend::Keyed),
+        );
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("vr panel"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -1835,7 +1870,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                         // Blended over the world, or over nothing for a
                         // blank game frame (the panel is clear then).
                         let blended = world.is_some() || blank.get();
-                        pass.set_pipeline(if blended { &over } else { &pipeline });
+                        pass.set_pipeline(if blended { &over } else { &keyed });
                         pass.set_bind_group(0, &groups[front][i], &[]);
                         pass.draw(0..6, 0..1);
                         // Latency probe: this thread's bar, on the panel's
@@ -2189,9 +2224,10 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         fn shaders_are_valid_wgsl() {
             use wgpu::naga;
             let sources = [
-                super::shader(false, false),
-                super::shader(true, false),
-                super::shader(true, true),
+                super::shader(false, super::PanelBlend::Opaque),
+                super::shader(true, super::PanelBlend::Opaque),
+                super::shader(true, super::PanelBlend::Over),
+                super::shader(true, super::PanelBlend::Keyed),
                 super::BAR_SHADER.to_string(),
             ];
             for source in sources {

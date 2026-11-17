@@ -249,6 +249,13 @@ which is dizzying as the player's head. Confirmed on the headset
   drawn blended (`Vr::blank`, `Source::blank`). Each change of a flat
   frame's makeup is logged (`flat game frame: N draws, M textured, blank
   B`, at most 12 per stretch without a world).
+- **Flat game screens float in the room** (the level-load square): between
+  level select and the flight the game shows full 2D screens (logged 72/61,
+  170/153, 159/140 draws/textured) on a black background, which the opaque
+  panel showed as a black rectangle. The headset now draws the panel, when
+  there is no stereo world, with black keyed out (`PanelBlend::Keyed`:
+  alpha `smoothstep(0, 0.004, max(r, g, b))`, premultiplied), so the
+  screens' text and pictures float in the dark room.
 - **Data**: after the world tag, 21 G_NOOP words (`PW64_DIORAMA_TAG`):
   the camera's world matrix, the island's bounds, a title flag, the game
   state and the title's phase (logged: `[vr] game state N, title phase P`).
