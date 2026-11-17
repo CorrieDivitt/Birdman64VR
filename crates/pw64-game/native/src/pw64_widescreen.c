@@ -60,26 +60,14 @@ float pw64_vr_hud_rad_per_px = 0.0f;
  * from the VR HUD page, pw64_game::set_vr_gyro_windscreen). */
 int pw64_vr_gyro_windscreen = 1;
 
-/* Birdman64VR horizon lock (c5): the rotation (row vectors, camera space:
- * x right, y up, -z forward) the headset levels the world with this frame
- * (Rust: pw64_game::set_vr_horizon; identity = no lock). */
-float pw64_vr_horizon[9] = { 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f };
-
-/* Where a direction `down` radians below the camera's forward axis shows in
- * the headset, after the horizon lock: radians right of and below the
- * view's centre. */
+/* Where a direction `down` radians below the camera's forward axis shows on
+ * the HUD sphere: radians right of and below the view's centre. (The
+ * horizon lock turns the sight on the sphere itself, pw64-gfx
+ * `StereoEye::sight`: moved here in N64 pixels, the game clipped it at its
+ * screen's edges.) */
 static void pw64_vr_aim_angles(float down, float* right, float* below) {
-    const float* R = pw64_vr_horizon;
-    float d[3], e[3];
-    int i;
-    d[0] = 0.0f;
-    d[1] = -uvSinF(down);
-    d[2] = -uvCosF(down);
-    for (i = 0; i < 3; i++) {
-        e[i] = d[0] * R[0 * 3 + i] + d[1] * R[1 * 3 + i] + d[2] * R[2 * 3 + i];
-    }
-    *right = uvAtan2F(e[0], -e[2]);
-    *below = uvAtan2F(-e[1], uvSqrtF(e[0] * e[0] + e[2] * e[2]));
+    *right = 0.0f;
+    *below = down;
 }
 
 static float pw64_round(float v) {

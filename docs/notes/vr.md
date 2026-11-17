@@ -439,11 +439,14 @@ aiming up and down in first person must pitch)
   has no bank). Put in front of `StereoEye::world` (camera space), so the
   world, the cockpit and the dashboard gauges turn together; the HUD sphere
   stays with the seat. Not for the title or the island model.
-- The gyrocopter's reticle: Rust hands the rotation to C each frame
-  (`pw64_game::set_vr_horizon`, `pw64_vr_horizon[9]`); `pw64_vr_aim_reticle_x/y`
-  turn the missile direction (6 degrees below the camera's forward line,
-  `PW64_VR_GYRO_AIM_DOWN`) by it and place the reticle there, every frame
-  (code_7CF30.c.patch, where the HUD copies the reticle).
+- The gyrocopter's reticle: the game draws it where it always is (6 degrees
+  below the camera's forward line, `PW64_VR_GYRO_AIM_DOWN`,
+  `pw64_vr_aim_reticle_x/y`), and the renderer turns the fixed sights
+  (`elem` 0) on the HUD sphere by the same rotation (`StereoEye::sight`,
+  u.clip rows 1-3 in the sphere shader), so it stays on where the missiles
+  fly. A first try moved it in N64 pixels from C: past the game screen's
+  top or bottom edge (bank and pitch, pitching) the game clipped it, an
+  "invisible square".
 - In first person in a cockpit (the frame has dashboard points) the fixed
   sights (`elem` 0: the gyrocopter's reticle) sit on the windscreen, as far
   as the dashboard's tip + 5 cm, and are not depth tested: at the HUD

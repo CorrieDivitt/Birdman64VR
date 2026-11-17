@@ -829,6 +829,7 @@ mod real {
             } else {
                 &[]
             },
+            sight: None,
         }
     }
 
@@ -1335,8 +1336,8 @@ mod real {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .unwrap_or_default();
-            // Horizon lock, in flight (one rotation for both eyes); the C
-            // side places the gyrocopter's reticle by it too.
+            // Horizon lock, in flight (one rotation for both eyes); the
+            // fixed sights on the HUD sphere turn by it too.
             let horizon = frame
                 .diorama
                 .is_none()
@@ -1347,8 +1348,6 @@ mod real {
                     })
                 })
                 .flatten();
-            let r = horizon.unwrap_or(pw64_gfx::matrix::IDENTITY);
-            pw64_game::set_vr_horizon(std::array::from_fn(|i| r[i / 3][i % 3]));
             for (eye, pose) in poses.iter().enumerate() {
                 let seated = seat.seated(pose);
                 let mut matrices = match &frame.diorama {
@@ -1360,6 +1359,7 @@ mod real {
                 // player. The HUD sphere stays with the seat.
                 if let Some(r) = &horizon {
                     matrices.world = pw64_gfx::matrix::mul(r, &matrices.world);
+                    matrices.sight = Some(std::array::from_fn(|k| [r[k][0], r[k][1], r[k][2]]));
                 }
                 renderer.render_stereo(frame, &views[back][eye], self.eye_size, &matrices);
             }

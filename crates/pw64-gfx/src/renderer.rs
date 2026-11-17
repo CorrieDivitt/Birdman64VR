@@ -174,6 +174,12 @@ pub struct StereoEye {
     /// instead of the sphere while the frame has one
     /// ([`crate::Frame::dash`], [`DashPanel`]), each where its slot says.
     pub hud_dash: &'static [DashSlot],
+    /// Birdman64VR horizon lock: the rotation (row vectors, camera space)
+    /// the world is levelled with, for the fixed sights on the HUD sphere
+    /// (`elem` 0: the gyrocopter's reticle), so they stay on what they aim
+    /// at. Turned on the sphere: moved in N64 pixels instead, the game
+    /// clipped them at its screen's edges.
+    pub sight: Option<[[f32; 3]; 3]>,
 }
 
 /// Birdman64VR: where one HUD element sits on the dashboard
@@ -1717,11 +1723,17 @@ impl Renderer {
                     };
                     u.vr = [1.0, 0.0, 0.0, 2.0];
                     u.eye = h.eye;
+                    // The fixed sights turn with the horizon lock (rows
+                    // 1-3, w of row 1 = on).
+                    let turn = eye.sight.filter(|_| d.elem == 0);
+                    let row = |k: usize, on: f32| {
+                        turn.map_or([0.0; 4], |r| [r[k][0], r[k][1], r[k][2], on])
+                    };
                     u.clip = [
                         [h.rad_per_px, radius, shift[0], shift[1]],
-                        [0.0; 4],
-                        [0.0; 4],
-                        [0.0; 4],
+                        row(0, 1.0),
+                        row(1, 0.0),
+                        row(2, 0.0),
                     ];
                 }
             }
@@ -2456,6 +2468,7 @@ mod tests {
             hud_sphere: None,
             hud_hidden: 0,
             hud_dash: &[],
+            sight: None,
         };
         r.render_stereo(&frame, &view, (w, h), &eye);
         let stereo = read_rgba(&device, &queue, &tex);

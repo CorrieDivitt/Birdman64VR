@@ -68,7 +68,12 @@ fn vs_main(v: VIn) -> VOut {
         let yaw = (p.x - 160.0) * k.x + k.z;
         let pitch = (120.0 - p.y) * k.x + k.w;
         let r = k.y * (1.0 - 0.02 * clamp(p.z, 0.0, 1.0));
-        let s = vec3<f32>(sin(yaw) * cos(pitch), sin(pitch), -cos(yaw) * cos(pitch)) * r;
+        var s = vec3<f32>(sin(yaw) * cos(pitch), sin(pitch), -cos(yaw) * cos(pitch)) * r;
+        // A fixed sight under the horizon lock: turned like the world
+        // (u.clip rows 1-3, row vectors; row 1's w = on).
+        if (u.clip[1].w == 1.0) {
+            s = s.x * u.clip[1].xyz + s.y * u.clip[2].xyz + s.z * u.clip[3].xyz;
+        }
         o.pos = u.eye * vec4<f32>(s, 1.0);
     }
     // Birdman64VR, a gauge on the cockpit's dashboard (`DashPanel`):
