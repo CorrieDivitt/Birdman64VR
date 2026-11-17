@@ -130,6 +130,9 @@ pub struct Config {
     /// `[vr] horizon_lock`: `"off"`, `"bank"` or `"full"` (bank and
     /// pitch); `None` = default, bank (`vr::HorizonLock`).
     pub vr_horizon_lock: Option<String>,
+    /// `[vr] chase_offsets`: how much further back each vehicle's chase
+    /// camera sits in VR (metres, `VEHICLE_*` order; the right stick).
+    pub vr_chase_offsets: Option<[f32; 7]>,
     /// Keys skipped at load (wrong type or invalid value; see `ignored_keys`).
     pub ignored: Vec<String>,
 }
@@ -909,6 +912,23 @@ fn from_table(table: &toml::Table) -> Config {
                         None => ignore(&mut ignored, &format!("vr.{key}"), v, "use true or false"),
                     }
                 }
+                if let Some(v) = t.get("chase_offsets") {
+                    let (lo, hi) = crate::vr::CHASE_RANGE;
+                    let parsed = v.as_array().and_then(|a| {
+                        let f: Vec<f32> = a.iter().filter_map(coerce_f32).collect();
+                        (a.len() == 7 && f.len() == 7 && f.iter().all(|x| (lo..=hi).contains(x)))
+                            .then(|| std::array::from_fn(|i| f[i]))
+                    });
+                    match parsed {
+                        Some(o) => cfg.vr_chase_offsets = Some(o),
+                        None => ignore(
+                            &mut ignored,
+                            "vr.chase_offsets",
+                            v,
+                            &format!("use a list of 7 numbers from {lo} to {hi}"),
+                        ),
+                    }
+                }
                 if let Some(v) = t.get("horizon_lock") {
                     match v.as_str() {
                         Some(m) if HORIZON_LOCK_VALUES.contains(&m) => {
@@ -983,6 +1003,40 @@ fn with_vr_bool(mut table: toml::Table, key: &str, on: bool) -> Result<toml::Tab
         vr.remove(key);
     } else {
         vr.insert(key.into(), toml::Value::Boolean(false));
+    }
+    if vr.is_empty() {
+        table.remove("vr");
+    }
+    Ok(table)
+}
+
+/// Writes `[vr] chase_offsets` (all zero removes the key, and `[vr]` when
+/// nothing else is in it).
+pub fn save_vr_chase_offsets(offsets: &[f32; 7]) -> Result<(), String> {
+    let table = read_table()?;
+    write_table(&with_vr_chase_offsets(table, offsets)?)
+}
+
+/// [`save_vr_chase_offsets`]'s table edit (separate from the file I/O for
+/// tests).
+fn with_vr_chase_offsets(
+    mut table: toml::Table,
+    offsets: &[f32; 7],
+) -> Result<toml::Table, String> {
+    let vr = table
+        .entry("vr")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let toml::Value::Table(vr) = vr else {
+        return Err("[vr] is not a table in pw64.toml; not saved".to_string());
+    };
+    if offsets.iter().all(|o| *o == 0.0) {
+        vr.remove("chase_offsets");
+    } else {
+        let round = |f: f32| toml::Value::Float((f64::from(f) * 100.0).round() / 100.0);
+        vr.insert(
+            "chase_offsets".into(),
+            toml::Value::Array(offsets.iter().map(|o| round(*o)).collect()),
+        );
     }
     if vr.is_empty() {
         table.remove("vr");
@@ -1882,6 +1936,19 @@ mod tests {
         let t = with_vr_horizon_lock(toml::Table::new(), "off").unwrap();
         assert_eq!(from_table(&t).vr_horizon_lock.as_deref(), Some("off"));
         assert!(with_vr_horizon_lock(t, "bank").unwrap().is_empty());
+        // `[vr] chase_offsets`: seven numbers in range, else reported.
+        let c = parse("[vr]\nchase_offsets = [0, 1.5, -2, 0, 0, 3, 0]\n").unwrap();
+        assert_eq!(
+            c.vr_chase_offsets,
+            Some([0.0, 1.5, -2.0, 0.0, 0.0, 3.0, 0.0])
+        );
+        let c = parse("[vr]\nchase_offsets = [1, 2]\n").unwrap();
+        assert_eq!(c.vr_chase_offsets, None);
+        assert_eq!(c.ignored, vec!["vr.chase_offsets".to_string()]);
+        let t = with_vr_chase_offsets(toml::Table::new(), &[0.0, 2.25, 0.0, 0.0, 0.0, 0.0, 0.0])
+            .unwrap();
+        assert_eq!(from_table(&t).vr_chase_offsets.unwrap()[1], 2.25);
+        assert!(with_vr_chase_offsets(t, &[0.0; 7]).unwrap().is_empty());
         let c = parse("[vr]\ngyro_windscreen = \"maybe\"\n").unwrap();
         assert_eq!(c.vr_gyro_windscreen, None);
         assert_eq!(c.ignored, vec!["vr.gyro_windscreen"]);

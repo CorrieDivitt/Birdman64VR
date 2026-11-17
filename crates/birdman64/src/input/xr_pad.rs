@@ -104,6 +104,11 @@ pub(crate) fn nav_pad(p: &PadState, held: &[Button]) -> Pad {
 /// The Touch controllers' state (headset thread, once per headset frame).
 /// Publishes only when it changed.
 pub fn set_xr_pad(p: PadState) {
+    // Birdman64VR (p8): the right stick for the VR code, every frame.
+    super::set_right_stick(
+        super::STICK_XR,
+        if p.active { p.right_stick } else { [0.0; 2] },
+    );
     let settings_btn = crate::settings::pad_button();
     let now = held(&p);
     let before = {

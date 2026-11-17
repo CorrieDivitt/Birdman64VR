@@ -168,7 +168,7 @@ pub struct Interpreter {
     /// Birdman64VR: the dashboard's values as their tags arrive.
     dash_in: [f32; (crate::Dash::POINTS + 1) * 3],
     /// [`UP_TAG`] values so far.
-    up_in: [f32; 4],
+    up_in: [f32; 5],
     split: Option<[f32; 4]>,
     /// Current movable HUD element (`HUD_ELEM_TAG` markers, 0 = none);
     /// reset per run.
@@ -209,7 +209,8 @@ pub const DIORAMA_TAG: u32 = 0x44_5200;
 /// (`pw64_vr_dash_tag`, [`crate::Dash`]: the points, then the right axis).
 pub const DASH_TAG: u32 = 0x44_4800;
 /// Birdman64VR: `G_NOOP` w0 marker (low 24 bits, + an index in the low
-/// byte) of the world's up in camera space and a no-lock flag, four f32
+/// byte) of the world's up in camera space, a no-lock flag and the camera
+/// mode, five f32
 /// in w1 (`pw64_vr_up_tag`, [`Frame::up`]).
 pub const UP_TAG: u32 = 0x55_5000;
 /// `G_NOOP` w1 HUD anchor marker: "PWA" + `L`/`C`/`R` in the low byte;
@@ -343,7 +344,7 @@ impl Interpreter {
             split_x: [0.0; 2],
             diorama_in: [0.0; 22],
             dash_in: [0.0; (crate::Dash::POINTS + 1) * 3],
-            up_in: [0.0; 4],
+            up_in: [0.0; 5],
             split: None,
             elem: 0,
             commands: 0,
@@ -1531,12 +1532,12 @@ mod tests {
         assert_eq!(Interpreter::new().run(&mem, dl).dash, None);
     }
 
-    /// Birdman64VR horizon lock (`pw64_vr_up_tag`): four float words make
+    /// Birdman64VR horizon lock (`pw64_vr_up_tag`): five float words make
     /// `Frame::up`, none without them.
     #[test]
     fn up_tag_values() {
         let mut mem = VecMemory::default();
-        let v = [0.5f32, 0.866, 0.0, 1.0];
+        let v = [0.5f32, 0.866, 0.0, 1.0, 0.0];
         let mut cmds: Vec<(u32, u32)> = v
             .iter()
             .enumerate()

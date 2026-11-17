@@ -420,6 +420,27 @@ spike_build.sh).
 | Jumble hopper | speed, timer, altimeter, map, altitude, messages |
 | Birdman | speed, altimeter, altitude, photos, messages |
 
+## The right stick in VR (p8)
+
+Since c11 the right stick's C buttons do nothing in flight in VR; it now
+drives two VR things (input.rs `right_stick`: each source's raw stick,
+gilrs pads, the Android/iOS pad, the Touch controllers; the furthest pushed
+wins; dead zone 0.2):
+
+- **Chase distance, in flight:** up brings the chase camera nearer, down
+  takes it further (4 m/s), per vehicle, -2 to +15 m from the game's own
+  spot, saved when the stick is let go (`[vr] chase_offsets`, seven numbers
+  in `VEHICLE_*` order). Only in chase views: the "UP" tag's fifth value is
+  the player camera's mode (camera.c 0, 4, 7, 9). A camera-space
+  translation along the view in front of `StereoEye::world` (the vehicle
+  stays centred; the game's ground collision does not know about it).
+- **The island model, in the menus:** left/right turns it about its
+  middle (1.6 rad/s), up/down tilts it (far side up, 0.8 rad/s, at most
+  0.6 rad), between the island's frame and its placement (`diorama_eye`
+  `spin`; the cut to its cylinder stays in the island's own frame). Not on
+  the title or a badge celebration. Kept until the app restarts.
+- Sky diving has no horizon lock either (the "UP" tag's fourth value).
+
 ## Transitions (w8)
 
 - **A fade in from black** (`FADE_IN` 0.3 s, headset thread) whenever the
@@ -439,8 +460,8 @@ spike_build.sh).
 Comfort: in flight the world stays level and the vehicle (its cockpit
 included) banks around the player. VR Comfort page (Main, under VR HUD) >
 Horizon lock: off / bank (default; the view still pitches with the vehicle)
-/ bank and pitch; never in the cannonball (the "UP" tag's fourth value:
-aiming up and down in first person must pitch)
+/ bank and pitch; never in the cannonball or sky diving (the "UP" tag's
+fourth value: aiming up and down in first person must pitch)
 (`[vr] horizon_lock = "off" | "bank" | "full"`, `vr::HorizonLock`).
 
 - C: `pw64_vr_up_tag` (pw64_widescreen.c), at the end of a flight's world

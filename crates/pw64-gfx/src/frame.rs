@@ -279,8 +279,9 @@ pub struct Frame {
     pub dash: Option<Dash>,
     /// Birdman64VR, in flight: the game world's up in camera space (x
     /// right, y up, -z forward; `pw64_vr_up_tag`), for the headset's
-    /// horizon lock; then 1 where the lock is off (the cannonball), else 0.
-    pub up: Option<[f32; 4]>,
+    /// horizon lock; then 1 where the lock is off (cannonball, sky diving),
+    /// else 0; then the player camera's mode (camera.c, -1 unknown).
+    pub up: Option<[f32; 5]>,
 }
 
 /// Birdman64VR: points on the vehicle's dashboard, one per dashboard gauge

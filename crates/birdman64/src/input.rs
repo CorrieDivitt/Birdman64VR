@@ -1714,6 +1714,35 @@ static SOURCES: Mutex<Sources> = Mutex::new(Sources {
     nav: IDLE,
 });
 
+/// Birdman64VR (p8): each source's right stick (x right, y up, -1..1):
+/// desktop pads (gilrs), the Android / iOS pad, the Touch controllers. The
+/// VR code reads it raw ([`right_stick`]): the chase distance in flight,
+/// the island model's turn in the menus.
+static RIGHT_STICK: Mutex<[[f32; 2]; 3]> = Mutex::new([[0.0; 2]; 3]);
+
+/// [`RIGHT_STICK`] slots.
+pub(crate) const STICK_GILRS: usize = 0;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) const STICK_MOBILE: usize = 1;
+#[cfg(any(windows, target_os = "linux", target_os = "android"))]
+pub(crate) const STICK_XR: usize = 2;
+
+pub(crate) fn set_right_stick(slot: usize, v: [f32; 2]) {
+    RIGHT_STICK.lock().unwrap_or_else(PoisonError::into_inner)[slot] = v;
+}
+
+/// The right stick: the source pushed furthest wins. Idle while another
+/// window has focus or the settings overlay owns input.
+pub fn right_stick() -> [f32; 2] {
+    if !FOCUSED.load(Ordering::Relaxed) || crate::settings::is_open() {
+        return [0.0; 2];
+    }
+    let s = *RIGHT_STICK.lock().unwrap_or_else(PoisonError::into_inner);
+    s.into_iter()
+        .max_by(|a, b| a[0].hypot(a[1]).total_cmp(&b[0].hypot(b[1])))
+        .unwrap_or_default()
+}
+
 /// Pad state for menu navigation: the settings overlay (`settings.rs`) and
 /// the first-run setup screen poll it on the window thread. While the
 /// overlay is open the game sees an idle pad instead.
@@ -2242,6 +2271,13 @@ pub fn spawn() {
                     }
                 }
                 let pads: Vec<_> = gilrs.gamepads().filter(|(_, g)| g.is_connected()).collect();
+                // Birdman64VR (p8): the furthest pushed right stick.
+                let right = pads
+                    .iter()
+                    .map(|(_, g)| [g.value(Axis::RightStickX), g.value(Axis::RightStickY)])
+                    .max_by(|a, b| a[0].hypot(a[1]).total_cmp(&b[0].hypot(b[1])))
+                    .unwrap_or_default();
+                set_right_stick(STICK_GILRS, right);
                 // One entry per connected pad: per-player routing picks
                 // single pads out by name (split-screen), else they merge
                 // into controller 1.
