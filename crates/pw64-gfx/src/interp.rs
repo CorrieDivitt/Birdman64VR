@@ -209,7 +209,7 @@ pub const DIORAMA_TAG: u32 = 0x44_5200;
 /// (`pw64_vr_dash_tag`, [`crate::Dash`]: the points, then the right axis).
 pub const DASH_TAG: u32 = 0x44_4800;
 /// Birdman64VR: `G_NOOP` w0 marker (low 24 bits, + an index in the low
-/// byte) of the world's up in camera space and a bank-only flag, four f32
+/// byte) of the world's up in camera space and a no-lock flag, four f32
 /// in w1 (`pw64_vr_up_tag`, [`Frame::up`]).
 pub const UP_TAG: u32 = 0x55_5000;
 /// `G_NOOP` w1 HUD anchor marker: "PWA" + `L`/`C`/`R` in the low byte;

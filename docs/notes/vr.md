@@ -220,7 +220,7 @@ which is dizzying as the player's head. Confirmed on the headset
 (2026-11-15): "the opening scene looks awesome, the menus work".
 
 - **Island model** (file and level select, results, replays): a full-width
-  world view with terrain is drawn as a 2.75 m model (2.2 m, then 25% bigger) of the whole island on
+  world view with terrain is drawn as a 2.61 m model (2.2 m, then 25% bigger, then 5% smaller) of the whole island on
   a table below the menus (0.3 to 2.5 m ahead, 0.65 m down; the menus
   float 0.5 m higher meanwhile), game north away, fixed whatever the camera
   does. Its sea is kept, cut to a cylinder around the terrain and a little
@@ -425,8 +425,8 @@ spike_build.sh).
 Comfort: in flight the world stays level and the vehicle (its cockpit
 included) banks around the player. VR Comfort page (Main, under VR HUD) >
 Horizon lock: off / bank (default; the view still pitches with the vehicle)
-/ bank and pitch (never the pitch in the cannonball's first person: the
-"UP" tag's fourth value, the arc is the flight)
+/ bank and pitch; never in the cannonball (the "UP" tag's fourth value:
+aiming up and down in first person must pitch)
 (`[vr] horizon_lock = "off" | "bank" | "full"`, `vr::HorizonLock`).
 
 - C: `pw64_vr_up_tag` (pw64_widescreen.c), at the end of a flight's world

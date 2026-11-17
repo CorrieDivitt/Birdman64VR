@@ -794,20 +794,18 @@ static void pw64_vr_dash_tag(const UnkStruct_80204D94* c) {
 
 /* Birdman64VR horizon lock (c5): the game world's up (+z) in the camera's
  * space as the renderer has it (x right, y up, -z forward), then 1 where
- * only the bank may be locked (the cannonball's first person: the flight
- * is the arc, the pitch lock would hide it), else 0; four floats at the end
- * of a flight's world view. The camera matrix's rows are right, forward,
- * up; their z components are world up in each. */
+ * the lock is off (the cannonball: aiming up and down in first person must
+ * pitch, and the flight is the arc), else 0; four floats at the end of a
+ * flight's world view. The camera matrix's rows are right, forward, up;
+ * their z components are world up in each. */
 static void pw64_vr_up_tag(const UnkStruct_80204D94* c) {
     const Mtx4F* cam = &c->unk110;
-    const Camera* player;
     float v[4];
     int i;
     v[0] = cam->m[0][2];
     v[1] = cam->m[2][2];
     v[2] = -cam->m[1][2];
-    player = D_80362690 != NULL ? D_80362690->unkC[D_80362690->unk9C].unk70 : NULL;
-    v[3] = (pw64_vr_flight_vehicle() == VEHICLE_CANNONBALL && player != NULL && player->unk1 == 1) ? 1.0f : 0.0f;
+    v[3] = pw64_vr_flight_vehicle() == VEHICLE_CANNONBALL ? 1.0f : 0.0f;
     for (i = 0; i < 4; i++) {
         union {
             float f;
