@@ -1670,6 +1670,28 @@ impl Renderer {
                 && eye.hud_sphere.is_some()
                 && matches!(d.wide, Wide::Stretch(_))
                 && d.pipeline.shader.mode != ShaderMode::DepthClear;
+            // The island model: no sky. The game's sky dome is centred on
+            // its camera, so parts of it fell inside the model's cylinder
+            // (a ragged piece of sky behind the island). It is the world
+            // drawn with neither depth test nor depth write.
+            if eye.clip.is_some()
+                && d.view != 0
+                && !d.pipeline.depth.test
+                && !d.pipeline.depth.write
+            {
+                continue;
+            }
+            // In flight, 3D draws outside the world view that are no HUD
+            // element (the photo the game renders when a picture is taken,
+            // into a small viewport: a little image on a black square on
+            // the HUD sphere). Perspective: their clip w is not 1.
+            if eye.hud_sphere.is_some() && d.view == 0 && d.elem == 0 && d.is_3d {
+                let first = d.first_vertex as usize;
+                let verts = &frame.vertices[first..first + d.vertex_count as usize];
+                if verts.iter().any(|v| (v.pos[3] - 1.0).abs() > 1e-3) {
+                    continue;
+                }
+            }
             let m = if d.view != 0 {
                 world.get(d.view as usize - 1)
             } else if fade {

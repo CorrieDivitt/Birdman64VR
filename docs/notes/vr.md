@@ -420,6 +420,30 @@ spike_build.sh).
 | Jumble hopper | speed, timer, altimeter, map, altitude, messages |
 | Birdman | speed, altimeter, altitude, photos, messages |
 
+## The right stick in VR (p8)
+
+Since c11 the right stick's C buttons do nothing in flight in VR; it now
+drives two VR things (input.rs `right_stick`: each source's raw stick,
+gilrs pads, the Android/iOS pad, the Touch controllers; the furthest pushed
+wins; dead zone 0.2):
+
+- **Camera distance, in flight:** up brings the camera nearer, down takes
+  it further, per vehicle, saved when the stick is let go: chase views
+  (camera.c modes 0, 4, 7, 9) 4 m/s, -2 to +30 m (`[vr] chase_offsets`);
+  first person (mode 1) 2 m/s, 1 m either way (`[vr]
+  first_person_offsets`); seven numbers each in `VEHICLE_*` order
+  (`vr::ViewKind`). The "UP" tag's fifth value is the player camera's mode. A camera-space
+  translation along the view in front of `StereoEye::world` (the vehicle
+  stays centred; the game's ground collision does not know about it).
+- **The island model, in the menus:** left/right turns it about its
+  middle (1.6 rad/s), up/down tilts it (far side up, 0.8 rad/s, at most
+  0.6 rad), between the island's frame and its placement (`diorama_eye`
+  `spin`; the cut to its cylinder stays in the island's own frame). Not on
+  the title or a badge celebration. Kept until the app restarts.
+- **L / R zoom the island model** in the menus (player 1's buttons,
+  `input::p1_buttons`; e^0.7 per second, 0.5x to 2.5x).
+- Sky diving has no horizon lock either (the "UP" tag's fourth value).
+
 ## Transitions (w8)
 
 - **A fade in from black** (`FADE_IN` 0.3 s, headset thread) whenever the
@@ -434,13 +458,26 @@ spike_build.sh).
   whole eye (`EYE_FADE`, 3x the eye in N64 clip space, no depth test, last
   pass), not on the HUD sphere.
 
+## Island model sky, photo shutter (polish)
+
+- The island model has no sky: the game's sky dome is centred on its
+  camera, so pieces of it fell inside the model's cylinder (a ragged sky
+  behind the island). World draws with neither depth test nor write are
+  skipped when `StereoEye::clip` is set.
+- Taking a photo: the shutter's two bars (hud.c `hudDrawCamera`) were a
+  black square on the HUD sphere; in VR one full-screen fill instead
+  (`pw64_vr_shutter`, alpha by how far it closed), drawn over the whole eye
+  like the game's fades. The photo the game renders into a small viewport
+  (perspective draws outside the world view, `elem` 0: clip w not 1) is not
+  shown in the headset.
+
 ## Horizon lock (c5)
 
 Comfort: in flight the world stays level and the vehicle (its cockpit
 included) banks around the player. VR Comfort page (Main, under VR HUD) >
 Horizon lock: off / bank (default; the view still pitches with the vehicle)
-/ bank and pitch; never in the cannonball (the "UP" tag's fourth value:
-aiming up and down in first person must pitch)
+/ bank and pitch; never in the cannonball or sky diving (the "UP" tag's
+fourth value: aiming up and down in first person must pitch)
 (`[vr] horizon_lock = "off" | "bank" | "full"`, `vr::HorizonLock`).
 
 - C: `pw64_vr_up_tag` (pw64_widescreen.c), at the end of a flight's world

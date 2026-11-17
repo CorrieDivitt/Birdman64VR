@@ -13,6 +13,7 @@
  *    not to draw this frame (pw64_fill_frame, reset per uvGfxBegin).
  */
 #include <ultra64.h>
+#include <uv_geometry.h>
 #include <uv_graphics.h>
 #include <uv_math.h>
 #include <uv_matrix.h>
@@ -95,6 +96,25 @@ float pw64_vr_aim_reticle_x(float flat, float down) {
     pw64_vr_aim_angles(down, &right, &below);
     /* hudDrawAimReticle: sprite centre column 160 + reticleX. */
     return pw64_round(right / r);
+}
+
+void pw64_vr_shutter(int x) {
+    int a = (x * 255) / (SCREEN_WIDTH / 2);
+    if (a > 255) {
+        a = 255;
+    }
+    /* Full width and untextured: the renderer draws it over the whole eye
+     * (pw64-gfx EYE_FADE), like the game's own fades. */
+    uvGfxStatePush();
+    uvGfxSetFlags(GFX_STATE_XLU | GFX_STATE_TEXTURE_NONE);
+    uvGfxClearFlags(GFX_STATE_ZBUFFER);
+    uvVtxBeginPoly();
+    uvVtx(0, 0, 0, 0, 0, 0, 0, 0, (u8)a);
+    uvVtx(SCREEN_WIDTH, 0, 0, 0, 0, 0, 0, 0, (u8)a);
+    uvVtx(SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0, 0, 0, 0, (u8)a);
+    uvVtx(0, SCREEN_HEIGHT, 0, 0, 0, 0, 0, 0, (u8)a);
+    uvVtxEndPoly();
+    uvGfxStatePop();
 }
 
 int pw64_vr_flight_vehicle(void) {
@@ -781,20 +801,26 @@ static void pw64_vr_dash_tag(const UnkStruct_80204D94* c) {
 #define PW64_UP_TAG 0x555000u /* "UP" */
 
 /* Birdman64VR horizon lock (c5): the game world's up (+z) in the camera's
- * space as the renderer has it (x right, y up, -z forward), then 1 where
+ * space as the renderer has it (x right, y up, -z forward); then 1 where
  * the lock is off (the cannonball: aiming up and down in first person must
- * pitch, and the flight is the arc), else 0; four floats at the end of a
- * flight's world view. The camera matrix's rows are right, forward, up;
- * their z components are world up in each. */
+ * pitch; sky diving), else 0; then the player camera's mode (camera.c: 0,
+ * 4, 7, 9 chase; 1 first person; -1 unknown), for the right stick's chase
+ * distance (p8); five floats at the end of a flight's world view. The
+ * camera matrix's rows are right, forward, up; their z components are world
+ * up in each. */
 static void pw64_vr_up_tag(const UnkStruct_80204D94* c) {
     const Mtx4F* cam = &c->unk110;
-    float v[4];
-    int i;
+    const Camera* player;
+    float v[5];
+    int i, veh;
     v[0] = cam->m[0][2];
     v[1] = cam->m[2][2];
     v[2] = -cam->m[1][2];
-    v[3] = pw64_vr_flight_vehicle() == VEHICLE_CANNONBALL ? 1.0f : 0.0f;
-    for (i = 0; i < 4; i++) {
+    veh = pw64_vr_flight_vehicle();
+    v[3] = (veh == VEHICLE_CANNONBALL || veh == VEHICLE_SKY_DIVING) ? 1.0f : 0.0f;
+    player = D_80362690 != NULL ? D_80362690->unkC[D_80362690->unk9C].unk70 : NULL;
+    v[4] = player != NULL ? (float)player->unk1 : -1.0f;
+    for (i = 0; i < 5; i++) {
         union {
             float f;
             u32 u;

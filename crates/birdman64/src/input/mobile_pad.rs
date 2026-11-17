@@ -398,6 +398,8 @@ fn republish_state(st: &mut State, settings_btn: Button) {
     st.settings_down = settings_down;
     let touch = super::touch_pad::touch();
     let pad = game_pad(&st.held, &st.axes, st.axes_seen, &touch);
+    // Birdman64VR (p8): the right stick for the VR code (Android's y down).
+    super::set_right_stick(super::STICK_MOBILE, [st.axes.rx, -st.axes.ry]);
     let nav = nav_pad(&st.held, &st.axes);
     let name = if st.name.is_empty() {
         PAD_NAME

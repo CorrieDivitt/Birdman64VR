@@ -130,6 +130,12 @@ pub struct Config {
     /// `[vr] horizon_lock`: `"off"`, `"bank"` or `"full"` (bank and
     /// pitch); `None` = default, bank (`vr::HorizonLock`).
     pub vr_horizon_lock: Option<String>,
+    /// `[vr] chase_offsets`: how much further back each vehicle's chase
+    /// camera sits in VR (metres, `VEHICLE_*` order; the right stick).
+    pub vr_chase_offsets: Option<[f32; 7]>,
+    /// `[vr] first_person_offsets`: the same for first person (metres back,
+    /// -1 to 1).
+    pub vr_first_person_offsets: Option<[f32; 7]>,
     /// Keys skipped at load (wrong type or invalid value; see `ignored_keys`).
     pub ignored: Vec<String>,
 }
@@ -909,6 +915,30 @@ fn from_table(table: &toml::Table) -> Config {
                         None => ignore(&mut ignored, &format!("vr.{key}"), v, "use true or false"),
                     }
                 }
+                for (key, kind) in [
+                    ("chase_offsets", crate::vr::ViewKind::Chase),
+                    ("first_person_offsets", crate::vr::ViewKind::FirstPerson),
+                ] {
+                    let Some(v) = t.get(key) else { continue };
+                    let (lo, hi) = kind.range();
+                    let parsed = v.as_array().and_then(|a| {
+                        let f: Vec<f32> = a.iter().filter_map(coerce_f32).collect();
+                        (a.len() == 7 && f.len() == 7 && f.iter().all(|x| (lo..=hi).contains(x)))
+                            .then(|| std::array::from_fn(|i| f[i]))
+                    });
+                    match parsed {
+                        Some(o) if kind == crate::vr::ViewKind::Chase => {
+                            cfg.vr_chase_offsets = Some(o);
+                        }
+                        Some(o) => cfg.vr_first_person_offsets = Some(o),
+                        None => ignore(
+                            &mut ignored,
+                            &format!("vr.{key}"),
+                            v,
+                            &format!("use a list of 7 numbers from {lo} to {hi}"),
+                        ),
+                    }
+                }
                 if let Some(v) = t.get("horizon_lock") {
                     match v.as_str() {
                         Some(m) if HORIZON_LOCK_VALUES.contains(&m) => {
@@ -983,6 +1013,45 @@ fn with_vr_bool(mut table: toml::Table, key: &str, on: bool) -> Result<toml::Tab
         vr.remove(key);
     } else {
         vr.insert(key.into(), toml::Value::Boolean(false));
+    }
+    if vr.is_empty() {
+        table.remove("vr");
+    }
+    Ok(table)
+}
+
+/// Writes `[vr] chase_offsets` and `first_person_offsets` (all zero
+/// removes a key, and `[vr]` when nothing else is in it).
+pub fn save_vr_offsets(chase: &[f32; 7], first_person: &[f32; 7]) -> Result<(), String> {
+    let table = read_table()?;
+    write_table(&with_vr_offsets(table, chase, first_person)?)
+}
+
+/// [`save_vr_offsets`]'s table edit (separate from the file I/O for tests).
+fn with_vr_offsets(
+    mut table: toml::Table,
+    chase: &[f32; 7],
+    first_person: &[f32; 7],
+) -> Result<toml::Table, String> {
+    let vr = table
+        .entry("vr")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let toml::Value::Table(vr) = vr else {
+        return Err("[vr] is not a table in pw64.toml; not saved".to_string());
+    };
+    for (key, offsets) in [
+        ("chase_offsets", chase),
+        ("first_person_offsets", first_person),
+    ] {
+        if offsets.iter().all(|o| *o == 0.0) {
+            vr.remove(key);
+        } else {
+            let round = |f: f32| toml::Value::Float((f64::from(f) * 100.0).round() / 100.0);
+            vr.insert(
+                key.into(),
+                toml::Value::Array(offsets.iter().map(|o| round(*o)).collect()),
+            );
+        }
     }
     if vr.is_empty() {
         table.remove("vr");
@@ -1882,6 +1951,31 @@ mod tests {
         let t = with_vr_horizon_lock(toml::Table::new(), "off").unwrap();
         assert_eq!(from_table(&t).vr_horizon_lock.as_deref(), Some("off"));
         assert!(with_vr_horizon_lock(t, "bank").unwrap().is_empty());
+        // `[vr] chase_offsets` / `first_person_offsets`: seven numbers in
+        // their range, else reported.
+        let c = parse("[vr]\nchase_offsets = [0, 1.5, -2, 0, 0, 30, 0]\n").unwrap();
+        assert_eq!(
+            c.vr_chase_offsets,
+            Some([0.0, 1.5, -2.0, 0.0, 0.0, 30.0, 0.0])
+        );
+        let c = parse("[vr]\nchase_offsets = [1, 2]\n").unwrap();
+        assert_eq!(c.vr_chase_offsets, None);
+        assert_eq!(c.ignored, vec!["vr.chase_offsets".to_string()]);
+        let c = parse("[vr]\nfirst_person_offsets = [0, 0, -1, 0, 0, 0, 2]\n").unwrap();
+        assert_eq!(c.vr_first_person_offsets, None, "2 m is out of range");
+        let fp = [0.0, 0.0, -0.5, 0.0, 0.0, 0.0, 0.0];
+        let t = with_vr_offsets(
+            toml::Table::new(),
+            &[0.0, 2.25, 0.0, 0.0, 0.0, 0.0, 0.0],
+            &fp,
+        )
+        .unwrap();
+        let c = from_table(&t);
+        assert_eq!(
+            (c.vr_chase_offsets.unwrap()[1], c.vr_first_person_offsets),
+            (2.25, Some(fp))
+        );
+        assert!(with_vr_offsets(t, &[0.0; 7], &[0.0; 7]).unwrap().is_empty());
         let c = parse("[vr]\ngyro_windscreen = \"maybe\"\n").unwrap();
         assert_eq!(c.vr_gyro_windscreen, None);
         assert_eq!(c.ignored, vec!["vr.gyro_windscreen"]);
