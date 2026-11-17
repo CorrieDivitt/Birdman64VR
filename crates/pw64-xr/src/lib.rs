@@ -9,10 +9,12 @@
 //! The OpenXR loader is opened at run time, so a machine without it (or
 //! without a running runtime) gets an [`XrError`] and can start flat.
 
+mod controllers;
 mod gpu;
 pub mod math;
 mod session;
 
+pub use controllers::PadState;
 pub use gpu::XrGpu;
 pub use session::{Eye, EyePose, Frame, FrameOutcome, FrameTime, Layers, Panel, Seat, XrContext};
 

@@ -1601,6 +1601,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         let mut bound: Option<(u64, f32, [[wgpu::BindGroup; 2]; 2])> = None;
         // Session state, to pause the game when the player is away.
         let mut was_focused = false;
+        let mut touch_active = false;
         let mut last_outcome = None;
         let mut announced = false;
         // Hitch report: the longest gap between shown headset frames and
@@ -1796,6 +1797,20 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             for line in xr.take_log() {
                 log(&line, true);
             }
+            // The Touch controllers: a pad for player 1 (input/xr_pad.rs).
+            let pad = xr.pad();
+            if pad.active != touch_active {
+                touch_active = pad.active;
+                log(
+                    if touch_active {
+                        "Touch controllers on"
+                    } else {
+                        "Touch controllers off"
+                    },
+                    true,
+                );
+            }
+            crate::input::set_xr_pad(pad);
             let kind = outcome.as_ref().ok().copied();
             if kind.is_some() && kind != last_outcome {
                 last_outcome = kind;

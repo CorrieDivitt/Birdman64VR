@@ -388,6 +388,38 @@ the cannon). The rocket belt's C up/down camera height steps (22.5 degrees,
 and are skipped in VR the same way; R's level/top-down toggle is unchanged.
 C buttons outside flight (map zoom, photo album, test menu) are untouched.
 
+## Touch controllers (q3)
+
+The Touch controllers are one more gamepad for player 1, laid out like a
+modern Xbox / PlayStation pad, so every gamepad binding, the settings
+trigger, R3 recentre and rebinding work as with a real pad (a Bluetooth pad
+still works alongside; both merge).
+
+- `pw64-xr` `controllers.rs`: one action per physical input, suggested for
+  `/interaction_profiles/oculus/touch_controller` (the Quest maps Touch Pro
+  and Plus onto it), attached at session creation, synced once per headset
+  frame while the session is focused (`XrContext::pad`, `PadState`).
+  A refused action set is logged and the game runs on a pad.
+- `birdman64` `input/xr_pad.rs`: `PadState` to the Xbox pad's gilrs
+  buttons, then the `[input.gamepad]` bindings (own `Sources::xr` /
+  `xr_nav`, merged into player 1 in `route` and the overlay's nav pad).
+  Logged: `[vr] Touch controllers on/off`.
+
+| Touch | Xbox pad | N64 by default |
+|---|---|---|
+| A, B (right) | A, B | A, B |
+| X, Y (left) | X, Y | B, C-up |
+| Left / right stick | sticks | stick / C buttons |
+| Left / right trigger | LT, RT | Z, R |
+| Left / right grip | LB, RB | L, R |
+| Menu (left) | Menu (Start) | Start |
+| Right stick press | R3 | recentre |
+| Left stick press | View (Select) | settings |
+
+The Touch controllers have one menu button (the right one is the
+system's): the left stick press stands in for View. No d-pad (by default
+it only doubles the stick).
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`

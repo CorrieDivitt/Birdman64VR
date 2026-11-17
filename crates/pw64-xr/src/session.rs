@@ -268,6 +268,13 @@ pub struct XrContext {
     has_clock: bool,
     /// How long the last frame waited for the queue lock.
     queue_wait: std::time::Duration,
+    /// The Touch controllers as a gamepad (`None`: the runtime refused the
+    /// actions; logged, the game still runs on a gamepad).
+    controllers: Option<crate::controllers::Controllers>,
+    /// Their state at the last frame ([`Self::pad`]).
+    pad: crate::PadState,
+    /// A read failed and was logged (once per session).
+    pad_error: bool,
     gpu: XrGpu,
 }
 
@@ -405,6 +412,14 @@ impl XrContext {
             session.create_reference_space(xr::ReferenceSpaceType::LOCAL, xr::Posef::IDENTITY)?;
         let head =
             session.create_reference_space(xr::ReferenceSpaceType::VIEW, xr::Posef::IDENTITY)?;
+        let mut log = Vec::new();
+        let controllers = match crate::controllers::Controllers::new(&instance, &session) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                log.push(format!("Touch controllers unavailable: {e}"));
+                None
+            }
+        };
 
         let formats = session.enumerate_swapchain_formats()?;
         let (vk_format, format) = [
@@ -450,9 +465,12 @@ impl XrContext {
             running: false,
             focused: false,
             present: true,
-            log: Vec::new(),
+            log,
             has_clock,
             queue_wait: std::time::Duration::ZERO,
+            controllers,
+            pad: crate::PadState::default(),
+            pad_error: false,
             gpu,
         })
     }
@@ -509,6 +527,12 @@ impl XrContext {
     /// head's position, so the game's camera is at the player's eyes again.
     pub fn recentre(&mut self) {
         self.recentre = true;
+    }
+
+    /// The Touch controllers' state at the last frame (idle without input
+    /// focus or controllers).
+    pub fn pad(&self) -> crate::PadState {
+        self.pad
     }
 
     /// The seat now ([`Seat`]).
@@ -608,6 +632,17 @@ impl XrContext {
             return Ok(FrameOutcome::Idle);
         }
         let state = self.frame_waiter.wait()?;
+        // The Touch controllers: once per headset frame, only with input
+        // focus (the runtime delivers none otherwise: idle).
+        self.pad = match &self.controllers {
+            Some(c) if self.focused => c.read(&self.session).unwrap_or_else(|e| {
+                if !std::mem::replace(&mut self.pad_error, true) {
+                    self.log.push(format!("Touch controllers: {e}"));
+                }
+                crate::PadState::default()
+            }),
+            _ => crate::PadState::default(),
+        };
         if std::mem::take(&mut self.recentre) {
             let flags =
                 xr::SpaceLocationFlags::ORIENTATION_VALID | xr::SpaceLocationFlags::POSITION_VALID;
