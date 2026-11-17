@@ -495,6 +495,10 @@ type RevertTo = (opts::DisplayMode, Option<opts::Res>);
 /// egui state. Created on first open.
 pub struct Overlay {
     ctx: egui::Context,
+    /// Tests: lay the pages out as in VR (`in_vr`) without switching the
+    /// process-wide VR mode under other tests.
+    #[cfg(test)]
+    force_vr: bool,
     renderer: Option<EguiRenderer>,
     /// Cleared by Escape / B / Start / Close / the window's X; the window
     /// closes the overlay when `render` returns false.
@@ -714,6 +718,8 @@ impl Overlay {
         let p2 = p2_choices(&pads, &saved_p2);
         let p2_sel = p2_select(&p2, &pads, &saved_p2);
         Self {
+            #[cfg(test)]
+            force_vr: false,
             ctx: egui::Context::default(),
             renderer: None,
             show: false,
@@ -1780,6 +1786,15 @@ impl Overlay {
     /// Every selectable row of the current page, in navigation order
     /// (U2 pages). `ui_rows` draws exactly these, so keyboard/pad selection
     /// and mouse clicks stay in sync.
+    /// The pages are laid out for the headset (`VR_HIDDEN_*`, VR HUD page).
+    fn in_vr(&self) -> bool {
+        #[cfg(test)]
+        if self.force_vr {
+            return true;
+        }
+        crate::vr::active()
+    }
+
     fn rows(&self) -> Vec<Row> {
         match self.page {
             Page::Main => {
@@ -1830,7 +1845,7 @@ impl Overlay {
                 // Birdman64VR: the headset's HUD choices, under Move HUD.
                 // No touch controls (no touchscreen) and no split-screen
                 // (VR is single-player) in the headset.
-                if crate::vr::active() {
+                if self.in_vr() {
                     rows.insert(at + 1, Row::VrHudPage);
                     rows.retain(|r| !VR_HIDDEN_MAIN.contains(r));
                 }
@@ -1863,7 +1878,7 @@ impl Overlay {
                 // page so it sits directly under the banner text (which only
                 // shows while changes are pending).
                 // Birdman64VR: only what changes the picture in the headset.
-                if crate::vr::active() {
+                if self.in_vr() {
                     rows.retain(|r| !matches!(r, Row::Opt(o) if VR_HIDDEN_GRAPHICS.contains(o)));
                 }
                 if !self.pending_restart().is_empty() {
@@ -2013,7 +2028,10 @@ impl Overlay {
                 if rows.contains(&Row::VrHudPage) {
                     self.text_row(ui, at(Row::VrHudPage), "VR HUD \u{203a}");
                 }
-                self.text_row(ui, at(Row::SplitScreen), "Split-screen \u{203a}");
+                // Not in VR (`rows`): `at` would panic on a missing row.
+                if rows.contains(&Row::SplitScreen) {
+                    self.text_row(ui, at(Row::SplitScreen), "Split-screen \u{203a}");
+                }
                 self.text_row(ui, at(Row::Graphics), "Display & graphics \u{203a}");
                 self.text_row(ui, at(Row::PerfPage), "Performance overlay \u{203a}");
                 self.opt_row(ui, at(Row::Opt(Opt::Volume)), Opt::Volume);
@@ -2110,7 +2128,10 @@ impl Overlay {
                     Opt::TexFilter,
                     Opt::TexturePack,
                 ] {
-                    self.opt_row(ui, at(Row::Opt(o)), o);
+                    // VR hides some (`VR_HIDDEN_GRAPHICS`): only rows on the page.
+                    if rows.contains(&Row::Opt(o)) {
+                        self.opt_row(ui, at(Row::Opt(o)), o);
+                    }
                 }
                 // Where the Texture pack row's folders live (created when
                 // missing on confirm), like "Open save folder" on Main.
@@ -2123,7 +2144,10 @@ impl Overlay {
                     Opt::OledDrift,
                     Opt::OledBrightness,
                 ] {
-                    self.opt_row(ui, at(Row::Opt(o)), o);
+                    // VR hides some (`VR_HIDDEN_GRAPHICS`): only rows on the page.
+                    if rows.contains(&Row::Opt(o)) {
+                        self.opt_row(ui, at(Row::Opt(o)), o);
+                    }
                 }
                 self.text_row(ui, at(Row::ResetGraphics), "Reset to defaults");
                 self.text_row(ui, at(Row::Back), "\u{2039} Back");
@@ -4967,6 +4991,40 @@ mod tests {
     /// SS-UI: two connected pads sharing a name list as distinct choices —
     /// the second is `name (2)` with the value `gamepad:name#2`; unique
     /// names are unchanged.
+    /// Every page draws in VR, where rows are hidden (`VR_HIDDEN_*`): the
+    /// drawing looks rows up by position and must skip the missing ones
+    /// (opening the menu in the headset crashed on the Split-screen row).
+    #[test]
+    fn every_page_draws_in_vr() {
+        for vr in [false, true] {
+            let mut o = Overlay::new();
+            o.force_vr = vr;
+            for page in [
+                Page::Main,
+                Page::Graphics,
+                Page::Controls,
+                Page::Split,
+                Page::Perf,
+                Page::VrHud,
+            ] {
+                o.page = page;
+                let ctx = egui::Context::default();
+                let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| o.ui_rows(ui));
+                });
+            }
+            let main = {
+                o.page = Page::Main;
+                o.rows()
+            };
+            assert_eq!(main.contains(&Row::SplitScreen), !vr);
+            assert_eq!(main.contains(&Row::VrHudPage), vr);
+            o.page = Page::Graphics;
+            assert_eq!(o.rows().contains(&Row::Opt(Opt::Widescreen)), !vr);
+            assert!(o.rows().contains(&Row::Opt(Opt::Msaa)));
+        }
+    }
+
     #[test]
     fn p2_choices_duplicate_pads() {
         let pads = vec!["Xbox Controller".to_string(), "Xbox Controller".to_string()];
