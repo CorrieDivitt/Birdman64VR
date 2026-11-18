@@ -209,6 +209,10 @@ pub struct StereoEye {
     /// HUD's text). The game's full-screen fades and its pause menu (drawn
     /// outside that bracket) stay.
     pub hide_hud: bool,
+    /// Diorama mode in the dim room: no sky ([`DrawCall::sky`]: the game's
+    /// sky dome follows its camera, a bubble around the model); the sea
+    /// stays, at the model's scale.
+    pub hide_sky: bool,
 }
 
 /// Birdman64VR: where one HUD element sits on the dashboard
@@ -1995,6 +1999,10 @@ impl Renderer {
                 if eye.hide_env && d.env {
                     continue;
                 }
+                // Diorama mode in the dim room: the sea, not the sky.
+                if eye.hide_sky && d.sky {
+                    continue;
+                }
                 // In flight, 3D draws outside the world view that are no HUD
                 // element (the photo the game renders when a picture is taken,
                 // into a small viewport: a little image on a black square on
@@ -2761,6 +2769,7 @@ mod tests {
             sight: None,
             hide_env: false,
             hide_hud: false,
+            hide_sky: false,
         };
         let mut d = red_green_frame().draws[0].clone();
         d.view = 0;
@@ -2914,6 +2923,7 @@ mod tests {
             sight: None,
             hide_env: false,
             hide_hud: false,
+            hide_sky: false,
         };
         r.render_stereo(&frame, &view, (w, h), &eye);
         let stereo = read_rgba(&device, &queue, &tex);
@@ -3181,6 +3191,7 @@ mod tests {
             stretch_y: [0.0; 2],
             hud: false,
             env: false,
+            sky: false,
             split: None,
             elem: 0,
             view: 0,
@@ -3198,6 +3209,7 @@ mod tests {
             dash: None,
             up: None,
             shutter: false,
+            env_log: Vec::new(),
             table: None,
         }
     }
@@ -3519,6 +3531,7 @@ mod tests {
             split: Some(view),
             hud: true,
             env: false,
+            sky: false,
             ..base.clone()
         };
         let size = (640, 480); // 2 target px per N64 px, view 20..620 × 16..230
@@ -3584,6 +3597,7 @@ mod tests {
             split: Some(view),
             hud: true,
             env: false,
+            sky: false,
             ..base.clone()
         };
         let size = (640, 480);
@@ -3638,6 +3652,7 @@ mod tests {
             split: Some(left),
             hud: false,
             env: false,
+            sky: false,
             ..base.clone()
         };
         let px = |s: [f32; 4], x: f32, w: f32| ((x * s[0] + s[1]) + 1.0) / 2.0 * w;

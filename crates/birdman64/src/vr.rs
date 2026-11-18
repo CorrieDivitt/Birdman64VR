@@ -858,6 +858,138 @@ mod real {
 
     /// `[vr]` lines go to stderr and to `vr.log` in the data folder (a new
     /// file per run), so a headset session can be looked at afterwards.
+    /// x1, log only: the view kinds [`env_report`] tells apart.
+    const ENV_KIND_FULL: u8 = 0;
+    const ENV_KIND_MODEL: u8 = 1;
+    const ENV_KIND_MENUS: u8 = 2;
+    /// x1, log only: height marks (game m, the vehicle's height, else the
+    /// camera's) at which the environment is logged again.
+    const ENV_HEIGHT_MARKS: [f32; 7] = [10.0, 25.0, 50.0, 100.0, 200.0, 400.0, 800.0];
+
+    /// x1, log only: the lines describing each `_uvEnvDraw` of `frame`
+    /// (env.c.patch, [`pw64_gfx::EnvLog`]), with the environment id and
+    /// the (view kind, height band) they are for. `None`: no environment.
+    fn env_report(
+        frame: &pw64_gfx::Frame,
+        kind: u8,
+        mode: super::DioramaMode,
+    ) -> Option<(i32, (u8, u8), Vec<String>)> {
+        let first = frame.env_log.first()?;
+        let cam = first.camera();
+        let vehicle = frame.table.map(|t| t.vehicle);
+        let height = vehicle.map_or(cam[3][2], |v| v[2]);
+        let band = ENV_HEIGHT_MARKS.iter().filter(|m| height >= **m).count() as u8;
+        let band_name = match band as usize {
+            0 => format!("below {} m", ENV_HEIGHT_MARKS[0]),
+            b if b == ENV_HEIGHT_MARKS.len() => format!("above {} m", ENV_HEIGHT_MARKS[b - 1]),
+            b => format!("{}-{} m", ENV_HEIGHT_MARKS[b - 1], ENV_HEIGHT_MARKS[b]),
+        };
+        // The land's view: the most common view of the world draws that
+        // are not the environment's.
+        let mut counts = std::collections::HashMap::<u16, usize>::new();
+        for d in frame.draws.iter().filter(|d| d.view != 0 && !d.env) {
+            *counts.entry(d.view).or_default() += 1;
+        }
+        let land = counts
+            .into_iter()
+            .max_by_key(|(_, n)| *n)
+            .map_or(0, |(v, _)| v);
+        let kind_name = match kind {
+            ENV_KIND_MENUS => "menus island model",
+            ENV_KIND_MODEL => "flight as a model",
+            _ => "full size",
+        };
+        let p3 = |v: [f32; 3]| format!("({:.1}, {:.1}, {:.1})", v[0], v[1], v[2]);
+        let mut lines = Vec::new();
+        for e in &frame.env_log {
+            let h = &e.head;
+            let c = e.camera();
+            lines.push(format!(
+                "env: chan {} env {} ({} models), {kind_name} (Diorama {mode:?}), height {band_name}; \
+                 clear {} rgba {},{},{},{}; fog {} min {:.1} max {:.1} rgb {},{},{}; \
+                 camera at {} forward {}; vehicle at {}; land view {land} of {} views",
+                h[0], h[1], h[2], h[3] != 0.0, h[4], h[5], h[6], h[7], h[8] != 0.0,
+                h[9], h[10], h[11], h[12], h[13],
+                p3(c[3]),
+                p3(c[1]),
+                vehicle.map_or("-".to_string(), p3),
+                frame.views.len(),
+            ));
+            for m in &e.models {
+                let name = match m.index {
+                    pw64_gfx::EnvModel::CLEAR => "screen clear".to_string(),
+                    pw64_gfx::EnvModel::CALLBACK => "callback".to_string(),
+                    i => {
+                        let f = m.flag;
+                        let mut what = Vec::new();
+                        if f & 1 != 0 {
+                            what.push("depth");
+                        }
+                        if f & 2 != 0 {
+                            what.push("own view");
+                        }
+                        if f & 4 != 0 {
+                            what.push("fog");
+                        }
+                        if f & 8 != 0 {
+                            what.push("follows camera");
+                        }
+                        format!("model #{i} id {} flag {f:#04x} ({})", m.id, what.join(","))
+                    }
+                };
+                if m.runs == 0 {
+                    lines.push(format!("env:   {name}: no draws"));
+                    continue;
+                }
+                let n = m.vertices.max(1) as f32;
+                let avg = m.color_sum.map(|c| c / n);
+                let depth = m.depth.map_or("-".to_string(), |d| {
+                    format!("test {} write {} decal {}", d.test, d.write, d.decal)
+                });
+                let view = if m.view == 0 {
+                    "none (2D)".to_string()
+                } else if m.view == land {
+                    format!("{} (= land)", m.view)
+                } else {
+                    format!("{} (not land)", m.view)
+                };
+                let mut line = format!(
+                    "env:   {name}: {} runs ({} 3D, {} textured), {} verts; view {view}{}; depth {depth}{}; cull {}; {:?}; \
+                     shade avg {:.2},{:.2},{:.2} alpha {:.2}-{:.2}",
+                    m.runs,
+                    m.runs_3d,
+                    m.textured,
+                    m.vertices,
+                    if m.view_mixed { " MIXED" } else { "" },
+                    if m.depth_mixed { " MIXED" } else { "" },
+                    m.cull,
+                    m.mode.unwrap_or(pw64_gfx::frame::ShaderMode::Normal),
+                    avg[0],
+                    avg[1],
+                    avg[2],
+                    m.alpha[0],
+                    m.alpha[1],
+                );
+                if m.cam_min[0].is_finite() {
+                    let (a, b) = (m.world_min, m.world_max);
+                    line += &format!(
+                        "; camera space {} to {}; world {} to {} (size {:.1} x {:.1} x {:.1}, centre {})",
+                        p3(m.cam_min),
+                        p3(m.cam_max),
+                        p3(a),
+                        p3(b),
+                        b[0] - a[0],
+                        b[1] - a[1],
+                        b[2] - a[2],
+                        p3([0, 1, 2].map(|k| (a[k] + b[k]) * 0.5)),
+                    );
+                }
+                lines.push(line);
+            }
+        }
+        Some((first.head[1] as i32, (kind, band), lines))
+    }
+
     fn log(line: &str, console: bool) {
         use std::io::Write;
         static FILE: OnceLock<Option<Mutex<std::fs::File>>> = OnceLock::new();
@@ -1085,6 +1217,7 @@ mod real {
             sight: None,
             hide_env: false,
             hide_hud: false,
+            hide_sky: false,
         }
     }
 
@@ -1197,8 +1330,9 @@ mod real {
     /// times `zoom`, level, game north away turned by `spin` radians. `follow`: moved so the vehicle
     /// stays at [`TABLE_VEHICLE_M`] and the land slides past below it;
     /// else the island stands still where the menus' model does
-    /// ([`MODEL_CENTRE_M`], its middle at sea level). No sky and no sea;
-    /// around it the player's room (`room`) or the dim one.
+    /// ([`MODEL_CENTRE_M`], its middle at sea level). In the player's room
+    /// (`room`): no sky and no sea. In the dim room the game's sea with the
+    /// model, and no sky (x1 round 2).
     pub(super) fn table_eye(
         pose: &EyePose,
         t: &pw64_gfx::Table,
@@ -1248,10 +1382,13 @@ mod real {
         ];
         let to_world = pw64_gfx::Diorama::to_world(&t.camera);
         eye.world = mul(&mul(&mul(&mul(&to_world, &centre), &turn), &place), &view);
-        // No sky and no sea (tried: the game's sea is a patch following its
-        // camera, sized per level, and its sky a bubble around it; neither
-        // fits a model island; tracker After 1.0).
-        eye.hide_env = true;
+        // x1 round 2: the dim room keeps the game's sea at the model's scale
+        // (a flat 24.6 km square at sea level on every flight level) and
+        // leaves out its sky (the dome following the game camera, told
+        // apart by its environment flag, `DrawCall::sky`). The player's
+        // room: neither.
+        eye.hide_env = room;
+        eye.hide_sky = !room;
         eye.background = Some(if room {
             MODEL_BACKGROUND_ROOM
         } else {
@@ -1459,6 +1596,9 @@ mod real {
         /// Lines of that logged since the last frame with a world (capped:
         /// 2D screens change their draw count often).
         flat_lines: u32,
+        /// x1, log only: the environment logged so far on this level
+        /// (its id) and which (view kind, height band) it was logged in.
+        env_seen: (i32, std::collections::HashSet<(u8, u8)>),
         /// p8: the island model's turn and tilt from the right stick
         /// (radians) and its zoom (L / R), when the stick was last read,
         /// and a camera distance change not saved yet.
@@ -1551,6 +1691,7 @@ mod real {
                     void: false,
                     flat_logged: None,
                     flat_lines: 0,
+                    env_seen: (-1, Default::default()),
                     spin: [0.0, 0.0, 1.0],
                     stick_at: Instant::now(),
                     chase_dirty: false,
@@ -1812,6 +1953,26 @@ mod real {
                         }
                     })
             });
+            // x1, log only: what the level's sky and sea are made of, once
+            // per level, view kind and height band.
+            let kind = if frame.diorama.is_some() {
+                ENV_KIND_MENUS
+            } else if table.is_some() {
+                ENV_KIND_MODEL
+            } else {
+                ENV_KIND_FULL
+            };
+            if let Some((env, seen, lines)) = env_report(frame, kind, mode)
+                && (self.env_seen.0 != env || !self.env_seen.1.contains(&seen))
+            {
+                if self.env_seen.0 != env {
+                    self.env_seen = (env, Default::default());
+                }
+                self.env_seen.1.insert(seen);
+                for l in lines {
+                    log(&l, true);
+                }
+            }
             let table_room = mode.passthrough() && super::passthrough_available();
             if let Some(t) = &table {
                 // The right stick: up = closer, in to 20 game metres from
@@ -2908,6 +3069,49 @@ fn fs(v: V) -> @location(0) vec4<f32> {
 
     #[cfg(test)]
     mod tests {
+
+        /// x1, log only: one head line and one line per model, the
+        /// height band from the camera when there is no vehicle, and an
+        /// environment model's world extents from its camera-space ones.
+        #[test]
+        fn env_report_lines() {
+            let mut head = [0.0f32; pw64_gfx::EnvLog::HEAD];
+            head[1] = 3.0; // env id
+            head[2] = 1.0;
+            // Camera: right x, forward y, up z, at (100, 200, 60).
+            head[14..26].copy_from_slice(&[
+                1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 100.0, 200.0, 60.0,
+            ]);
+            let mut e = pw64_gfx::EnvLog::new(head);
+            let mut m = pw64_gfx::EnvModel::new(0, 12, 0x0D);
+            m.runs = 1;
+            m.vertices = 3;
+            m.cam_min = [-5.0, -60.0, -10.0];
+            m.cam_max = [5.0, -60.0, -1.0];
+            m.world_min = [95.0, 201.0, 0.0];
+            m.world_max = [105.0, 210.0, 0.0];
+            e.models.push(m);
+            let f = pw64_gfx::Frame {
+                env_log: vec![e],
+                ..Default::default()
+            };
+            let (env, seen, lines) =
+                super::env_report(&f, super::ENV_KIND_MODEL, crate::vr::DioramaMode::On).unwrap();
+            assert_eq!((env, seen), (3, (super::ENV_KIND_MODEL, 3)));
+            assert_eq!(lines.len(), 3, "{lines:#?}");
+            assert!(lines[0].contains("height 50-100 m"), "{}", lines[0]);
+            assert!(lines[1].contains("screen clear: no draws"), "{}", lines[1]);
+            assert!(
+                lines[2].contains("id 12 flag 0x0d (depth,fog,follows camera)"),
+                "{}",
+                lines[2]
+            );
+            assert!(lines[2].contains("size 10.0 x 9.0 x 0.0"), "{}", lines[2]);
+            assert!(
+                super::env_report(&pw64_gfx::Frame::default(), 0, crate::vr::DioramaMode::Off)
+                    .is_none()
+            );
+        }
         /// The eye matrices: the world straight ahead lands in the middle
         /// of a symmetric eye with reversed depth; the N64 screen lands on
         /// the panel, its top-left corner up and to the left.
@@ -3204,7 +3408,10 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     ndc(apply(&eye.world, middle)),
                     ndc(apply(&view, MODEL_CENTRE_M))
                 ));
-                assert!(eye.hide_env && eye.clip.is_none());
+                // The dim room keeps the sea, not the sky.
+                assert!(!eye.hide_env && eye.hide_sky && eye.clip.is_none());
+                let room = super::table_eye(&pose, &t, zoom, 0.0, false, true);
+                assert!(room.hide_env && !room.hide_sky);
                 assert_eq!(eye.background.map(|b| b[3]), Some(1.0));
             }
         }

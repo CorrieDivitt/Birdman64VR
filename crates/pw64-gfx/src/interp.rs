@@ -167,9 +167,13 @@ pub struct Interpreter {
     diorama_in: [f32; 22],
     /// [`TABLE_TAG`] values so far.
     table_in: [f32; 21],
+    /// [`ENV_HEAD_TAG`] values so far.
+    env_head_in: [f32; crate::EnvLog::HEAD],
     /// Inside a world view's environment draws (`ENV_TAG_ON/OFF`); reset
     /// per run.
     backdrop: bool,
+    /// The environment model being drawn is a sky ([`DrawCall::sky`]).
+    env_sky: bool,
     /// Birdman64VR: the dashboard's values as their tags arrive.
     dash_in: [f32; (crate::Dash::POINTS + 1) * 3],
     /// [`UP_TAG`] values so far.
@@ -230,6 +234,13 @@ pub const TABLE_TAG: u32 = 0x54_4200;
 /// ([`DrawCall::env`]).
 pub const ENV_TAG_ON: u32 = 0x5057_4E31;
 pub const ENV_TAG_OFF: u32 = 0x5057_4E30;
+/// Birdman64VR, for the log only (x1): `G_NOOP` w0 markers ("EH" / "EM"
+/// in bits 8-23) inside `_uvEnvDraw` (env.c.patch). "EH" + index: the
+/// [`crate::EnvLog`] head values, one f32 in w1 each. "EM" + the model's
+/// index in the environment (0xFF: its callback): w1 = model id << 16 |
+/// flag byte; the following draws are that model's ([`Frame::env_log`]).
+pub const ENV_HEAD_TAG: u32 = 0x45_4800;
+pub const ENV_MODEL_TAG: u32 = 0x45_4D00;
 /// `G_NOOP` w1 HUD anchor marker: "PWA" + `L`/`C`/`R` in the low byte;
 /// applies to the following draws (see [`Anchor`]).
 pub const ANCHOR_TAG: u32 = 0x5057_4100;
@@ -361,7 +372,9 @@ impl Interpreter {
             split_x: [0.0; 2],
             diorama_in: [0.0; 22],
             table_in: [0.0; 21],
+            env_head_in: [0.0; crate::EnvLog::HEAD],
             backdrop: false,
+            env_sky: false,
             dash_in: [0.0; (crate::Dash::POINTS + 1) * 3],
             up_in: [0.0; 5],
             split: None,
@@ -401,6 +414,7 @@ impl Interpreter {
             dash: None,
             up: None,
             shutter: false,
+            env_log: Vec::new(),
             table: None,
         };
         self.run_into(mem, dl, &mut frame);
@@ -436,6 +450,7 @@ impl Interpreter {
         frame.up = None;
         frame.shutter = false;
         frame.table = None;
+        frame.env_log.clear();
         std::mem::swap(&mut self.frame, frame);
         self.execute(mem, dl);
         std::mem::swap(&mut self.frame, frame);
@@ -561,6 +576,27 @@ impl Interpreter {
                     if i == self.table_in.len() - 1 {
                         self.frame.table = Some(crate::Table::from_values(&self.table_in));
                     }
+                }
+            }
+            // Birdman64VR, log only (x1): the environment's head values
+            // and which model the following draws belong to (env.c.patch).
+            op::G_NOOP if w0 & 0xFF_FF00 == ENV_HEAD_TAG => {
+                let i = (w0 & 0xFF) as usize;
+                if i < self.env_head_in.len() {
+                    self.env_head_in[i] = f32::from_bits(w1);
+                    if i == self.env_head_in.len() - 1 {
+                        self.frame
+                            .env_log
+                            .push(crate::EnvLog::new(self.env_head_in));
+                    }
+                }
+            }
+            op::G_NOOP if w0 & 0xFF_FF00 == ENV_MODEL_TAG => {
+                // A sky: own view (2) or following the camera (8).
+                self.env_sky = w0 as u8 != crate::EnvModel::CALLBACK && w1 & 0x0A != 0;
+                if let Some(log) = self.frame.env_log.last_mut() {
+                    log.models
+                        .push(crate::EnvModel::new(w0 as u8, (w1 >> 16) as u16, w1 as u8));
                 }
             }
             // Birdman64VR: a photo was taken (pw64_vr_shutter).
@@ -1194,6 +1230,9 @@ impl Interpreter {
         } else {
             0
         };
+        if self.backdrop && !self.frame.env_log.is_empty() {
+            self.env_stats(t, first as usize, is_3d, view);
+        }
         let same_template = self.last_serial == t.serial;
         self.last_serial = t.serial;
         if let Some(last) = self.frame.draws.last_mut()
@@ -1213,6 +1252,7 @@ impl Interpreter {
             && last.vanchor == self.vanchor
             && last.hud == self.hud
             && last.env == self.backdrop
+            && last.sky == (self.backdrop && self.env_sky)
             && last.split == self.split
             && last.elem == self.elem
             && last.view == view
@@ -1237,10 +1277,63 @@ impl Interpreter {
             stretch_y,
             hud: self.hud,
             env: self.backdrop,
+            sky: self.backdrop && self.env_sky,
             split: self.split,
             elem: self.elem,
             view,
         });
+    }
+
+    /// Birdman64VR, log only (x1): adds a run of environment draws (the
+    /// vertices from `first`) to the current model's [`crate::EnvModel`].
+    fn env_stats(&mut self, t: &Template, first: usize, is_3d: bool, view: u16) {
+        let frame = &mut self.frame;
+        let Some(log) = frame.env_log.last_mut() else {
+            return;
+        };
+        let to_world = crate::Diorama::to_world(&log.camera());
+        let Some(m) = log.models.last_mut() else {
+            return;
+        };
+        let verts = &frame.vertices[first..];
+        if m.runs == 0 {
+            m.view = view;
+            m.depth = Some(t.pipeline.depth);
+            m.cull = t.pipeline.cull;
+            m.mode = Some(t.pipeline.shader.mode);
+        } else {
+            m.view_mixed |= m.view != view;
+            m.depth_mixed |= m.depth != Some(t.pipeline.depth);
+        }
+        m.runs += 1;
+        m.vertices += verts.len() as u32;
+        m.textured += u32::from(t.textures.iter().any(Option::is_some));
+        m.runs_3d += u32::from(is_3d);
+        let cam_of = view
+            .checked_sub(1)
+            .and_then(|i| frame.views.get(i as usize));
+        for v in verts {
+            for k in 0..4 {
+                m.color_sum[k] += v.color[k];
+            }
+            m.alpha = [m.alpha[0].min(v.color[3]), m.alpha[1].max(v.color[3])];
+            let Some(inv) = cam_of else { continue };
+            let p = v.pos;
+            let c: [f32; 4] = std::array::from_fn(|j| {
+                p[0] * inv[0][j] + p[1] * inv[1][j] + p[2] * inv[2][j] + p[3] * inv[3][j]
+            });
+            if c[3].abs() < 1e-9 {
+                continue;
+            }
+            let c = [c[0] / c[3], c[1] / c[3], c[2] / c[3]];
+            let w = matrix::transform(c, &to_world);
+            for k in 0..3 {
+                m.cam_min[k] = m.cam_min[k].min(c[k]);
+                m.cam_max[k] = m.cam_max[k].max(c[k]);
+                m.world_min[k] = m.world_min[k].min(w[k]);
+                m.world_max[k] = m.world_max[k].max(w[k]);
+            }
+        }
     }
 
     /// Birdman64VR: [`DrawCall::view`] for a world draw under the current
@@ -1622,6 +1715,50 @@ mod tests {
         assert_eq!(t.bounds, [15.5, 16.5, 17.5, 18.5, 19.5, 20.5]);
         let dl = mem.push_words(&words(&[(0xB800_0000, 0)]));
         assert_eq!(Interpreter::new().run(&mem, dl).table, None);
+    }
+
+    /// Birdman64VR, log only (x1, env.c.patch): 26 "EH" float words start
+    /// an `EnvLog` (with its screen-clear entry), each "EM" word a model;
+    /// the environment's draws count towards the model before them.
+    #[test]
+    fn env_log_tags() {
+        let mut mem = VecMemory::default();
+        let head: [f32; crate::EnvLog::HEAD] = std::array::from_fn(|i| i as f32);
+        let mut cmds: Vec<(u32, u32)> = head
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (0xC000_0000 | ENV_HEAD_TAG | i as u32, f.to_bits()))
+            .collect();
+        cmds.push((0xC000_0000, ENV_TAG_ON));
+        cmds.push((0xC000_0000 | ENV_MODEL_TAG, (7 << 16) | 0x09));
+        // A fill rectangle: one 2D run for model #0.
+        cmds.push((0xF600_0000 | (40 << 14) | (40 << 2), (10 << 14) | (10 << 2)));
+        cmds.push((0xC000_0000 | ENV_MODEL_TAG | 0xFF, 0));
+        cmds.push((0xC000_0000, ENV_TAG_OFF));
+        cmds.push((0xB800_0000, 0));
+        let dl = mem.push_words(&words(&cmds));
+        let f = Interpreter::new().run(&mem, dl);
+        assert_eq!(f.env_log.len(), 1);
+        let e = &f.env_log[0];
+        assert_eq!(e.head, head);
+        assert_eq!(e.camera()[3], [23.0, 24.0, 25.0]);
+        let m: Vec<_> = e
+            .models
+            .iter()
+            .map(|m| (m.index, m.id, m.flag, m.runs, m.runs_3d))
+            .collect();
+        assert_eq!(
+            m,
+            [
+                (crate::EnvModel::CLEAR, 0, 0, 0, 0),
+                (0, 7, 9, 1, 0),
+                (crate::EnvModel::CALLBACK, 0, 0, 0, 0)
+            ]
+        );
+        // Flag 9 follows the camera: a sky draw.
+        assert!(!f.draws.is_empty() && f.draws.iter().all(|d| d.env && d.sky));
+        let dl = mem.push_words(&words(&[(0xB800_0000, 0)]));
+        assert!(Interpreter::new().run(&mem, dl).env_log.is_empty());
     }
 
     #[test]
