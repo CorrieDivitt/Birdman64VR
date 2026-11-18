@@ -1086,7 +1086,7 @@ impl App {
             surface.configure(&device, &config);
         }
         let msaa = opts::resolve_msaa(&adapter, format, opts::msaa());
-        let renderer = Renderer::new(
+        let mut renderer = Renderer::new(
             &device,
             &queue,
             format,
@@ -1109,6 +1109,9 @@ impl App {
                 hud_offsets: opts::hud_offsets(),
             },
         );
+        // q6: shader pipelines saved by an earlier run load instead of
+        // compiling again (`pipeline_cache`).
+        crate::pipeline_cache::load(&mut renderer, &adapter.get_info());
         let (scale, filter) = (opts::scale(), opts::scale_filter());
         // Display mode (`PW64_DISPLAY_MODE`) and the exclusive video mode
         // (`PW64_FULLSCREEN_RES`); exclusive is unavailable on Wayland
@@ -1451,6 +1454,8 @@ impl App {
         }
         g.renderer.set_skip_world(false);
         crate::vr::note(crate::vr::Stage::Drain, timing.elapsed());
+        // q6: newly compiled pipelines to disk (at most every 5 s).
+        crate::pipeline_cache::save(&mut g.renderer, &g.adapter, false);
         if q.show.is_some() {
             self.shown = q.show;
         }
@@ -2047,6 +2052,8 @@ impl ApplicationHandler<UserEvent> for App {
             // Nothing may still use the old swapchain: let queued work end.
             let _ = g.device.poll(wgpu::PollType::wait_indefinitely());
             g.surface = None;
+            // The app may not come back: keep what was compiled (q6).
+            crate::pipeline_cache::save(&mut g.renderer, &g.adapter, true);
         }
     }
 

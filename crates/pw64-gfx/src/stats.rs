@@ -9,8 +9,13 @@ use std::time::Duration;
 static PIPELINES: AtomicU32 = AtomicU32::new(0);
 static PIPELINE_US: AtomicU64 = AtomicU64::new(0);
 static PIPELINE_MAX_US: AtomicU64 = AtomicU64::new(0);
+static SHADERS: AtomicU32 = AtomicU32::new(0);
+static SHADER_US: AtomicU64 = AtomicU64::new(0);
 static TEXTURES: AtomicU32 = AtomicU32::new(0);
 static TEXTURE_US: AtomicU64 = AtomicU64::new(0);
+static EYE_PREP_US: AtomicU64 = AtomicU64::new(0);
+static EYE_ENCODE_US: AtomicU64 = AtomicU64::new(0);
+static EYE_CALLS: AtomicU32 = AtomicU32::new(0);
 static EYES: AtomicU32 = AtomicU32::new(0);
 static EYE_DRAWS: AtomicU64 = AtomicU64::new(0);
 static EYE_DRAWS_MAX: AtomicU32 = AtomicU32::new(0);
@@ -23,6 +28,9 @@ pub struct Counts {
     pub pipelines: u32,
     pub pipeline_ms: f64,
     pub pipeline_max_ms: f64,
+    /// Of those, shader modules made (WGSL translated) and their time.
+    pub shaders: u32,
+    pub shader_ms: f64,
     /// Textures uploaded and their total time.
     pub textures: u32,
     pub texture_ms: f64,
@@ -30,6 +38,11 @@ pub struct Counts {
     pub eyes: u32,
     pub eye_draws_avg: f64,
     pub eye_draws_max: u32,
+    /// Stereo calls (both eyes of a frame), and their average CPU time
+    /// preparing (uniforms, uploads) and recording plus submitting.
+    pub eye_calls: u32,
+    pub eye_prep_ms: f64,
+    pub eye_encode_ms: f64,
 }
 
 fn us(d: Duration) -> u64 {
@@ -40,6 +53,11 @@ pub(crate) fn pipeline(d: Duration) {
     PIPELINES.fetch_add(1, Relaxed);
     PIPELINE_US.fetch_add(us(d), Relaxed);
     PIPELINE_MAX_US.fetch_max(us(d), Relaxed);
+}
+
+pub(crate) fn shader(d: Duration) {
+    SHADERS.fetch_add(1, Relaxed);
+    SHADER_US.fetch_add(us(d), Relaxed);
 }
 
 pub(crate) fn texture(d: Duration) {
@@ -54,14 +72,30 @@ pub(crate) fn eye(draws: usize) {
     EYE_DRAWS_MAX.fetch_max(draws, Relaxed);
 }
 
+pub(crate) fn eye_cpu(prep: Duration, encode: Duration) {
+    EYE_CALLS.fetch_add(1, Relaxed);
+    EYE_PREP_US.fetch_add(us(prep), Relaxed);
+    EYE_ENCODE_US.fetch_add(us(encode), Relaxed);
+}
+
 /// The counts since the last call, which starts them again from zero.
 pub fn take() -> Counts {
     let eyes = EYES.swap(0, Relaxed);
     let draws = EYE_DRAWS.swap(0, Relaxed);
+    let calls = EYE_CALLS.swap(0, Relaxed);
+    let per_call = |us: u64| {
+        if calls == 0 {
+            0.0
+        } else {
+            us as f64 / 1e3 / calls as f64
+        }
+    };
     Counts {
         pipelines: PIPELINES.swap(0, Relaxed),
         pipeline_ms: PIPELINE_US.swap(0, Relaxed) as f64 / 1e3,
         pipeline_max_ms: PIPELINE_MAX_US.swap(0, Relaxed) as f64 / 1e3,
+        shaders: SHADERS.swap(0, Relaxed),
+        shader_ms: SHADER_US.swap(0, Relaxed) as f64 / 1e3,
         textures: TEXTURES.swap(0, Relaxed),
         texture_ms: TEXTURE_US.swap(0, Relaxed) as f64 / 1e3,
         eyes,
@@ -71,5 +105,8 @@ pub fn take() -> Counts {
             draws as f64 / eyes as f64
         },
         eye_draws_max: EYE_DRAWS_MAX.swap(0, Relaxed),
+        eye_calls: calls,
+        eye_prep_ms: per_call(EYE_PREP_US.swap(0, Relaxed)),
+        eye_encode_ms: per_call(EYE_ENCODE_US.swap(0, Relaxed)),
     }
 }

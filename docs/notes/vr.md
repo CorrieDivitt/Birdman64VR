@@ -678,6 +678,30 @@ Round 1 (`vr/perf-1`):
   eye draws) at the end of the 5 s line; MSAA and the flat picture size on
   the `stereo world on` line.
 
+Round 1 in the headset (MSAA 1x, render scale 1.5: flat picture 2160 x
+1620): flights 4-6 ms GPU (from 7-10); Infinite LOD + view distance 72 fps
+at 7-10 ms GPU (from 10-60 fps at up to 89 ms), game ~48 fps: now the
+window thread's CPU (eye pictures ~15 ms, flat picture ~5 ms with 2550
+draws). Each new pipeline 25-38 ms; 15-38 of them at the first menus and
+at each flight's start (0.4-0.9 s), 1-4 at a time in flight (the lost
+frames). Textures: under 1 ms for dozens. The pipelines compile again in
+every run.
+
+Round 2 (`vr/perf-1`, second commit):
+- Driver pipeline cache on disk (`pipeline_cache.rs`: `<data dir>/
+  pipeline-cache/<wgpu::util::pipeline_cache_key>`, loaded at start, saved
+  at most every 5 s after new pipelines and when the app is suspended;
+  `Renderer::use_pipeline_cache` / `take_pipeline_cache_data`,
+  `Features::PIPELINE_CACHE` asked for where offered: Vulkan). Log
+  `[gpu] pipeline cache: ... loaded / saved`.
+- Both eyes in one call (`render_stereo_eyes`): textures and vertices
+  uploaded once, both eyes' uniforms in one buffer, one submit; the same
+  pipeline or textures as the draw before not set again.
+- The flat picture with its world left out skips the world draws' uniforms,
+  binds and pipelines too, and uploads only the vertices it draws.
+- Log: shader modules made and their time (of the pipeline time), stereo
+  calls per 5 s and their CPU time preparing and recording.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`

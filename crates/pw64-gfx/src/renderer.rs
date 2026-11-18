@@ -23,6 +23,7 @@ use crate::shader;
 use crate::texture::{SamplerKey, TileBinding, Wrap};
 use pw64_formats::Image;
 use std::collections::HashMap;
+use std::ops::Range;
 use wgpu::util::DeviceExt;
 
 mod fb;
@@ -408,6 +409,13 @@ pub struct Renderer {
     /// Birdman64VR: the full-screen depth (and stencil) clear between the
     /// passes of an eye picture, for its MSAA sample count.
     depth_clear: Option<(u32, wgpu::RenderPipeline)>,
+    /// Birdman64VR: the driver's pipeline cache (Vulkan), loaded from and
+    /// saved to disk by the app ([`Self::use_pipeline_cache`],
+    /// [`Self::take_pipeline_cache_data`]): pipelines take 25-40 ms each to
+    /// compile on the Quest, every launch, in the middle of a frame.
+    cache: Option<wgpu::PipelineCache>,
+    /// A pipeline was compiled since the cache was last taken.
+    cache_dirty: bool,
 }
 
 /// Gives fully transparent texels the color of their opaque neighbours, so
@@ -584,6 +592,8 @@ impl Renderer {
             depth_format: depth_format(device),
             skip_world: false,
             depth_clear: None,
+            cache: None,
+            cache_dirty: false,
             textures: HashMap::new(),
             samplers: HashMap::new(),
             bind_groups: HashMap::new(),
@@ -635,11 +645,14 @@ impl Renderer {
                 .entry((key.shader, filter, clip))
                 .or_insert_with(|| {
                     let src = shader::wgsl(&key.shader, filter == TexFilter::N64, clip);
-                    self.device
+                    let module = self
+                        .device
                         .create_shader_module(wgpu::ShaderModuleDescriptor {
                             label: Some("pw64 combiner"),
                             source: wgpu::ShaderSource::Wgsl(src.into()),
-                        })
+                        });
+                    crate::stats::shader(started.elapsed());
+                    module
                 });
             let s = &key.shader;
             let no_color = matches!(s.mode, ShaderMode::DepthClear | ShaderMode::DepthImage)
@@ -755,9 +768,10 @@ impl Renderer {
                         })],
                     }),
                     multiview: None,
-                    cache: None,
+                    cache: self.cache.as_ref(),
                 });
             crate::stats::pipeline(started.elapsed());
+            self.cache_dirty = true;
             self.pipelines.insert((*key, step, filter, clip), pipeline);
         }
     }
@@ -1463,6 +1477,12 @@ impl Renderer {
     /// Writes the per-draw uniforms (`ubytes`, [`UNIFORM_STRIDE`] apart) and
     /// `frame`'s vertices into the (grown as needed) GPU buffers.
     fn upload_buffers(&mut self, ubytes: &[u8], frame: &Frame) {
+        self.upload_buffers_part(ubytes, frame, 0..frame.vertices.len());
+    }
+
+    /// [`Self::upload_buffers`] writing only the vertices in `verts` (the
+    /// buffer still fits all of `frame`'s: draws index them absolutely).
+    fn upload_buffers_part(&mut self, ubytes: &[u8], frame: &Frame, verts: Range<usize>) {
         let need = ubytes.len() as u64;
         if self.ubuf.as_ref().is_none_or(|u| u.1 < need) {
             let cap = need.next_power_of_two();
@@ -1500,9 +1520,12 @@ impl Renderer {
             });
             self.vbuf = Some((buf, cap));
         }
-        if !vbytes.is_empty() {
+        let verts = verts.start.min(verts.end)..verts.end.min(frame.vertices.len());
+        if !verts.is_empty() {
+            let part: &[u8] = bytemuck::cast_slice(&frame.vertices[verts.clone()]);
+            let at = (verts.start * size_of::<Vertex>()) as u64;
             self.queue
-                .write_buffer(&self.vbuf.as_ref().unwrap().0, 0, vbytes);
+                .write_buffer(&self.vbuf.as_ref().unwrap().0, at, part);
         }
     }
 
@@ -1522,7 +1545,15 @@ impl Renderer {
         let mut scissors = Vec::with_capacity(frame.draws.len());
         let n64 = self.options.filter == TexFilter::N64;
         let moves = self.hud_layout(frame, size);
+        // Birdman64VR (`set_skip_world`): the vertices still drawn.
+        let (mut lo, mut hi) = (usize::MAX, 0);
         for (i, d) in frame.draws.iter().enumerate() {
+            if self.skip_world && d.view != 0 {
+                scissors.push([0; 4]);
+                continue;
+            }
+            let first = d.first_vertex as usize;
+            (lo, hi) = (lo.min(first), hi.max(first + d.vertex_count as usize));
             let drift = self.options.oled.drift;
             // Movable HUD: the element's (clamped) offset on top of the
             // OLED drift. Split-screen HUDs keep their own layout.
@@ -1557,7 +1588,13 @@ impl Renderer {
                 self.pipeline(&d.pipeline, step, false);
             }
         }
-        self.upload_buffers(&ubytes, frame);
+        if self.skip_world {
+            // Only the vertices of what is drawn: the world's are most of
+            // them (the eyes uploaded them all this frame already).
+            self.upload_buffers_part(&ubytes, frame, lo..hi);
+        } else {
+            self.upload_buffers(&ubytes, frame);
+        }
 
         let mut enc = self
             .device
@@ -1633,6 +1670,43 @@ impl Renderer {
             }
         }
         crate::submit(&self.queue, [enc.finish()]);
+    }
+
+    /// Birdman64VR: compile pipelines through a driver pipeline cache,
+    /// started from `data` (what [`Self::take_pipeline_cache_data`] gave in
+    /// an earlier run; data from another driver or GPU is ignored and the
+    /// cache starts empty). False: the device has no pipeline cache
+    /// (`Features::PIPELINE_CACHE`: Vulkan only).
+    pub fn use_pipeline_cache(&mut self, data: Option<&[u8]>) -> bool {
+        if !self
+            .device
+            .features()
+            .contains(wgpu::Features::PIPELINE_CACHE)
+        {
+            return false;
+        }
+        // SAFETY: `data` is only ever what `PipelineCache::get_data` returned
+        // (the app's own cache file, keyed by `wgpu::util::pipeline_cache_key`);
+        // wgpu checks its header and the driver validates the rest.
+        let cache = unsafe {
+            self.device
+                .create_pipeline_cache(&wgpu::PipelineCacheDescriptor {
+                    label: Some("pw64"),
+                    data,
+                    fallback: true,
+                })
+        };
+        self.cache = Some(cache);
+        true
+    }
+
+    /// The pipeline cache's contents to save, if pipelines were compiled
+    /// since the last call.
+    pub fn take_pipeline_cache_data(&mut self) -> Option<Vec<u8>> {
+        if !std::mem::take(&mut self.cache_dirty) {
+            return None;
+        }
+        self.cache.as_ref()?.get_data()
     }
 
     /// Birdman64VR: leave the world view's draws out of the flat picture
@@ -1713,9 +1787,10 @@ impl Renderer {
                     })],
                 }),
                 multiview: None,
-                cache: None,
+                cache: self.cache.as_ref(),
             });
         crate::stats::pipeline(started.elapsed());
+        self.cache_dirty = true;
         self.depth_clear = Some((samples, pipeline));
     }
 
@@ -1740,323 +1815,360 @@ impl Renderer {
         size: (u32, u32),
         eye: &StereoEye,
     ) {
+        self.render_stereo_eyes(frame, size, &[(target, eye)]);
+    }
+
+    /// [`Self::render_stereo`] for several eyes of one frame (the headset's
+    /// two, all `size`): its textures and vertices go up once, both eyes'
+    /// uniforms in one buffer, one submit.
+    pub fn render_stereo_eyes(
+        &mut self,
+        frame: &Frame,
+        size: (u32, u32),
+        eyes: &[(&wgpu::TextureView, &StereoEye)],
+    ) {
         let Some(first_world) = frame.draws.iter().position(|d| d.view != 0) else {
             return;
         };
+        let started = std::time::Instant::now();
         self.ensure_targets(size);
         self.upload_textures(frame);
-        let world: Vec<Mat4> = frame
-            .views
-            .iter()
-            .map(|v| crate::matrix::mul(v, &eye.world))
-            .collect();
-        // Sphere HUD: each movable element's centre (N64 px), from the
-        // bounds of all its draws after the world starts.
-        let mut elem_centres = [None::<[f32; 2]>; crate::hud::HUD_ELEMS];
-        if eye.hud_sphere.is_some() {
-            let mut bounds = [None::<[f32; 4]>; crate::hud::HUD_ELEMS];
-            for d in &frame.draws[first_world..] {
-                let e = d.elem as usize;
-                if d.view != 0 || e == 0 || e >= crate::hud::HUD_ELEMS {
-                    continue;
-                }
-                let first = d.first_vertex as usize;
-                for v in &frame.vertices[first..first + d.vertex_count as usize] {
-                    if v.pos[3].abs() < 1e-6 {
-                        continue;
-                    }
-                    let (x, y) = (v.pos[0] / v.pos[3], v.pos[1] / v.pos[3]);
-                    bounds[e] = Some(crate::hud::union(bounds[e], [x, y, x, y]));
-                }
-            }
-            for (c, b) in elem_centres.iter_mut().zip(bounds) {
-                *c = b.map(|b| [0.5 * (b[0] + b[2]), 0.5 * (b[1] + b[3])]);
-            }
-        }
-        let clip_views: Vec<Mat4> = match &eye.clip {
-            Some(c) => frame
+        let per_eye = frame.draws.len().max(1);
+        let mut all_ubytes = Vec::with_capacity(eyes.len() * per_eye * UNIFORM_STRIDE as usize);
+        let mut plans = Vec::with_capacity(eyes.len());
+        for &(target, eye) in eyes {
+            let world: Vec<Mat4> = frame
                 .views
                 .iter()
-                .map(|v| crate::matrix::mul(v, &c.model))
-                .collect(),
-            None => Vec::new(),
-        };
-        let n64 = self.options.filter == TexFilter::N64;
-        let mut ubytes = vec![0u8; frame.draws.len().max(1) * UNIFORM_STRIDE as usize];
-        let last_world = frame.draws.iter().rposition(|d| d.view != 0).unwrap();
-        // The passes, each a list of draws over a cleared depth buffer: the
-        // world (a new pass wherever the game cleared the depth buffer
-        // between world draws: the sky is drawn first and must not hide
-        // the land), then the panel.
-        let mut passes: Vec<Vec<usize>> = vec![Vec::new()];
-        let mut panel = Vec::new();
-        // First person in a cockpit (the frame has dashboard points): how
-        // far the windscreen is, for the fixed sights (below). The first
-        // point sits just below the glass's lower edge; game units are
-        // metres.
-        let glass = frame.dash.as_ref().map(|d| {
-            let p = d.points[0];
-            (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt().max(0.3) + 0.05
-        });
-        // Each draw's pipeline: its own, except a dashboard gauge's, which
-        // is depth tested against the cockpit (see below).
-        let mut keys: Vec<PipelineKey> = frame.draws.iter().map(|d| d.pipeline).collect();
-        for (i, d) in frame.draws.iter().enumerate() {
-            if d.pipeline.shader.mode == ShaderMode::DepthClear
-                && i > first_world
-                && i < last_world
-                && passes.last().is_some_and(|p| !p.is_empty())
-            {
-                passes.push(Vec::new());
+                .map(|v| crate::matrix::mul(v, &eye.world))
+                .collect();
+            // Sphere HUD: each movable element's centre (N64 px), from the
+            // bounds of all its draws after the world starts.
+            let mut elem_centres = [None::<[f32; 2]>; crate::hud::HUD_ELEMS];
+            if eye.hud_sphere.is_some() {
+                let mut bounds = [None::<[f32; 4]>; crate::hud::HUD_ELEMS];
+                for d in &frame.draws[first_world..] {
+                    let e = d.elem as usize;
+                    if d.view != 0 || e == 0 || e >= crate::hud::HUD_ELEMS {
+                        continue;
+                    }
+                    let first = d.first_vertex as usize;
+                    for v in &frame.vertices[first..first + d.vertex_count as usize] {
+                        if v.pos[3].abs() < 1e-6 {
+                            continue;
+                        }
+                        let (x, y) = (v.pos[0] / v.pos[3], v.pos[1] / v.pos[3]);
+                        bounds[e] = Some(crate::hud::union(bounds[e], [x, y, x, y]));
+                    }
+                }
+                for (c, b) in elem_centres.iter_mut().zip(bounds) {
+                    *c = b.map(|b| [0.5 * (b[0] + b[2]), 0.5 * (b[1] + b[3])]);
+                }
             }
-            // The game's full-screen fades in flight (crash fade to white or
-            // black, sky diving's clouds: full-width untextured fills after
-            // the world starts): over the whole eye, not on the HUD sphere
-            // (a square in front) and not dropped (a hard cut).
-            let fade = d.view == 0
-                && i > first_world
-                && eye.hud_sphere.is_some()
-                && matches!(d.wide, Wide::Stretch(_))
-                && d.pipeline.shader.mode != ShaderMode::DepthClear;
-            // The island model: no sky. The game's sky dome is centred on
-            // its camera, so parts of it fell inside the model's cylinder
-            // (a ragged piece of sky behind the island). It is the world
-            // drawn with neither depth test nor depth write.
-            if (eye.clip.is_some() || eye.hide_env)
-                && d.view != 0
-                && !d.pipeline.depth.test
-                && !d.pipeline.depth.write
-            {
-                continue;
-            }
-            // Diorama mode: no flight HUD.
-            if hud_hidden_whole(eye, d, fade, i > first_world) {
-                continue;
-            }
-            // Diorama mode: no sky and no sea at all.
-            if eye.hide_env && d.env {
-                continue;
-            }
-            // In flight, 3D draws outside the world view that are no HUD
-            // element (the photo the game renders when a picture is taken,
-            // into a small viewport: a little image on a black square on
-            // the HUD sphere). Perspective: their clip w is not 1.
-            if eye.hud_sphere.is_some() && d.view == 0 && d.elem == 0 && d.is_3d {
-                let first = d.first_vertex as usize;
-                let verts = &frame.vertices[first..first + d.vertex_count as usize];
-                if verts.iter().any(|v| (v.pos[3] - 1.0).abs() > 1e-3) {
+            let clip_views: Vec<Mat4> = match &eye.clip {
+                Some(c) => frame
+                    .views
+                    .iter()
+                    .map(|v| crate::matrix::mul(v, &c.model))
+                    .collect(),
+                None => Vec::new(),
+            };
+            let n64 = self.options.filter == TexFilter::N64;
+            let mut ubytes = vec![0u8; frame.draws.len().max(1) * UNIFORM_STRIDE as usize];
+            let last_world = frame.draws.iter().rposition(|d| d.view != 0).unwrap();
+            // The passes, each a list of draws over a cleared depth buffer: the
+            // world (a new pass wherever the game cleared the depth buffer
+            // between world draws: the sky is drawn first and must not hide
+            // the land), then the panel.
+            let mut passes: Vec<Vec<usize>> = vec![Vec::new()];
+            let mut panel = Vec::new();
+            // First person in a cockpit (the frame has dashboard points): how
+            // far the windscreen is, for the fixed sights (below). The first
+            // point sits just below the glass's lower edge; game units are
+            // metres.
+            let glass = frame.dash.as_ref().map(|d| {
+                let p = d.points[0];
+                (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt().max(0.3) + 0.05
+            });
+            // Each draw's pipeline: its own, except a dashboard gauge's, which
+            // is depth tested against the cockpit (see below).
+            let mut keys: Vec<PipelineKey> = frame.draws.iter().map(|d| d.pipeline).collect();
+            for (i, d) in frame.draws.iter().enumerate() {
+                if d.pipeline.shader.mode == ShaderMode::DepthClear
+                    && i > first_world
+                    && i < last_world
+                    && passes.last().is_some_and(|p| !p.is_empty())
+                {
+                    passes.push(Vec::new());
+                }
+                // The game's full-screen fades in flight (crash fade to white or
+                // black, sky diving's clouds: full-width untextured fills after
+                // the world starts): over the whole eye, not on the HUD sphere
+                // (a square in front) and not dropped (a hard cut).
+                let fade = d.view == 0
+                    && i > first_world
+                    && eye.hud_sphere.is_some()
+                    && matches!(d.wide, Wide::Stretch(_))
+                    && d.pipeline.shader.mode != ShaderMode::DepthClear;
+                // The island model: no sky. The game's sky dome is centred on
+                // its camera, so parts of it fell inside the model's cylinder
+                // (a ragged piece of sky behind the island). It is the world
+                // drawn with neither depth test nor depth write.
+                if (eye.clip.is_some() || eye.hide_env)
+                    && d.view != 0
+                    && !d.pipeline.depth.test
+                    && !d.pipeline.depth.write
+                {
                     continue;
                 }
-            }
-            let m = if d.view != 0 {
-                world.get(d.view as usize - 1)
-            } else if fade {
-                Some(&EYE_FADE)
-            } else if i > first_world
-                && !matches!(d.wide, Wide::Stretch(_))
-                && d.pipeline.shader.mode != ShaderMode::DepthClear
-                && (d.elem == 0 || d.elem >= 16 || eye.hud_hidden & (1 << d.elem) == 0)
-            {
-                Some(&eye.hud)
-            } else {
-                None
-            };
-            let Some(m) = m else { continue };
-            if d.vertex_count == 0 {
-                continue;
-            }
-            // A gauge on the cockpit's dashboard: drawn with the world's last
-            // pass (the cockpit's, after the game's near-list depth clear)
-            // and depth tested, so the pilot's hands pass in front of it.
-            let centre = elem_centres.get(d.elem as usize).copied().flatten();
-            let slot = eye.hud_dash.iter().find(|s| {
-                d.view == 0 && eye.hud_sphere.is_some() && d.elem != 0 && s.elem == d.elem
-            });
-            let dash_at = slot
-                .and_then(|s| Some((DashPanel::new(frame.dash.as_ref()?, s.point)?, s)))
-                .zip(centre);
-            if d.view != 0 || dash_at.is_some() {
-                passes.last_mut().unwrap().push(i);
-            } else {
-                panel.push(i);
-            }
-            if fade {
-                keys[i].depth = crate::rdp::DepthState {
-                    test: false,
-                    write: false,
-                    decal: false,
-                };
-            }
-            if dash_at.is_some() {
-                keys[i].depth = crate::rdp::DepthState {
-                    test: true,
-                    write: false,
-                    decal: false,
-                };
-            }
-            let mut u = d.uniforms;
-            u.vr = [1.0, 0.0, 0.0, 0.0];
-            u.eye = *m;
-            if let Some(h) = eye.hud_sphere.as_ref().filter(|_| d.view == 0 && !fade) {
-                if let Some(((p, s), c)) = dash_at {
-                    let o = p.centre(s);
-                    u.vr = [1.0, 0.0, 0.0, 3.0];
-                    u.eye = eye.world;
-                    u.clip = [
-                        [o[0], o[1], o[2], s.m_per_px],
-                        [p.right[0], p.right[1], p.right[2], c[0]],
-                        [p.up[0], p.up[1], p.up[2], c[1]],
-                        [DashPanel::DEPTH_PULL, 0.0, 0.0, 0.0],
-                    ];
+                // Diorama mode: no flight HUD.
+                if hud_hidden_whole(eye, d, fade, i > first_world) {
+                    continue;
+                }
+                // Diorama mode: no sky and no sea at all.
+                if eye.hide_env && d.env {
+                    continue;
+                }
+                // In flight, 3D draws outside the world view that are no HUD
+                // element (the photo the game renders when a picture is taken,
+                // into a small viewport: a little image on a black square on
+                // the HUD sphere). Perspective: their clip w is not 1.
+                if eye.hud_sphere.is_some() && d.view == 0 && d.elem == 0 && d.is_3d {
+                    let first = d.first_vertex as usize;
+                    let verts = &frame.vertices[first..first + d.vertex_count as usize];
+                    if verts.iter().any(|v| (v.pos[3] - 1.0).abs() > 1e-3) {
+                        continue;
+                    }
+                }
+                let m = if d.view != 0 {
+                    world.get(d.view as usize - 1)
+                } else if fade {
+                    Some(&EYE_FADE)
+                } else if i > first_world
+                    && !matches!(d.wide, Wide::Stretch(_))
+                    && d.pipeline.shader.mode != ShaderMode::DepthClear
+                    && (d.elem == 0 || d.elem >= 16 || eye.hud_hidden & (1 << d.elem) == 0)
+                {
+                    Some(&eye.hud)
                 } else {
-                    let shift = centre.map_or([0.0; 2], |c| h.shift(c));
-                    // The cockpit's fixed sights (the gyrocopter's aim
-                    // reticle: elements that never move, `elem` 0) sit on
-                    // the windscreen, as far as the dashboard's tip, and
-                    // over it: seen at 10 m through the glass they looked
-                    // hidden behind it. Same direction and size (the
-                    // sphere's angles do not depend on its radius).
-                    let radius = match glass {
-                        Some(g) if d.elem == 0 => {
-                            keys[i].depth = crate::rdp::DepthState {
-                                test: false,
-                                write: false,
-                                decal: false,
-                            };
-                            g
-                        }
-                        _ => h.radius,
+                    None
+                };
+                let Some(m) = m else { continue };
+                if d.vertex_count == 0 {
+                    continue;
+                }
+                // A gauge on the cockpit's dashboard: drawn with the world's last
+                // pass (the cockpit's, after the game's near-list depth clear)
+                // and depth tested, so the pilot's hands pass in front of it.
+                let centre = elem_centres.get(d.elem as usize).copied().flatten();
+                let slot = eye.hud_dash.iter().find(|s| {
+                    d.view == 0 && eye.hud_sphere.is_some() && d.elem != 0 && s.elem == d.elem
+                });
+                let dash_at = slot
+                    .and_then(|s| Some((DashPanel::new(frame.dash.as_ref()?, s.point)?, s)))
+                    .zip(centre);
+                if d.view != 0 || dash_at.is_some() {
+                    passes.last_mut().unwrap().push(i);
+                } else {
+                    panel.push(i);
+                }
+                if fade {
+                    keys[i].depth = crate::rdp::DepthState {
+                        test: false,
+                        write: false,
+                        decal: false,
                     };
-                    u.vr = [1.0, 0.0, 0.0, 2.0];
-                    u.eye = h.eye;
-                    // The fixed sights turn with the horizon lock (rows
-                    // 1-3, w of row 1 = on).
-                    let turn = eye.sight.filter(|_| d.elem == 0);
-                    let row = |k: usize, on: f32| {
-                        turn.map_or([0.0; 4], |r| [r[k][0], r[k][1], r[k][2], on])
+                }
+                if dash_at.is_some() {
+                    keys[i].depth = crate::rdp::DepthState {
+                        test: true,
+                        write: false,
+                        decal: false,
                     };
-                    u.clip = [
-                        [h.rad_per_px, radius, shift[0], shift[1]],
-                        row(0, 1.0),
-                        row(1, 0.0),
-                        row(2, 0.0),
-                    ];
+                }
+                let mut u = d.uniforms;
+                u.vr = [1.0, 0.0, 0.0, 0.0];
+                u.eye = *m;
+                if let Some(h) = eye.hud_sphere.as_ref().filter(|_| d.view == 0 && !fade) {
+                    if let Some(((p, s), c)) = dash_at {
+                        let o = p.centre(s);
+                        u.vr = [1.0, 0.0, 0.0, 3.0];
+                        u.eye = eye.world;
+                        u.clip = [
+                            [o[0], o[1], o[2], s.m_per_px],
+                            [p.right[0], p.right[1], p.right[2], c[0]],
+                            [p.up[0], p.up[1], p.up[2], c[1]],
+                            [DashPanel::DEPTH_PULL, 0.0, 0.0, 0.0],
+                        ];
+                    } else {
+                        let shift = centre.map_or([0.0; 2], |c| h.shift(c));
+                        // The cockpit's fixed sights (the gyrocopter's aim
+                        // reticle: elements that never move, `elem` 0) sit on
+                        // the windscreen, as far as the dashboard's tip, and
+                        // over it: seen at 10 m through the glass they looked
+                        // hidden behind it. Same direction and size (the
+                        // sphere's angles do not depend on its radius).
+                        let radius = match glass {
+                            Some(g) if d.elem == 0 => {
+                                keys[i].depth = crate::rdp::DepthState {
+                                    test: false,
+                                    write: false,
+                                    decal: false,
+                                };
+                                g
+                            }
+                            _ => h.radius,
+                        };
+                        u.vr = [1.0, 0.0, 0.0, 2.0];
+                        u.eye = h.eye;
+                        // The fixed sights turn with the horizon lock (rows
+                        // 1-3, w of row 1 = on).
+                        let turn = eye.sight.filter(|_| d.elem == 0);
+                        let row = |k: usize, on: f32| {
+                            turn.map_or([0.0; 4], |r| [r[k][0], r[k][1], r[k][2], on])
+                        };
+                        u.clip = [
+                            [h.rad_per_px, radius, shift[0], shift[1]],
+                            row(0, 1.0),
+                            row(1, 0.0),
+                            row(2, 0.0),
+                        ];
+                    }
+                }
+                let clip = eye.clip.as_ref().filter(|_| d.view != 0);
+                if let Some(c) = clip {
+                    u.vr = [1.0, c.radius, c.top, 0.0];
+                    u.clip = clip_views[d.view as usize - 1];
+                }
+                u.lod[1] = 0.0;
+                if n64 {
+                    u.filt = filter_uniform(&d.textures);
+                }
+                let o = i * UNIFORM_STRIDE as usize;
+                ubytes[o..o + size_of::<DrawUniforms>()].copy_from_slice(bytemuck::bytes_of(&u));
+                self.bind_group(&d.textures);
+                for &step in Self::steps(&keys[i]) {
+                    self.pipeline(&keys[i], step, clip.is_some());
                 }
             }
-            let clip = eye.clip.as_ref().filter(|_| d.view != 0);
-            if let Some(c) = clip {
-                u.vr = [1.0, c.radius, c.top, 0.0];
-                u.clip = clip_views[d.view as usize - 1];
-            }
-            u.lod[1] = 0.0;
-            if n64 {
-                u.filt = filter_uniform(&d.textures);
-            }
-            let o = i * UNIFORM_STRIDE as usize;
-            ubytes[o..o + size_of::<DrawUniforms>()].copy_from_slice(bytemuck::bytes_of(&u));
-            self.bind_group(&d.textures);
-            for &step in Self::steps(&keys[i]) {
-                self.pipeline(&keys[i], step, clip.is_some());
-            }
+            // The game's own screen clear, if it made one before the world.
+            let clear = eye
+                .background
+                .map(|[r, g, b, a]| wgpu::Color { r, g, b, a });
+            let clear = clear.unwrap_or_else(|| {
+                frame.draws[..first_world]
+                    .iter()
+                    .rev()
+                    .find(|d| {
+                        matches!(d.wide, Wide::Stretch(_))
+                            && d.pipeline.shader.mode == ShaderMode::Fill
+                    })
+                    .map_or(wgpu::Color::BLACK, |d| {
+                        let c = d.uniforms.fill;
+                        wgpu::Color {
+                            r: c[0] as f64,
+                            g: c[1] as f64,
+                            b: c[2] as f64,
+                            a: 1.0,
+                        }
+                    })
+            });
+            passes.push(panel);
+            crate::stats::eye(passes.iter().map(Vec::len).sum());
+            all_ubytes.extend_from_slice(&ubytes);
+            plans.push((target, eye.clip.is_some(), passes, keys, clear));
         }
-        self.upload_buffers(&ubytes, frame);
-        // The game's own screen clear, if it made one before the world.
-        let clear = eye
-            .background
-            .map(|[r, g, b, a]| wgpu::Color { r, g, b, a });
-        let clear = clear.unwrap_or_else(|| {
-            frame.draws[..first_world]
-                .iter()
-                .rev()
-                .find(|d| {
-                    matches!(d.wide, Wide::Stretch(_)) && d.pipeline.shader.mode == ShaderMode::Fill
-                })
-                .map_or(wgpu::Color::BLACK, |d| {
-                    let c = d.uniforms.fill;
-                    wgpu::Color {
-                        r: c[0] as f64,
-                        g: c[1] as f64,
-                        b: c[2] as f64,
-                        a: 1.0,
-                    }
-                })
-        });
+        self.upload_buffers(&all_ubytes, frame);
+        self.depth_clear_pipeline();
+        let prepared = started.elapsed();
         let mut enc = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("pw64 eye"),
             });
-        passes.push(panel);
-        crate::stats::eye(passes.iter().map(Vec::len).sum());
-        self.depth_clear_pipeline();
         let ub = self.ubuf.as_ref().unwrap();
         let t = &self.targets[&size];
         let depth_clear = &self.depth_clear.as_ref().unwrap().1;
-        // One render pass for the whole eye, so the picture stays on the
-        // GPU's tiles (Quest: every pass break wrote the multisampled
-        // picture and the depth out to memory and read them back). Between
-        // the world's parts and before the panel, a full-screen draw clears
-        // depth and stencil instead of a new pass.
-        // With MSAA the pass resolves into `target`; the multisampled
-        // picture and the depth are not needed afterwards.
-        let (view, resolve) = match &t.msaa {
-            Some(m) => (m, Some(target)),
-            None => (target, None),
-        };
-        let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("pw64 eye"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                depth_slice: None,
-                resolve_target: resolve,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(clear),
-                    store: if resolve.is_some() {
-                        wgpu::StoreOp::Discard
-                    } else {
-                        wgpu::StoreOp::Store
+        for (k, (target, clipped, passes, keys, clear)) in plans.iter().enumerate() {
+            let base = k * per_eye;
+            let (target, clear) = (*target, *clear);
+            // One render pass for the whole eye, so the picture stays on the
+            // GPU's tiles (Quest: every pass break wrote the multisampled
+            // picture and the depth out to memory and read them back). Between
+            // the world's parts and before the panel, a full-screen draw clears
+            // depth and stencil instead of a new pass.
+            // With MSAA the pass resolves into `target`; the multisampled
+            // picture and the depth are not needed afterwards.
+            let (view, resolve) = match &t.msaa {
+                Some(m) => (m, Some(target)),
+                None => (target, None),
+            };
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("pw64 eye"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    depth_slice: None,
+                    resolve_target: resolve,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(clear),
+                        store: if resolve.is_some() {
+                            wgpu::StoreOp::Discard
+                        } else {
+                            wgpu::StoreOp::Store
+                        },
                     },
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &t.depth,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(0.0),
-                    store: wgpu::StoreOp::Discard,
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &t.depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
                 }),
-                stencil_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(0),
-                    store: wgpu::StoreOp::Discard,
-                }),
-            }),
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-        pass.set_vertex_buffer(0, self.vbuf.as_ref().unwrap().0.slice(..));
-        pass.set_stencil_reference(1);
-        for (pass_no, draws) in passes.iter().enumerate() {
-            if pass_no > 0 {
-                pass.set_pipeline(depth_clear);
-                pass.draw(0..3, 0..1);
-            }
-            for &i in draws {
-                let d = &frame.draws[i];
-                let bkey: BindKey = (
-                    d.textures[0].map(|b| (b.key, b.sampler)),
-                    d.textures[1].map(|b| (b.key, b.sampler)),
-                );
-                pass.set_bind_group(0, &ub.2, &[(i as u64 * UNIFORM_STRIDE) as u32]);
-                pass.set_bind_group(1, &self.bind_groups[&bkey], &[]);
-                for &step in Self::steps(&keys[i]) {
-                    let clip = eye.clip.is_some() && d.view != 0;
-                    let key = (keys[i], step, self.options.filter, clip);
-                    pass.set_pipeline(&self.pipelines[&key]);
-                    pass.draw(d.first_vertex..d.first_vertex + d.vertex_count, 0..1);
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_vertex_buffer(0, self.vbuf.as_ref().unwrap().0.slice(..));
+            pass.set_stencil_reference(1);
+            let (mut last_pipeline, mut last_bind) = (None, None);
+            for (pass_no, draws) in passes.iter().enumerate() {
+                if pass_no > 0 {
+                    pass.set_pipeline(depth_clear);
+                    pass.draw(0..3, 0..1);
+                    (last_pipeline, last_bind) = (None, None);
+                }
+                for &i in draws {
+                    let d = &frame.draws[i];
+                    let bkey: BindKey = (
+                        d.textures[0].map(|b| (b.key, b.sampler)),
+                        d.textures[1].map(|b| (b.key, b.sampler)),
+                    );
+                    pass.set_bind_group(0, &ub.2, &[((base + i) as u64 * UNIFORM_STRIDE) as u32]);
+                    // The same textures or pipeline as the draw before: not
+                    // set again (thousands of draws with Infinite LOD).
+                    if last_bind != Some(bkey) {
+                        pass.set_bind_group(1, &self.bind_groups[&bkey], &[]);
+                        last_bind = Some(bkey);
+                    }
+                    for &step in Self::steps(&keys[i]) {
+                        let clip = *clipped && d.view != 0;
+                        let key = (keys[i], step, self.options.filter, clip);
+                        if last_pipeline != Some(key) {
+                            pass.set_pipeline(&self.pipelines[&key]);
+                            last_pipeline = Some(key);
+                        }
+                        pass.draw(d.first_vertex..d.first_vertex + d.vertex_count, 0..1);
+                    }
                 }
             }
+            drop(pass);
         }
-        drop(pass);
         crate::submit(&self.queue, [enc.finish()]);
+        crate::stats::eye_cpu(prepared, started.elapsed() - prepared);
     }
 
     /// Renders offscreen and reads the result back as tightly packed RGBA8
@@ -2771,10 +2883,7 @@ mod tests {
         dc.pipeline.shader.mode = ShaderMode::DepthClear;
         dc.vertex_count = 0;
         cleared.draws = vec![green, dc, red];
-        let flat_eye = StereoEye {
-            world: same,
-            ..eye
-        };
+        let flat_eye = StereoEye { world: same, ..eye };
         for msaa in [1, 4] {
             let mut r = Renderer::new(
                 &device,
@@ -2795,6 +2904,70 @@ mod tests {
             r.render_stereo(&frame, &view, (w, h), &flat_eye);
             let img = read_rgba(&device, &queue, &tex);
             assert_eq!(px(&img, 38, 24), [0, 255, 0], "msaa {msaa}: depth tested");
+        }
+
+        // Both eyes in one call (one upload, one submit) give what one call
+        // per eye gives, each eye with its own matrices.
+        let tex2 = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view2 = tex2.create_view(&Default::default());
+        r.render_stereo_eyes(&cleared, (w, h), &[(&view, &flat_eye), (&view2, &eye)]);
+        let (left, right) = (
+            read_rgba(&device, &queue, &tex),
+            read_rgba(&device, &queue, &tex2),
+        );
+        r.render_stereo(&cleared, &view, (w, h), &flat_eye);
+        assert!(read_rgba(&device, &queue, &tex) == left, "left eye");
+        r.render_stereo(&cleared, &view, (w, h), &eye);
+        assert!(read_rgba(&device, &queue, &tex) == right, "right eye");
+        assert!(left != right, "the zoomed eye differs");
+
+        // The flat picture with its world left out (`set_skip_world`, while
+        // the headset shows the stereo world): nothing of it drawn.
+        r.set_skip_world(true);
+        let skipped = r.render_to_rgba(&frame, (w, h));
+        r.set_skip_world(false);
+        assert_eq!(px(&skipped, 26, 24), [0, 0, 0], "no world");
+        assert_eq!(px(&skipped, 38, 24), [0, 0, 0], "no world");
+        assert_eq!(r.render_to_rgba(&frame, (w, h)), flat, "drawn again");
+
+        // The pipeline cache (Vulkan): filled by the pipelines compiled,
+        // handed out once per batch of new pipelines, and a new renderer
+        // started from it draws the same.
+        let cached = |data: Option<&[u8]>| {
+            let mut r = Renderer::new(
+                &device,
+                &queue,
+                wgpu::TextureFormat::Rgba8Unorm,
+                RenderOptions {
+                    msaa: 1,
+                    fill_view: false,
+                    ..Default::default()
+                },
+            );
+            r.use_pipeline_cache(data).then_some(r)
+        };
+        if let Some(mut r) = cached(None) {
+            assert_eq!(r.render_to_rgba(&frame, (w, h)), flat);
+            let data = r.take_pipeline_cache_data().expect("cache data");
+            assert!(!data.is_empty());
+            assert!(r.take_pipeline_cache_data().is_none(), "nothing new");
+            let mut again = cached(Some(&data)).unwrap();
+            assert_eq!(again.render_to_rgba(&frame, (w, h)), flat);
+        } else {
+            eprintln!("no pipeline cache on this device; skipped");
         }
 
         // A gauge on the cockpit's dashboard (`DashPanel`): a blue HUD

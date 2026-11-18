@@ -42,7 +42,8 @@ pub fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'sta
     wgpu::DeviceDescriptor {
         required_features: adapter.features()
             & (wgpu::Features::DEPTH32FLOAT_STENCIL8
-                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES),
+                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                | wgpu::Features::PIPELINE_CACHE),
         ..Default::default()
     }
 }
