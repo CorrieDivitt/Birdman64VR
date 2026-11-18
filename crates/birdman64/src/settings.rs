@@ -162,8 +162,8 @@ enum Row {
     /// (`vr::diorama_mode`), cycled with confirm or left / right; the two
     /// passthrough choices only on a headset that can.
     DioramaMode,
-    /// Main (in VR on a headset that offers a choice, under Diorama mode):
-    /// the display's refresh rate, the headset's own or one it offers
+    /// Graphics (in VR on a headset that offers a choice, in Frame rate's
+    /// place): the display's refresh rate, the headset's own or one it offers
     /// (`vr::refresh_rate`, q6), cycled with confirm or left / right.
     RefreshRate,
     /// VR HUD page: show or hide one flight-HUD element in the headset
@@ -2003,9 +2003,6 @@ impl Overlay {
                         next += 1;
                     }
                     rows.insert(next, Row::DioramaMode);
-                    if !self.refresh_rates().is_empty() {
-                        rows.insert(next + 1, Row::RefreshRate);
-                    }
                     rows.retain(|r| !VR_HIDDEN_MAIN.contains(r));
                 }
                 rows
@@ -2039,6 +2036,16 @@ impl Overlay {
                 // Birdman64VR: only what changes the picture in the headset.
                 if self.in_vr() {
                     rows.retain(|r| !matches!(r, Row::Opt(o) if VR_HIDDEN_GRAPHICS.contains(o)));
+                    // q6: the headset sets the game's frame rate, so in its
+                    // place the headset's refresh rate, where it offers a
+                    // choice (none on PC: Quest Link sets it).
+                    if let Some(i) = rows.iter().position(|r| *r == Row::Opt(Opt::Fps)) {
+                        if self.refresh_rates().is_empty() {
+                            rows.remove(i);
+                        } else {
+                            rows[i] = Row::RefreshRate;
+                        }
+                    }
                 }
                 if !self.pending_restart().is_empty() {
                     rows.insert(0, Row::RestartNow);
@@ -2217,13 +2224,6 @@ impl Overlay {
                         &format!("Diorama mode: {}", crate::vr::diorama_mode().label()),
                     );
                 }
-                if rows.contains(&Row::RefreshRate) {
-                    self.text_row(
-                        ui,
-                        at(Row::RefreshRate),
-                        &format!("Refresh rate: {}", refresh_label(crate::vr::refresh_rate())),
-                    );
-                }
                 // Not in VR (`rows`): `at` would panic on a missing row.
                 if rows.contains(&Row::SplitScreen) {
                     self.text_row(ui, at(Row::SplitScreen), "Split-screen \u{203a}");
@@ -2324,6 +2324,14 @@ impl Overlay {
                     Opt::TexFilter,
                     Opt::TexturePack,
                 ] {
+                    // q6: in VR the headset's refresh rate in Frame rate's place.
+                    if o == Opt::Fps && rows.contains(&Row::RefreshRate) {
+                        self.text_row(
+                            ui,
+                            at(Row::RefreshRate),
+                            &format!("Refresh rate: {}", refresh_label(crate::vr::refresh_rate())),
+                        );
+                    }
                     // VR hides some (`VR_HIDDEN_GRAPHICS`): only rows on the page.
                     if rows.contains(&Row::Opt(o)) {
                         self.opt_row(ui, at(Row::Opt(o)), o);
@@ -5271,8 +5279,7 @@ mod tests {
                 let i = main.iter().position(|r| *r == Row::VrComfortPage).unwrap();
                 assert_eq!(main[i + 1], Row::Passthrough);
                 assert_eq!(main[i + 2], Row::DioramaMode);
-                // q6: the refresh rate right under it, where offered.
-                assert_eq!(main[i + 3], Row::RefreshRate);
+                assert!(!main.contains(&Row::RefreshRate), "on the Graphics page");
                 assert_eq!(
                     refresh_choices(&[72, 90]),
                     [None, Some(72), Some(90)].to_vec()
@@ -5288,6 +5295,10 @@ mod tests {
             assert_eq!(o.rows().contains(&Row::Opt(Opt::Widescreen)), !vr);
             assert_eq!(o.rows().contains(&Row::Opt(Opt::TexFilter)), !vr);
             assert!(o.rows().contains(&Row::Opt(Opt::Msaa)));
+            // q6: in VR the headset's refresh rate replaces Frame rate.
+            let graphics = o.rows();
+            assert_eq!(graphics.contains(&Row::Opt(Opt::Fps)), !vr);
+            assert_eq!(graphics.contains(&Row::RefreshRate), vr);
         }
     }
 

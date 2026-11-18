@@ -758,12 +758,17 @@ Diorama mode honours Infinite LOD as set (the detail shows). Merged to
 
 Refresh rate (`vr/refresh-rate`): `XR_FB_display_refresh_rate` (Quest
 only; Link sets its own). The rates the display offers are logged
-(`refresh rates: ... Hz (now ...)`) and offered on the main settings page
-under Diorama mode (`Row::RefreshRate`: headset default, then each rate;
+(`refresh rates: ... Hz (now ...)`) and offered on the Graphics page in
+place of Frame rate, which does nothing in VR (the headset paces the game;
+on PC VR it is simply hidden) (`Row::RefreshRate`: headset default, then each rate;
 `[vr] refresh_rate` in Hz, removed for the default). The headset thread asks
 for it when it changes (`XrContext::request_refresh_rate`, 0 = the
 runtime's own; a saved rate the headset lacks falls back to that). The game
 follows the frame period (`HEADSET_MHZ`).
+Headset (round 1, on the main page): 72, 80, 90, 120 Hz offered; each
+change applied at once; normal flights 90 game fps at 90 Hz; Infinite LOD +
+view distance does not keep up at 90 or 120 (46-48 game fps). Moved to the
+Graphics page on request.
 
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
