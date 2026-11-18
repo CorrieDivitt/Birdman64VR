@@ -1085,6 +1085,7 @@ mod real {
             sight: None,
             hide_env: false,
             hide_hud: false,
+            hide_sky: false,
         }
     }
 
@@ -1172,17 +1173,22 @@ mod real {
     /// far in again).
     const TABLE_ZOOM_RANGE: (f32, f32) = (1.0 / 1.5, 7.5);
 
+    /// `VEHICLE_CANNONBALL` (decomp task.h).
+    const VEHICLE_CANNONBALL: u8 = 3;
+
     /// [`stereo_eye`] for a flight shown as a model (Diorama mode,
     /// [`pw64_gfx::Table`]): the island at the scale of the menus' model
-    /// times `zoom`, game north away, level. `follow`: moved so the vehicle
+    /// times `zoom`, level, game north away turned by `spin` radians. `follow`: moved so the vehicle
     /// stays at [`TABLE_VEHICLE_M`] and the land slides past below it;
     /// else the island stands still where the menus' model does
-    /// ([`MODEL_CENTRE_M`], its middle at sea level). No sky and no sea;
-    /// around it the player's room (`room`) or the dim one.
+    /// ([`MODEL_CENTRE_M`], its middle at sea level). In the player's room
+    /// (`room`): no sky and no sea. In the dim room the game's sea with the
+    /// model, and no sky (the user).
     pub(super) fn table_eye(
         pose: &EyePose,
         t: &pw64_gfx::Table,
         zoom: f32,
+        spin: f32,
         follow: bool,
         room: bool,
     ) -> pw64_gfx::StereoEye {
@@ -1216,9 +1222,22 @@ mod real {
             &math::view(pose.orientation, pose.position),
             &math::projection_reversed(l, r, u, dn, NEAR_M * 0.5),
         );
+        // The right stick's turn (left / right, as in the menus), about the
+        // vehicle or the island's middle.
+        let (sy, cy) = spin.sin_cos();
+        let turn: Mat4 = [
+            [cy, sy, 0.0, 0.0],
+            [-sy, cy, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
         let to_world = pw64_gfx::Diorama::to_world(&t.camera);
-        eye.world = mul(&mul(&mul(&to_world, &centre), &place), &view);
-        eye.hide_env = true;
+        eye.world = mul(&mul(&mul(&mul(&to_world, &centre), &turn), &place), &view);
+        eye.hide_env = room;
+        // The dim room: the sea at the model's scale; no sky (the game's
+        // sky dome, centred on its camera, was a bubble around the model;
+        // drawn full size it hid the sea).
+        eye.hide_sky = !room;
         eye.background = Some(if room {
             MODEL_BACKGROUND_ROOM
         } else {
@@ -1439,6 +1458,8 @@ mod real {
         /// ([`TABLE_ZOOM_RANGE`]; 1 again after a menu).
         table: bool,
         table_zoom: f32,
+        /// Diorama mode: the island model's turn (right stick left / right).
+        table_spin: f32,
         /// ...and the title screen (recentre when it starts).
         title: bool,
         /// The last game state and title phase logged.
@@ -1522,6 +1543,7 @@ mod real {
                     model: false,
                     table: false,
                     table_zoom: 1.0,
+                    table_spin: 0.0,
                     title: false,
                     state: None,
                     eye_serial: 0,
@@ -1748,19 +1770,41 @@ mod real {
                 m.copysign(v)
             });
             // Diorama mode: a flight as a model, unless the game's camera
-            // is the first-person one (R on the pad). In the player's room
-            // if the mode says so and the headset can.
+            // is the first-person one (R on the pad). The cannonball: aiming
+            // from behind the cannon as a model, down the barrel (R while
+            // aiming) full size; the flight as a model (in VR the flight is
+            // the game's first-person camera from the pilot's head,
+            // cannonball.c.patch), R in flight its first person full size
+            // (cannonball.c.patch, `pw64_vr_table_on`). In the player's room if the mode says so
+            // and the headset can.
             let mode = super::diorama_mode();
+            pw64_game::set_vr_table_on(mode != super::DioramaMode::Off);
+            let cannonball = pw64_game::vr_flight_vehicle() == Some(VEHICLE_CANNONBALL);
             let table = frame.table.filter(|_| {
                 frame.diorama.is_none()
                     && mode != super::DioramaMode::Off
-                    && frame.up.is_some_and(|u| u[4] as i32 != 1)
+                    && frame.up.is_some_and(|u| {
+                        let cam = u[4] as i32;
+                        if cannonball {
+                            use pw64_game::CannonView;
+                            match pw64_game::vr_cannon_view() {
+                                CannonView::AimBehind => true,
+                                CannonView::AimBarrel => false,
+                                CannonView::Flight => cam == 1,
+                                CannonView::FlightAlt => false,
+                            }
+                        } else {
+                            cam != 1
+                        }
+                    })
             });
             let table_room = mode.passthrough() && super::passthrough_available();
             if table.is_some() {
                 // The right stick: up = closer.
                 self.table_zoom = (self.table_zoom * (stick[1] * ZOOM_RATE * dt).exp())
                     .clamp(TABLE_ZOOM_RANGE.0, TABLE_ZOOM_RANGE.1);
+                // Left / right: turn it, as in the menus.
+                self.table_spin += stick[0] * SPIN_RAD_PER_S * dt;
             }
             let camera = frame
                 .up
@@ -1782,8 +1826,10 @@ mod real {
                         - f32::from(u8::from(b & crate::input::CONT_L != 0));
                     self.spin[2] = (self.spin[2] * (dir * ZOOM_RATE * dt).exp())
                         .clamp(ZOOM_RANGE.0, ZOOM_RANGE.1);
-                    // The next flight's model starts at its default size.
+                    // The next flight's model starts at its default size,
+                    // north away.
                     self.table_zoom = 1.0;
+                    self.table_spin = 0.0;
                 }
                 _ => {}
             }
@@ -1817,9 +1863,14 @@ mod real {
                 let seated = seat.seated(pose);
                 let mut matrices = match (&frame.diorama, &table) {
                     (Some(d), _) => diorama_eye(&seated, d, self.spin),
-                    (None, Some(t)) => {
-                        table_eye(&seated, t, self.table_zoom, mode.follows(), table_room)
-                    }
+                    (None, Some(t)) => table_eye(
+                        &seated,
+                        t,
+                        self.table_zoom,
+                        self.table_spin,
+                        mode.follows(),
+                        table_room,
+                    ),
                     (None, None) => stereo_eye(&seated),
                 };
                 // p12: the island model in the player's room.
@@ -1827,8 +1878,9 @@ mod real {
                     matrices.background = Some(MODEL_BACKGROUND_ROOM);
                 }
                 // Diorama mode: no flight HUD while it is on, in the model
-                // view and in the game's first-person view alike.
-                if frame.diorama.is_none() && mode != super::DioramaMode::Off {
+                // view and in the game's first-person view alike; the
+                // cannonball keeps it (aiming needs its gauges).
+                if frame.diorama.is_none() && mode != super::DioramaMode::Off && !cannonball {
                     matrices.hide_hud = true;
                 }
                 // Horizon lock, in flight: the world level, the vehicle
@@ -3102,7 +3154,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             let s = 2.6125 / 2000.0;
             for zoom in [1.0f32 / 1.5, 1.0, 7.5] {
                 let c = TABLE_VEHICLE_M;
-                let eye = super::table_eye(&pose, &t, zoom, true, true);
+                let eye = super::table_eye(&pose, &t, zoom, 0.0, true, true);
                 assert!(same(ndc(apply(&eye.world, vehicle)), ndc(apply(&view, c))));
                 // 100 m east of the vehicle.
                 let east = [c[0] + 100.0 * s * zoom, c[1], c[2]];
@@ -3113,12 +3165,25 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 assert!(eye.hide_env && eye.clip.is_none());
                 assert_eq!(eye.background, Some([0.0; 4]));
 
-                let eye = super::table_eye(&pose, &t, zoom, false, false);
+                // Turned a quarter (right stick): what was east of the
+                // vehicle is now where north was, about the vehicle.
+                let spun =
+                    super::table_eye(&pose, &t, zoom, std::f32::consts::FRAC_PI_2, true, true);
+                assert!(same(ndc(apply(&spun.world, vehicle)), ndc(apply(&view, c))));
+                let north = [c[0], c[1], c[2] - 100.0 * s * zoom];
+                assert!(same(
+                    ndc(apply(&spun.world, [110.0, -20.0, -50.0])),
+                    ndc(apply(&view, north))
+                ));
+                let eye = super::table_eye(&pose, &t, zoom, 0.0, false, false);
                 assert!(same(
                     ndc(apply(&eye.world, middle)),
                     ndc(apply(&view, MODEL_CENTRE_M))
                 ));
-                assert!(eye.hide_env && eye.clip.is_none());
+                // The dim room keeps the sea, not the sky.
+                assert!(!eye.hide_env && eye.hide_sky && eye.clip.is_none());
+                let room = super::table_eye(&pose, &t, zoom, 0.0, false, true);
+                assert!(room.hide_env && !room.hide_sky);
                 assert_eq!(eye.background.map(|b| b[3]), Some(1.0));
             }
         }

@@ -67,6 +67,11 @@ unsafe extern "C" {
     /// native/src/pw64_widescreen.c: the gyrocopter's windscreen in VR
     /// first person, 0 = hidden.
     static mut pw64_vr_gyro_windscreen: i32;
+    /// native/src/pw64_widescreen.c: the cannonball's view, 0 aiming from
+    /// behind the cannon, 1 down the barrel, 2 in flight.
+    static mut pw64_vr_cannon_view: i32;
+    /// native/src/pw64_widescreen.c: 1 = Diorama mode is on.
+    static mut pw64_vr_table_on: i32;
     /// native/src/pw64_widescreen.c: the vehicle flown in VR, -1 none.
     fn pw64_vr_flight_vehicle() -> i32;
 
@@ -351,6 +356,51 @@ pub fn set_vr_gyro_windscreen(on: bool) {
     #[cfg(feature = "dylib")]
     if let Some(g) = dylib::try_game() {
         unsafe { *g.vr_gyro_windscreen = on as i32 };
+    }
+}
+
+/// Birdman64VR: the cannonball's view (only meaningful while it is flown).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CannonView {
+    /// Aiming, the game's view from behind the cannon.
+    AimBehind,
+    /// Aiming down the barrel (R while aiming).
+    AimBarrel,
+    /// Fired, in flight.
+    Flight,
+    /// In flight after R: the cinematic view, or in Diorama mode first
+    /// person.
+    FlightAlt,
+}
+
+/// Birdman64VR: Diorama mode is on (the cannonball's R in flight then gives
+/// its first-person view). May be called any time.
+pub fn set_vr_table_on(on: bool) {
+    // SAFETY: plain C global, written volatile (the game thread reads it).
+    #[cfg(feature = "static")]
+    unsafe {
+        core::ptr::addr_of_mut!(pw64_vr_table_on).write_volatile(on as i32);
+    }
+    // SAFETY: same global, exported by the loaded game module.
+    #[cfg(feature = "dylib")]
+    if let Some(g) = dylib::try_game() {
+        unsafe { g.vr_table_on.write_volatile(on as i32) };
+    }
+}
+
+/// The cannonball's current view ([`CannonView`]).
+pub fn vr_cannon_view() -> CannonView {
+    // SAFETY: plain C global, read volatile (the game thread writes it).
+    #[cfg(feature = "static")]
+    let v = unsafe { core::ptr::addr_of!(pw64_vr_cannon_view).read_volatile() };
+    // SAFETY: same global, exported by the loaded game module.
+    #[cfg(feature = "dylib")]
+    let v = dylib::try_game().map_or(0, |g| unsafe { g.vr_cannon_view.read_volatile() });
+    match v {
+        3 => CannonView::FlightAlt,
+        2 => CannonView::Flight,
+        1 => CannonView::AimBarrel,
+        _ => CannonView::AimBehind,
     }
 }
 

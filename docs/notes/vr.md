@@ -799,6 +799,45 @@ Not marked, as triggers or arrival effects (decided with the user): whales,
 the whale pod, Missi, the shuttle launch, the fountain, the oil gusher and
 the oil plant flame.
 
+## Diorama mode and the cannonball; sky and sea (vr/diorama-cannon)
+
+- The cannon's aim (cannonball camera mode 5, `cannonball.c` `unkB4`)
+  showed the model too: Diorama mode now leaves it full size, like the
+  first-person view (`CANNON_AIM_MODE`, `VEHICLE_CANNONBALL`, vr.rs).
+- The cannonball keeps its HUD in Diorama mode (the other vehicles have
+  none there).
+- To try (the user): the two non-passthrough choices (on, on static) draw
+  the game's sky and sea with the model, at its scale (`table_eye`:
+  `hide_env` only in the player's room).
+- Round 1 in the headset: the sky was a bubble around the game camera at
+  the model's scale; the cannonball's aim and flight both showed full size.
+  The flight in VR is the game's first-person camera from the pilot's head
+  (mode 1, cannonball.c.patch), which Diorama mode always left full size;
+  the aim is not mode 5 (that is only its first frames).
+- Round 2: the cannonball goes by its phase: C `pw64_vr_cannon_flying`
+  (cannonball.c.patch, `cbData->unkD4 == 1` each frame; exported, read by
+  `pw64_game::vr_cannon_flying`): the flight (camera mode 1) as a model, the
+  aim and the cinematic view (R in flight, mode 5) full size. The sky and
+  sea in the dim room: full size around the player, level and turned like
+  the model, the sea at the model's sea level (`StereoEye::env_world` for
+  `DrawCall::env` draws; `table_eye`).
+- Round 2 in the headset: the flight works; the sea turned black (to look
+  at, screenshot asked for). Round 3: aiming follows the game's own R
+  switch (`D_8034E9F4`: behind the cannon / down the barrel): C
+  `pw64_vr_cannon_view` 0 behind, 1 barrel, 2 flight
+  (`pw64_game::vr_cannon_view`, `CannonView`); behind as a model, the
+  barrel full size.
+- Round 4 (the user): back to the sea at the model's scale, no sky:
+  `StereoEye::hide_sky` skips environment draws whose view is not the
+  land's (the sky dome has its own projection and view, `_uvEnvDraw` model
+  flag 2); `env_world` removed. Full-size sky: after 1.0 (tracker). The
+  cannonball in flight: R gives first person (full size) instead of the
+  cinematic view while Diorama mode is on (C `pw64_vr_table_on`, set by
+  vr.rs every frame; cannonball.c.patch; view 3, `CannonView::FlightAlt`),
+  HUD kept, no enlarged pilot. Right stick left / right turns the island
+  model about the vehicle or its middle (`Vr::table_spin`, `table_eye`
+  `spin`; reset with the zoom in the menus), as in the menus.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`

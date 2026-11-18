@@ -61,6 +61,15 @@ float pw64_vr_hud_rad_per_px = 0.0f;
  * from the VR HUD page, pw64_game::set_vr_gyro_windscreen). */
 int pw64_vr_gyro_windscreen = 1;
 
+/* Birdman64VR: the cannonball's view: 0 aiming from behind the cannon,
+ * 1 aiming down the barrel, 2 in flight (cannonball.c.patch sets it each
+ * frame; pw64_game::vr_cannon_view). */
+int pw64_vr_cannon_view = 0;
+
+/* Birdman64VR: Diorama mode is on (pw64_game::set_vr_table_on, every
+ * frame from vr.rs). */
+int pw64_vr_table_on = 0;
+
 /* Where a direction `down` radians below the camera's forward axis shows on
  * the HUD sphere: radians right of and below the view's centre. (The
  * horizon lock turns the sight on the sphere itself, pw64-gfx

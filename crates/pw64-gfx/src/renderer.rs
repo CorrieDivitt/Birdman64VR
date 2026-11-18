@@ -209,6 +209,9 @@ pub struct StereoEye {
     /// HUD's text). The game's full-screen fades and its pause menu (drawn
     /// outside that bracket) stay.
     pub hide_hud: bool,
+    /// Diorama mode in the dim room: no sky (the game's sky dome, centred
+    /// on its camera, was a bubble around the model); the sea stays.
+    pub hide_sky: bool,
 }
 
 /// Birdman64VR: where one HUD element sits on the dashboard
@@ -1908,6 +1911,12 @@ impl Renderer {
                 .iter()
                 .map(|v| crate::matrix::mul(v, &eye.world))
                 .collect();
+            // The land's view: the first world draw outside the sky and sea.
+            let land_view = frame
+                .draws
+                .iter()
+                .find(|d| d.view != 0 && !d.env)
+                .map(|d| d.view);
             // Sphere HUD: each movable element's centre (N64 px), from the
             // bounds of all its draws after the world starts.
             let mut elem_centres = [None::<[f32; 2]>; crate::hud::HUD_ELEMS];
@@ -1993,6 +2002,13 @@ impl Renderer {
                 }
                 // Diorama mode: no sky and no sea at all.
                 if eye.hide_env && d.env {
+                    continue;
+                }
+                // Diorama mode in the dim room: the sea, not the sky. The
+                // game draws the sky with its own projection and view
+                // (`_uvEnvDraw`, model flag 2), so its draws have a view of
+                // their own; the sea has the land's.
+                if eye.hide_sky && d.env && Some(d.view) != land_view {
                     continue;
                 }
                 // In flight, 3D draws outside the world view that are no HUD
@@ -2761,6 +2777,7 @@ mod tests {
             sight: None,
             hide_env: false,
             hide_hud: false,
+            hide_sky: false,
         };
         let mut d = red_green_frame().draws[0].clone();
         d.view = 0;
@@ -2914,6 +2931,7 @@ mod tests {
             sight: None,
             hide_env: false,
             hide_hud: false,
+            hide_sky: false,
         };
         r.render_stereo(&frame, &view, (w, h), &eye);
         let stereo = read_rgba(&device, &queue, &tex);
