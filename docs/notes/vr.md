@@ -702,6 +702,18 @@ Round 2 (`vr/perf-1`, second commit):
 - Log: shader modules made and their time (of the pipeline time), stereo
   calls per 5 s and their CPU time preparing and recording.
 
+Round 2 in the headset (looks the same): from the second run the cached
+pipelines take 1-6 ms each (44 at the first menus: 85 ms, was about 1 s);
+shader modules about 1 ms each. New pipelines are still 25-35 ms the first
+time they are ever needed. Infinite LOD + view distance: game ~50 fps, both
+eyes 2.9 ms CPU preparing and 8.9 ms recording (2550 draws each), GPU 8-11
+ms. Diorama mode with Infinite LOD + view distance: GPU 36-43 ms (whole
+island at full detail; the game still picks detail by its own camera).
+
+Round 3 (`vr/perf-1`, third commit): `merge_runs` issues neighbouring draws
+that change nothing (same view, pipeline, textures, uniform bytes, vertices
+following on, one step) as one draw call. Log: draws joined per eye.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`

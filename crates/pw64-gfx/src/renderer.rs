@@ -1818,6 +1818,57 @@ impl Renderer {
         self.render_stereo_eyes(frame, size, &[(target, eye)]);
     }
 
+    /// An eye's passes as runs of draws to issue as one: (first draw,
+    /// first vertex, vertex count). A draw joins the run before it when it
+    /// changes nothing: the same view, pipeline, textures and uniforms, its
+    /// vertices right after the run's, and a single step (z-image draws
+    /// interleave their steps per draw). The GPU draws a run's triangles in
+    /// the same order, so the picture is the same with fewer draw calls
+    /// (most of a frame's 2500 with Infinite LOD differ in nothing).
+    fn merge_runs(
+        frame: &Frame,
+        passes: &[Vec<usize>],
+        keys: &[PipelineKey],
+        ubytes: &[u8],
+    ) -> Vec<Vec<(usize, u32, u32)>> {
+        let stride = UNIFORM_STRIDE as usize;
+        let uniforms = |i: usize| &ubytes[i * stride..i * stride + size_of::<DrawUniforms>()];
+        let textures = |d: &DrawCall| {
+            (
+                d.textures[0].map(|b| (b.key, b.sampler)),
+                d.textures[1].map(|b| (b.key, b.sampler)),
+            )
+        };
+        let mut merged = 0;
+        let runs = passes
+            .iter()
+            .map(|draws| {
+                let mut runs: Vec<(usize, u32, u32)> = Vec::with_capacity(draws.len());
+                for &i in draws {
+                    let d = &frame.draws[i];
+                    if let Some((j, first, count)) = runs.last_mut() {
+                        let p = &frame.draws[*j];
+                        if *first + *count == d.first_vertex
+                            && p.view == d.view
+                            && keys[*j] == keys[i]
+                            && Self::steps(&keys[i]).len() == 1
+                            && textures(p) == textures(d)
+                            && uniforms(*j) == uniforms(i)
+                        {
+                            *count += d.vertex_count;
+                            merged += 1;
+                            continue;
+                        }
+                    }
+                    runs.push((i, d.first_vertex, d.vertex_count));
+                }
+                runs
+            })
+            .collect();
+        crate::stats::merged(merged);
+        runs
+    }
+
     /// [`Self::render_stereo`] for several eyes of one frame (the headset's
     /// two, all `size`): its textures and vertices go up once, both eyes'
     /// uniforms in one buffer, one submit.
@@ -2074,6 +2125,7 @@ impl Renderer {
                     })
             });
             passes.push(panel);
+            let passes = Self::merge_runs(frame, &passes, &keys, &ubytes);
             crate::stats::eye(passes.iter().map(Vec::len).sum());
             all_ubytes.extend_from_slice(&ubytes);
             plans.push((target, eye.clip.is_some(), passes, keys, clear));
@@ -2141,7 +2193,7 @@ impl Renderer {
                     pass.draw(0..3, 0..1);
                     (last_pipeline, last_bind) = (None, None);
                 }
-                for &i in draws {
+                for &(i, first, count) in draws {
                     let d = &frame.draws[i];
                     let bkey: BindKey = (
                         d.textures[0].map(|b| (b.key, b.sampler)),
@@ -2161,7 +2213,7 @@ impl Renderer {
                             pass.set_pipeline(&self.pipelines[&key]);
                             last_pipeline = Some(key);
                         }
-                        pass.draw(d.first_vertex..d.first_vertex + d.vertex_count, 0..1);
+                        pass.draw(first..first + count, 0..1);
                     }
                 }
             }
@@ -2933,6 +2985,44 @@ mod tests {
         r.render_stereo(&cleared, &view, (w, h), &eye);
         assert!(read_rgba(&device, &queue, &tex) == right, "right eye");
         assert!(left != right, "the zoomed eye differs");
+
+        // Neighbouring draws that change nothing are issued as one
+        // (`merge_runs`): the same picture. A different uniform, texture,
+        // pipeline or a gap in the vertices keeps them apart.
+        let mut halves = frame.clone();
+        let mut second = halves.draws[0].clone();
+        halves.draws[0].vertex_count = 6;
+        second.first_vertex += 6;
+        second.vertex_count = 6;
+        halves.draws.push(second);
+        r.render_stereo(&halves, &view, (w, h), &flat_eye);
+        let whole = {
+            r.render_stereo(&frame, &view, (w, h), &flat_eye);
+            read_rgba(&device, &queue, &tex)
+        };
+        r.render_stereo(&halves, &view, (w, h), &flat_eye);
+        assert!(
+            read_rgba(&device, &queue, &tex) == whole,
+            "merged: the same picture"
+        );
+        let keys: Vec<PipelineKey> = halves.draws.iter().map(|d| d.pipeline).collect();
+        let stride = UNIFORM_STRIDE as usize;
+        let mut ub = vec![0u8; 2 * stride];
+        let one = Renderer::merge_runs(&halves, &[vec![0, 1]], &keys, &ub);
+        assert_eq!(one, vec![vec![(0, 0, 12)]], "one run");
+        ub[stride] = 1;
+        let two = Renderer::merge_runs(&halves, &[vec![0, 1]], &keys, &ub);
+        assert_eq!(two, vec![vec![(0, 0, 6), (1, 6, 6)]], "different uniforms");
+        ub[stride] = 0;
+        let mut gap = halves.clone();
+        gap.draws[1].first_vertex += 1;
+        gap.draws[1].vertex_count -= 1;
+        let apart = Renderer::merge_runs(&gap, &[vec![0, 1]], &keys, &ub);
+        assert_eq!(apart.concat().len(), 2, "a gap in the vertices");
+        let mut other = keys.clone();
+        other[1].cull = other[1].cull.wrapping_add(1);
+        let apart = Renderer::merge_runs(&halves, &[vec![0, 1]], &other, &ub);
+        assert_eq!(apart.concat().len(), 2, "another pipeline");
 
         // The flat picture with its world left out (`set_skip_world`, while
         // the headset shows the stereo world): nothing of it drawn.

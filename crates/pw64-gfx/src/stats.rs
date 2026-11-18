@@ -16,6 +16,7 @@ static TEXTURE_US: AtomicU64 = AtomicU64::new(0);
 static EYE_PREP_US: AtomicU64 = AtomicU64::new(0);
 static EYE_ENCODE_US: AtomicU64 = AtomicU64::new(0);
 static EYE_CALLS: AtomicU32 = AtomicU32::new(0);
+static MERGED: AtomicU64 = AtomicU64::new(0);
 static EYES: AtomicU32 = AtomicU32::new(0);
 static EYE_DRAWS: AtomicU64 = AtomicU64::new(0);
 static EYE_DRAWS_MAX: AtomicU32 = AtomicU32::new(0);
@@ -38,6 +39,8 @@ pub struct Counts {
     pub eyes: u32,
     pub eye_draws_avg: f64,
     pub eye_draws_max: u32,
+    /// Draws joined to the draw before (`merge_runs`), per eye on average.
+    pub merged_avg: f64,
     /// Stereo calls (both eyes of a frame), and their average CPU time
     /// preparing (uniforms, uploads) and recording plus submitting.
     pub eye_calls: u32,
@@ -70,6 +73,10 @@ pub(crate) fn eye(draws: usize) {
     EYES.fetch_add(1, Relaxed);
     EYE_DRAWS.fetch_add(draws as u64, Relaxed);
     EYE_DRAWS_MAX.fetch_max(draws, Relaxed);
+}
+
+pub(crate) fn merged(n: usize) {
+    MERGED.fetch_add(n as u64, Relaxed);
 }
 
 pub(crate) fn eye_cpu(prep: Duration, encode: Duration) {
@@ -105,6 +112,14 @@ pub fn take() -> Counts {
             draws as f64 / eyes as f64
         },
         eye_draws_max: EYE_DRAWS_MAX.swap(0, Relaxed),
+        merged_avg: {
+            let m = MERGED.swap(0, Relaxed);
+            if eyes == 0 {
+                0.0
+            } else {
+                m as f64 / eyes as f64
+            }
+        },
         eye_calls: calls,
         eye_prep_ms: per_call(EYE_PREP_US.swap(0, Relaxed)),
         eye_encode_ms: per_call(EYE_ENCODE_US.swap(0, Relaxed)),

@@ -2731,7 +2731,8 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                          later; headset frames not shown {idle}; stereo: {} new eye pictures, \
                          {} shown again, lead {:.1} ms; longest, ms: {}; compiled {} \
                          pipelines ({:.0} ms, longest {:.0}; {} new shaders, {:.0} ms), {} \
-                         new textures ({:.0} ms); eye draws avg {:.0} max {}; {} stereo draws, \
+                         new textures ({:.0} ms); eye draws avg {:.0} max {} ({:.0} more joined into \
+                         them); {} stereo draws, \
                          CPU avg {:.1} ms preparing, {:.1} ms recording",
                         if hitch { "hitch, " } else { "" },
                         started.elapsed().as_secs_f64(),
@@ -2751,6 +2752,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                         gpu.texture_ms,
                         gpu.eye_draws_avg,
                         gpu.eye_draws_max,
+                        gpu.merged_avg,
                         gpu.eye_calls,
                         gpu.eye_prep_ms,
                         gpu.eye_encode_ms
