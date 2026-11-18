@@ -1173,6 +1173,23 @@ mod real {
     /// far in again).
     const TABLE_ZOOM_RANGE: (f32, f32) = (1.0 / 1.5, 7.5);
 
+    /// ...but zoomed fully in, the player is at most this far away in game
+    /// metres, whatever the island's size (7.5 alone was about 100 m on the
+    /// smallest island and further on the big ones; the user: 20 m).
+    const TABLE_NEAREST_GAME_M: f32 = 20.0;
+
+    /// The zoom (as [`TABLE_ZOOM_RANGE`]) at which the player, at
+    /// [`TABLE_VEHICLE_M`], is [`TABLE_NEAREST_GAME_M`] game metres away:
+    /// the most zoom on this island (never less than the range's own).
+    pub(super) fn table_zoom_max(t: &pw64_gfx::Table) -> f32 {
+        let [x0, y0, _, x1, y1, _] = t.bounds;
+        let radius = 0.5 * (x1 - x0).max(y1 - y0).max(1.0);
+        let s = MODEL_DIAMETER_M / (2.0 * radius);
+        let [x, y, z] = TABLE_VEHICLE_M;
+        let away = (x * x + y * y + z * z).sqrt();
+        (away / TABLE_NEAREST_GAME_M / s).max(TABLE_ZOOM_RANGE.1)
+    }
+
     /// `VEHICLE_CANNONBALL` (decomp task.h).
     const VEHICLE_CANNONBALL: u8 = 3;
 
@@ -1799,10 +1816,11 @@ mod real {
                     })
             });
             let table_room = mode.passthrough() && super::passthrough_available();
-            if table.is_some() {
-                // The right stick: up = closer.
+            if let Some(t) = &table {
+                // The right stick: up = closer, in to 20 game metres from
+                // the player on any island.
                 self.table_zoom = (self.table_zoom * (stick[1] * ZOOM_RATE * dt).exp())
-                    .clamp(TABLE_ZOOM_RANGE.0, TABLE_ZOOM_RANGE.1);
+                    .clamp(TABLE_ZOOM_RANGE.0, table_zoom_max(t));
                 // Left / right: turn it, as in the menus.
                 self.table_spin += stick[0] * SPIN_RAD_PER_S * dt;
             }
@@ -3165,6 +3183,15 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 assert!(eye.hide_env && eye.clip.is_none());
                 assert_eq!(eye.background, Some([0.0; 4]));
 
+                // Zoomed fully in, the vehicle is 20 game metres away: 20 m
+                // north of it shows a vehicle's distance further on.
+                let near = super::table_eye(&pose, &t, super::table_zoom_max(&t), 0.0, true, true);
+                let away = (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt();
+                let ahead = [c[0], c[1], c[2] - away];
+                assert!(same(
+                    ndc(apply(&near.world, [10.0, -20.0, -70.0])),
+                    ndc(apply(&view, ahead))
+                ));
                 // Turned a quarter (right stick): what was east of the
                 // vehicle is now where north was, about the vehicle.
                 let spun =
