@@ -184,8 +184,8 @@ pub(crate) fn start(first: Option<&std::ffi::OsStr>, rom_arg: Option<std::path::
         && in_zip_temp(&exe, &std::env::temp_dir())
     {
         fatal(
-            "Birdman64 is running from inside the zip file. Right-click the zip, choose \
-             \"Extract All…\", then start Birdman64.exe from the extracted folder.",
+            "Birdman64VR is running from inside the zip file. Right-click the zip, choose \
+             \"Extract All…\", then start Birdman64VR.exe from the extracted folder.",
         );
     }
     // ROM: first CLI arg, else `PW64_ROM`, else the remembered `[rom] path`,

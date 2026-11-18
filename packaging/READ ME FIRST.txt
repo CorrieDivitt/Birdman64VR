@@ -1,25 +1,37 @@
-READ ME FIRST - Birdman64
+READ ME FIRST - Birdman64VR
 
-PLAY: Birdman64 needs your own copy of the Pilotwings 64 (US) ROM: a
+Pilotwings 64 in VR, built on Birdman64 by NoahVl and its contributors.
+
+PLAY IN VR (experimental on PC; the Quest 3 app is the main version):
+start your headset's OpenXR runtime first (Meta Quest Link
+with Meta set as the active OpenXR runtime, or SteamVR), then
+double-click "Start in VR.cmd". Birdman64VR.exe on its own starts the
+normal flat game (as does "Start in VR.cmd" when no runtime is running).
+Known issue: over Virtual Desktop the passthrough stays on.
+
+ROM: Birdman64VR needs your own copy of the Pilotwings 64 (US) ROM: a
 .z64, .n64 or .v64 file, or a .zip containing one. It cannot give you
-one. Put the file next to Birdman64.exe and it is found automatically,
+one. Put the file next to Birdman64VR.exe and it is found automatically,
 or choose it when the game asks. Only the US version works.
 
 FIRST START: the game downloads the open-source code (about 1 MB) and
 builds it on your PC. This usually takes under a minute; next time the
-game starts right away.
+game starts right away. Keep the toolchain folder next to the exe.
 
-KEYS: move with W A S D. A = Space, B = Left Shift, Z = Z,
+CONTROLS IN VR: Touch controllers or a gamepad. Right stick press
+recentres the view; left stick press (pad: View/Select) opens the
+settings. R switches between chase and first person.
+
+ON A MONITOR: move with W A S D. A = Space, B = Left Shift, Z = Z,
 Start = Enter. C buttons (camera): I J K L. F11 toggles fullscreen.
+Settings: Esc or F10.
 
-SETTINGS: press Esc or F10 (pad: Select, Create or Capture). Changes
-save when you leave the settings screen.
-
-YOUR SAVES: by default they live in %APPDATA%\Birdman64
+YOUR SAVES: by default they live in %APPDATA%\Birdman64VR
 (pw64.eep = progress, pw64.toml = settings, crash.log = bug reports)
-and the build cache in %LOCALAPPDATA%\Birdman64\cache. Updating does
-not lose them. To keep everything next to the exe instead, put an
-empty portable.txt file in the exe's folder.
-(Linux: ~/.local/share/birdman64 and ~/.cache/birdman64)
+and the build cache in %LOCALAPPDATA%\Birdman64VR\cache. Updating does
+not lose them, and they are separate from Birdman64's. To keep
+everything next to the exe instead, put an empty portable.txt file in
+the exe's folder.
 
-PROBLEMS: see the Troubleshooting section of README.md, in this folder.
+PROBLEMS: see README.md in this folder, and report bugs at
+https://github.com/CorrieDivitt/Birdman64VR/issues (not to Birdman64).
