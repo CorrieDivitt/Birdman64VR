@@ -749,6 +749,32 @@ runtime. Infinite LOD and Infinite view distance apply at once from the
 settings (`pw64_game::set_visibility` any time, volatile writes; the game
 reads both every frame), no restart.
 
+Round 5 in the headset: CPU level 4 (1.9 GHz) held. Infinite view
+distance alone: game 72 fps (flight and Diorama mode, ~1500 draws, 6 ms
+recording). Both Infinite options: game 35-52 fps (2560 draws, 9-10 ms
+recording); the headset keeps 72 by showing eye pictures again. Decided:
+Diorama mode honours Infinite LOD as set (the detail shows). Merged to
+`main`.
+
+Refresh rate (`vr/refresh-rate`): `XR_FB_display_refresh_rate` (Quest
+only; Link sets its own). The rates the display offers are logged
+(`refresh rates: ... Hz (now ...)`) and offered on the Graphics page in
+place of Frame rate, which does nothing in VR (the headset paces the game;
+on PC VR it is simply hidden) (`Row::RefreshRate`: headset default, then each rate;
+`[vr] refresh_rate` in Hz, removed for the default). The headset thread asks
+for it when it changes (`XrContext::request_refresh_rate`, 0 = the
+runtime's own; a saved rate the headset lacks falls back to that). The game
+follows the frame period (`HEADSET_MHZ`).
+Headset (round 1, on the main page): 72, 80, 90, 120 Hz offered; each
+change applied at once; normal flights 90 game fps at 90 Hz; Infinite LOD +
+view distance does not keep up at 90 or 120 (46-48 game fps). Moved to the
+Graphics page on request.
+Round 2: works. Then: Display & graphics moved above VR HUD on the main
+page in VR, and no MSAA in VR at all (the row hidden, `VR_HIDDEN_GRAPHICS`;
+the renderer made with 1 sample when VR runs, window.rs; Reset graphics
+leaves the hidden value alone): turning it on in the headset was far too
+slow. The flat game keeps its MSAA setting.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`

@@ -250,6 +250,9 @@ pub struct XrContext {
     /// The room behind the picture (Quest; `None`: not available). First:
     /// a child of the session.
     passthrough: Option<crate::passthrough::Passthrough>,
+    /// The display's refresh rates, Hz (`XR_FB_display_refresh_rate`;
+    /// empty: not offered, the runtime keeps its own).
+    refresh_rates: Vec<f32>,
     panel: Swapchain,
     /// Both eyes: one image with two array layers.
     eyes: Swapchain,
@@ -373,6 +376,10 @@ impl XrContext {
         // Optional, standalone headsets only: the CPU's clock level (q6).
         enabled.ext_performance_settings =
             cfg!(target_os = "android") && available.ext_performance_settings;
+        // Optional, standalone headsets only (Quest Link sets its own): the
+        // display's refresh rate.
+        enabled.fb_display_refresh_rate =
+            cfg!(target_os = "android") && available.fb_display_refresh_rate;
         // Optional: the runtime's clock, to see how far ahead it predicts
         // (`FrameTime::ahead_ns`).
         #[cfg(windows)]
@@ -480,6 +487,24 @@ impl XrContext {
                 },
             );
         }
+        // The refresh rates the display offers (none: the runtime's own).
+        let refresh_rates = if enabled.fb_display_refresh_rate {
+            let rates = session
+                .enumerate_display_refresh_rates()
+                .unwrap_or_default();
+            let now = session.get_display_refresh_rate().unwrap_or(0.0);
+            log.push(format!(
+                "refresh rates: {} Hz (now {now:.0} Hz)",
+                rates
+                    .iter()
+                    .map(|r| format!("{r:.0}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+            rates
+        } else {
+            Vec::new()
+        };
         let controllers = match crate::controllers::Controllers::new(&instance, &session) {
             Ok(c) => Some(c),
             Err(e) => {
@@ -539,6 +564,7 @@ impl XrContext {
             controllers,
             pad: crate::PadState::default(),
             pad_error: false,
+            refresh_rates,
             gpu,
         })
     }
@@ -577,6 +603,26 @@ impl XrContext {
         }
         // Drops in field order: swapchains, space, session, instance, then
         // our references to the wgpu device.
+    }
+
+    /// The refresh rates the display offers, Hz (empty: no choice here).
+    pub fn refresh_rates(&self) -> &[f32] {
+        &self.refresh_rates
+    }
+
+    /// Asks the display for `hz` (one of [`Self::refresh_rates`]; 0: the
+    /// runtime's own choice). The frame period follows within a few frames
+    /// ([`FrameTime::period_ns`]). Logged.
+    pub fn request_refresh_rate(&mut self, hz: f32) {
+        if self.refresh_rates.is_empty() {
+            return;
+        }
+        let line = match self.session.request_display_refresh_rate(hz) {
+            Ok(()) if hz == 0.0 => "refresh rate: the headset's own".to_string(),
+            Ok(()) => format!("refresh rate: {hz:.0} Hz"),
+            Err(e) => format!("refresh rate {hz:.0} Hz not set: {e}"),
+        };
+        self.log.push(line);
     }
 
     /// The headset can show the player's room behind the picture

@@ -130,6 +130,10 @@ pub struct Config {
     /// `[vr] diorama_mode`: flights in third person as a model
     /// ([`DIORAMA_MODE_VALUES`]; `None` = default, off; `vr::DioramaMode`).
     pub vr_diorama_mode: Option<String>,
+    /// `[vr] refresh_rate`: the headset display's refresh rate in Hz, where
+    /// the headset offers a choice (`None` = default, the headset's own;
+    /// `vr::refresh_rate`).
+    pub vr_refresh_rate: Option<u32>,
     /// `[vr] dash_gauges`: the throttle and the map on the cockpit's
     /// dashboard in first person (`None` = default, on).
     pub vr_dash_gauges: Option<bool>,
@@ -960,6 +964,17 @@ fn from_table(table: &toml::Table) -> Config {
                         ),
                     }
                 }
+                if let Some(v) = t.get("refresh_rate") {
+                    match v.as_integer() {
+                        Some(hz @ 30..=240) => cfg.vr_refresh_rate = Some(hz as u32),
+                        _ => ignore(
+                            &mut ignored,
+                            "vr.refresh_rate",
+                            v,
+                            "use a whole number of Hz, such as 72, 90 or 120",
+                        ),
+                    }
+                }
                 if let Some(v) = t.get("horizon_lock") {
                     match v.as_str() {
                         Some(m) if HORIZON_LOCK_VALUES.contains(&m) => {
@@ -1097,6 +1112,36 @@ pub const DIORAMA_MODE_VALUES: [&str; 5] = [
 pub fn save_vr_diorama_mode(value: &str) -> Result<(), String> {
     let table = read_table()?;
     write_table(&with_vr_choice(table, "diorama_mode", value, "off")?)
+}
+
+/// Writes `[vr] refresh_rate` (`None`, the headset's own, removes the key,
+/// and `[vr]` when nothing else is in it).
+pub fn save_vr_refresh_rate(hz: Option<u32>) -> Result<(), String> {
+    let table = read_table()?;
+    write_table(&with_vr_refresh_rate(table, hz)?)
+}
+
+/// [`save_vr_refresh_rate`]'s table edit (separate from the file I/O for
+/// tests).
+fn with_vr_refresh_rate(mut table: toml::Table, hz: Option<u32>) -> Result<toml::Table, String> {
+    let vr = table
+        .entry("vr")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let toml::Value::Table(vr) = vr else {
+        return Err("[vr] is not a table in pw64.toml; not saved".to_string());
+    };
+    match hz {
+        Some(hz) => {
+            vr.insert("refresh_rate".into(), toml::Value::Integer(hz.into()));
+        }
+        None => {
+            vr.remove("refresh_rate");
+        }
+    }
+    if vr.is_empty() {
+        table.remove("vr");
+    }
+    Ok(table)
 }
 
 /// Writes `[vr] horizon_lock`; the default (`"bank"`) removes the key,
@@ -2024,11 +2069,23 @@ mod tests {
             (2.25, Some(fp))
         );
         assert!(with_vr_offsets(t, &[0.0; 7], &[0.0; 7]).unwrap().is_empty());
+        // `[vr] refresh_rate`: whole Hz; saved unless the headset's own.
+        let c = parse("[vr]\nrefresh_rate = 90\n").unwrap();
+        assert_eq!(c.vr_refresh_rate, Some(90));
+        let c = parse("[vr]\nrefresh_rate = \"fast\"\n").unwrap();
+        assert_eq!(
+            (c.vr_refresh_rate, c.ignored),
+            (None, vec!["vr.refresh_rate".to_string()])
+        );
+        let t = with_vr_refresh_rate(toml::Table::new(), Some(120)).unwrap();
+        assert_eq!(from_table(&t).vr_refresh_rate, Some(120));
+        assert!(with_vr_refresh_rate(t, None).unwrap().is_empty());
         // `[vr] diorama_mode`: one of five words; saved unless off.
         let c = parse("[vr]\ndiorama_mode = \"passthrough_static\"\n").unwrap();
         assert_eq!(c.vr_diorama_mode.as_deref(), Some("passthrough_static"));
         let c = parse("[vr]\ndiorama_mode = \"sideways\"\n").unwrap();
         assert_eq!(c.vr_diorama_mode, None);
+        assert_eq!(c.vr_refresh_rate, None);
         assert_eq!(c.ignored, vec!["vr.diorama_mode"]);
         let t = with_vr_choice(toml::Table::new(), "diorama_mode", "on_static", "off").unwrap();
         assert_eq!(from_table(&t).vr_diorama_mode.as_deref(), Some("on_static"));

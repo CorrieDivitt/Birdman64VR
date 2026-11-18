@@ -1085,7 +1085,14 @@ impl App {
         if !crate::vr::headless() {
             surface.configure(&device, &config);
         }
-        let msaa = opts::resolve_msaa(&adapter, format, opts::msaa());
+        // Birdman64VR (q6): never MSAA in VR, where it is far too slow for
+        // the eye pictures (the row is hidden there); the flat game keeps
+        // its setting.
+        let msaa = if self.vr.is_some() {
+            1
+        } else {
+            opts::resolve_msaa(&adapter, format, opts::msaa())
+        };
         let mut renderer = Renderer::new(
             &device,
             &queue,

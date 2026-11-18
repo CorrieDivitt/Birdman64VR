@@ -162,6 +162,10 @@ enum Row {
     /// (`vr::diorama_mode`), cycled with confirm or left / right; the two
     /// passthrough choices only on a headset that can.
     DioramaMode,
+    /// Graphics (in VR on a headset that offers a choice, in Frame rate's
+    /// place): the display's refresh rate, the headset's own or one it offers
+    /// (`vr::refresh_rate`, q6), cycled with confirm or left / right.
+    RefreshRate,
     /// VR HUD page: show or hide one flight-HUD element in the headset
     /// (`hud_edit::ELEMENTS` id).
     HudShow(u8),
@@ -252,11 +256,13 @@ const VR_HIDDEN_MAIN: [Row; 4] = [
 /// game), the screen-shape ones (widescreen, fill screen: the headset has its
 /// own field of view), the flat picture's scale and its filter (the eyes are
 /// drawn at the headset's own size; only the menu panel used them) and OLED
-/// care (the Quest 3 has LCD screens). Still shown: frame rate, texture
-/// packs, MSAA (the eye pictures use it), full-detail models
-/// and view distance. Texture filtering too: the N64 original filter's frame
+/// care (the Quest 3 has LCD screens), and MSAA (q6: far too slow for the
+/// eye pictures; VR always draws without it, window.rs). Still shown:
+/// texture packs, full-detail models and view distance; Frame rate becomes
+/// the headset's Refresh rate. Texture filtering too: the N64 original filter's frame
 /// rate is unsustainable in the headset, so VR always filters smoothly.
-const VR_HIDDEN_GRAPHICS: [Opt; 10] = [
+const VR_HIDDEN_GRAPHICS: [Opt; 11] = [
+    Opt::Msaa,
     Opt::DisplayMode,
     Opt::Resolution,
     Opt::Vsync,
@@ -284,6 +290,35 @@ fn step_diorama_mode(d: i32, passthrough: bool) {
         .unwrap_or(0) as i32;
     let n = all.len() as i32;
     crate::vr::set_diorama_mode(all[(i + d.signum()).rem_euclid(n) as usize]);
+}
+
+/// Steps the refresh rate by `d` (wrapping) through `choices` and saves
+/// it.
+fn step_refresh_rate(d: i32, choices: &[Option<u32>]) {
+    if choices.is_empty() {
+        return;
+    }
+    let i = choices
+        .iter()
+        .position(|c| *c == crate::vr::refresh_rate())
+        .unwrap_or(0) as i32;
+    let n = choices.len() as i32;
+    crate::vr::set_refresh_rate(choices[(i + d.signum()).rem_euclid(n) as usize]);
+}
+
+/// The refresh rates offered: the headset's own, then `rates` (Hz).
+fn refresh_choices(rates: &[u32]) -> Vec<Option<u32>> {
+    std::iter::once(None)
+        .chain(rates.iter().map(|&hz| Some(hz)))
+        .collect()
+}
+
+/// A refresh rate's label (`None`: the headset's own).
+fn refresh_label(hz: Option<u32>) -> String {
+    match hz {
+        Some(hz) => format!("{hz} Hz"),
+        None => "headset default".into(),
+    }
 }
 
 /// The diorama modes offered ([`step_diorama_mode`]).
@@ -1893,6 +1928,15 @@ impl Overlay {
         crate::vr::passthrough_available()
     }
 
+    /// The refresh rates the headset offers (empty on PC: no row).
+    fn refresh_rates(&self) -> Vec<u32> {
+        #[cfg(test)]
+        if self.force_vr {
+            return vec![72, 80, 90, 120];
+        }
+        crate::vr::refresh_rates()
+    }
+
     /// The pages are laid out for the headset (`VR_HIDDEN_*`, VR HUD page).
     fn in_vr(&self) -> bool {
         #[cfg(test)]
@@ -1953,6 +1997,10 @@ impl Overlay {
                 // No touch controls (no touchscreen) and no split-screen
                 // (VR is single-player) in the headset.
                 if self.in_vr() {
+                    // Display & graphics first, above the VR pages.
+                    rows.retain(|r| *r != Row::Graphics);
+                    rows.insert(at + 1, Row::Graphics);
+                    let at = at + 1;
                     rows.insert(at + 1, Row::VrHudPage);
                     rows.insert(at + 2, Row::VrComfortPage);
                     let mut next = at + 3;
@@ -1994,6 +2042,16 @@ impl Overlay {
                 // Birdman64VR: only what changes the picture in the headset.
                 if self.in_vr() {
                     rows.retain(|r| !matches!(r, Row::Opt(o) if VR_HIDDEN_GRAPHICS.contains(o)));
+                    // q6: the headset sets the game's frame rate, so in its
+                    // place the headset's refresh rate, where it offers a
+                    // choice (none on PC: Quest Link sets it).
+                    if let Some(i) = rows.iter().position(|r| *r == Row::Opt(Opt::Fps)) {
+                        if self.refresh_rates().is_empty() {
+                            rows.remove(i);
+                        } else {
+                            rows[i] = Row::RefreshRate;
+                        }
+                    }
                 }
                 if !self.pending_restart().is_empty() {
                     rows.insert(0, Row::RestartNow);
@@ -2151,6 +2209,11 @@ impl Overlay {
                 if rows.contains(&Row::HudLayout) {
                     self.text_row(ui, at(Row::HudLayout), "Move HUD");
                 }
+                // In VR, Display & graphics comes before the VR pages (`rows`).
+                let vr_rows = rows.contains(&Row::VrHudPage);
+                if vr_rows {
+                    self.text_row(ui, at(Row::Graphics), "Display & graphics \u{203a}");
+                }
                 if rows.contains(&Row::VrHudPage) {
                     self.text_row(ui, at(Row::VrHudPage), "VR HUD \u{203a}");
                 }
@@ -2176,7 +2239,9 @@ impl Overlay {
                 if rows.contains(&Row::SplitScreen) {
                     self.text_row(ui, at(Row::SplitScreen), "Split-screen \u{203a}");
                 }
-                self.text_row(ui, at(Row::Graphics), "Display & graphics \u{203a}");
+                if !vr_rows {
+                    self.text_row(ui, at(Row::Graphics), "Display & graphics \u{203a}");
+                }
                 self.text_row(ui, at(Row::PerfPage), "Performance overlay \u{203a}");
                 self.opt_row(ui, at(Row::Opt(Opt::Volume)), Opt::Volume);
                 self.opt_row(ui, at(Row::Opt(Opt::PauseBackground)), Opt::PauseBackground);
@@ -2272,6 +2337,14 @@ impl Overlay {
                     Opt::TexFilter,
                     Opt::TexturePack,
                 ] {
+                    // q6: in VR the headset's refresh rate in Frame rate's place.
+                    if o == Opt::Fps && rows.contains(&Row::RefreshRate) {
+                        self.text_row(
+                            ui,
+                            at(Row::RefreshRate),
+                            &format!("Refresh rate: {}", refresh_label(crate::vr::refresh_rate())),
+                        );
+                    }
                     // VR hides some (`VR_HIDDEN_GRAPHICS`): only rows on the page.
                     if rows.contains(&Row::Opt(o)) {
                         self.opt_row(ui, at(Row::Opt(o)), o);
@@ -3054,6 +3127,7 @@ impl Overlay {
             Row::HorizonLock => step_horizon_lock(1),
             Row::Passthrough => crate::vr::set_passthrough(!crate::vr::passthrough()),
             Row::DioramaMode => step_diorama_mode(1, self.passthrough_offered()),
+            Row::RefreshRate => step_refresh_rate(1, &refresh_choices(&self.refresh_rates())),
             Row::GyroWindscreen => crate::vr::set_gyro_windscreen(!crate::vr::gyro_windscreen()),
             Row::DashGauges => crate::vr::set_dash_gauges(!crate::vr::dash_gauges()),
             Row::HudShow(id) => {
@@ -3346,6 +3420,7 @@ impl Overlay {
             Row::HorizonLock => step_horizon_lock(d),
             Row::Passthrough => crate::vr::set_passthrough(!crate::vr::passthrough()),
             Row::DioramaMode => step_diorama_mode(d, self.passthrough_offered()),
+            Row::RefreshRate => step_refresh_rate(d, &refresh_choices(&self.refresh_rates())),
             // Left / right flip a VR HUD row too.
             Row::GyroWindscreen => crate::vr::set_gyro_windscreen(!crate::vr::gyro_windscreen()),
             Row::DashGauges => crate::vr::set_dash_gauges(!crate::vr::dash_gauges()),
@@ -3385,7 +3460,11 @@ impl Overlay {
     /// V-Sync, display mode) apply right away, restart ones (MSAA,
     /// widescreen, fill screen) become pending as usual.
     fn reset_graphics(&mut self) {
-        self.msaa = 1;
+        // In VR the flat game's MSAA is not shown (always off there): kept,
+        // so no restart for a hidden row.
+        if !self.in_vr() {
+            self.msaa = 1;
+        }
         self.infinite_lod = false;
         self.infinite_view_distance = false;
         // S8: the D3 default is the monitor's aspect (Off on a 4:3 one);
@@ -4173,6 +4252,11 @@ fn help(row: Row) -> &'static str {
              On: the land slides past under your vehicle. Static: the island stands still. \
              Passthrough: in your own room. Right stick up and down zooms. The first-person \
              view stays full size."
+        }
+        Row::RefreshRate => {
+            "How many times a second the headset's display refreshes. Higher is smoother and \
+             can feel more comfortable, but leaves less time for each picture: with Infinite \
+             LOD on, 72 or 80 Hz keep up best. 60 Hz may flicker."
         }
         Row::Passthrough => {
             "Show the menus and the island model in your own room. Off: in a dim virtual \
@@ -5212,6 +5296,16 @@ mod tests {
                 let i = main.iter().position(|r| *r == Row::VrComfortPage).unwrap();
                 assert_eq!(main[i + 1], Row::Passthrough);
                 assert_eq!(main[i + 2], Row::DioramaMode);
+                assert!(!main.contains(&Row::RefreshRate), "on the Graphics page");
+                // Display & graphics right above VR HUD.
+                assert_eq!(main[i - 2], Row::Graphics);
+                assert_eq!(main[i - 1], Row::VrHudPage);
+                assert_eq!(
+                    refresh_choices(&[72, 90]),
+                    [None, Some(72), Some(90)].to_vec()
+                );
+                assert_eq!(refresh_label(None), "headset default");
+                assert_eq!(refresh_label(Some(90)), "90 Hz");
                 // Its passthrough choices only where the headset can.
                 use crate::vr::DioramaMode as D;
                 assert_eq!(diorama_choices(true), D::ALL.to_vec());
@@ -5220,7 +5314,12 @@ mod tests {
             o.page = Page::Graphics;
             assert_eq!(o.rows().contains(&Row::Opt(Opt::Widescreen)), !vr);
             assert_eq!(o.rows().contains(&Row::Opt(Opt::TexFilter)), !vr);
-            assert!(o.rows().contains(&Row::Opt(Opt::Msaa)));
+            // q6: no MSAA in the headset.
+            assert_eq!(o.rows().contains(&Row::Opt(Opt::Msaa)), !vr);
+            // q6: in VR the headset's refresh rate replaces Frame rate.
+            let graphics = o.rows();
+            assert_eq!(graphics.contains(&Row::Opt(Opt::Fps)), !vr);
+            assert_eq!(graphics.contains(&Row::RefreshRate), vr);
         }
     }
 
