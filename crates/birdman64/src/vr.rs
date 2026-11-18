@@ -237,6 +237,103 @@ pub(crate) fn set_passthrough(on: bool) {
     }
 }
 
+/// Diorama mode (p14): a flight in third person shown as a model of the
+/// island (`[vr] diorama_mode`, the settings' main page). The game's
+/// first-person view (R on the pad) stays full size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DioramaMode {
+    Off,
+    /// The model moves so the vehicle stays in front of the player, in a
+    /// dim virtual room.
+    On,
+    /// The island stands still, as in the menus; dim virtual room.
+    OnStatic,
+    /// As `On`, in the player's own room (passthrough).
+    Passthrough,
+    /// As `OnStatic`, in the player's own room.
+    PassthroughStatic,
+}
+
+impl DioramaMode {
+    pub(crate) const ALL: [DioramaMode; 5] = [
+        DioramaMode::Off,
+        DioramaMode::On,
+        DioramaMode::OnStatic,
+        DioramaMode::Passthrough,
+        DioramaMode::PassthroughStatic,
+    ];
+
+    /// The `[vr] diorama_mode` value (`config::DIORAMA_MODE_VALUES`).
+    fn config(self) -> &'static str {
+        match self {
+            DioramaMode::Off => "off",
+            DioramaMode::On => "on",
+            DioramaMode::OnStatic => "on_static",
+            DioramaMode::Passthrough => "passthrough",
+            DioramaMode::PassthroughStatic => "passthrough_static",
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            DioramaMode::Off => "off",
+            DioramaMode::On => "on",
+            DioramaMode::OnStatic => "on static",
+            DioramaMode::Passthrough => "passthrough",
+            DioramaMode::PassthroughStatic => "passthrough static",
+        }
+    }
+
+    /// The model moves with the vehicle (else the island stands still).
+    pub(crate) fn follows(self) -> bool {
+        matches!(self, DioramaMode::On | DioramaMode::Passthrough)
+    }
+
+    /// The player's room behind the model (needs a headset that can).
+    pub(crate) fn passthrough(self) -> bool {
+        matches!(
+            self,
+            DioramaMode::Passthrough | DioramaMode::PassthroughStatic
+        )
+    }
+}
+
+/// 0 = not loaded yet, else 1 + the index in [`DioramaMode::ALL`].
+static DIORAMA_MODE: AtomicU8 = AtomicU8::new(0);
+
+pub(crate) fn diorama_mode() -> DioramaMode {
+    match DIORAMA_MODE.load(Ordering::Relaxed) {
+        0 => {
+            let cfg = crate::config::get().vr_diorama_mode.clone();
+            let mode = DioramaMode::ALL
+                .into_iter()
+                .find(|m| Some(m.config()) == cfg.as_deref())
+                .unwrap_or(DioramaMode::Off);
+            set_diorama_mode_live(mode);
+            mode
+        }
+        v => DioramaMode::ALL[(v - 1) as usize % DioramaMode::ALL.len()],
+    }
+}
+
+fn set_diorama_mode_live(mode: DioramaMode) {
+    let i = DioramaMode::ALL
+        .iter()
+        .position(|m| *m == mode)
+        .unwrap_or(0);
+    DIORAMA_MODE.store(i as u8 + 1, Ordering::Relaxed);
+}
+
+/// Sets the diorama mode (from the next game frame) and saves the choice.
+pub(crate) fn set_diorama_mode(mode: DioramaMode) {
+    set_diorama_mode_live(mode);
+    // A paused flight is redrawn the other way.
+    HUD_CHANGED.store(true, Ordering::Relaxed);
+    if let Err(e) = crate::config::save_vr_diorama_mode(mode.config()) {
+        eprintln!("[vr] diorama mode not saved: {e}");
+    }
+}
+
 /// The room shows this frame: the headset can and the player wants it.
 fn passthrough_on() -> bool {
     passthrough_available() && passthrough()
@@ -945,6 +1042,8 @@ mod real {
                 &[]
             },
             sight: None,
+            hide_env: false,
+            hide_hud: false,
         }
     }
 
@@ -1010,9 +1109,81 @@ mod real {
     }
 
     /// The views shown in the player's room where the headset can
-    /// (`Source::scene`): the flat screens and the island model.
-    fn in_room(scene: u8) -> bool {
-        matches!(scene, 0 | 2)
+    /// (`Source::scene`): the flat screens and the island model if the
+    /// player wants the menus there (`menus`: the Passthrough setting),
+    /// and a flight shown as a model in the room (scene 5: Diorama mode
+    /// passthrough or passthrough static; 6 is the model in the dim room).
+    fn in_room(scene: u8, menus: bool) -> bool {
+        match scene {
+            0 | 2 => menus,
+            5 => true,
+            _ => false,
+        }
+    }
+
+    /// Diorama mode, following: where the vehicle is held, in the seated
+    /// space (metres): a metre ahead, a little below eye level.
+    const TABLE_VEHICLE_M: [f32; 3] = [0.0, -0.25, -1.0];
+    /// ...and the right stick's zoom range, as a factor of the menus'
+    /// model at its default size (zoom 1, where a flight starts): back to
+    /// 1.5 times the distance, and in to 7.5 times the size (round 1 went
+    /// from the menus' full zoom, 2.5, to twice that, 5; the user: half as
+    /// far in again).
+    const TABLE_ZOOM_RANGE: (f32, f32) = (1.0 / 1.5, 7.5);
+
+    /// [`stereo_eye`] for a flight shown as a model (Diorama mode,
+    /// [`pw64_gfx::Table`]): the island at the scale of the menus' model
+    /// times `zoom`, game north away, level. `follow`: moved so the vehicle
+    /// stays at [`TABLE_VEHICLE_M`] and the land slides past below it;
+    /// else the island stands still where the menus' model does
+    /// ([`MODEL_CENTRE_M`], its middle at sea level). No sky and no sea;
+    /// around it the player's room (`room`) or the dim one.
+    pub(super) fn table_eye(
+        pose: &EyePose,
+        t: &pw64_gfx::Table,
+        zoom: f32,
+        follow: bool,
+        room: bool,
+    ) -> pw64_gfx::StereoEye {
+        use pw64_gfx::matrix::mul;
+        let mut eye = stereo_eye(pose);
+        let [x0, y0, _, x1, y1, _] = t.bounds;
+        let radius = 0.5 * (x1 - x0).max(y1 - y0).max(1.0);
+        let s = MODEL_DIAMETER_M / (2.0 * radius) * zoom;
+        // Game world → relative to the vehicle, or to the island's middle
+        // at sea level.
+        let (o, c) = if follow {
+            (t.vehicle, TABLE_VEHICLE_M)
+        } else {
+            ([0.5 * (x0 + x1), 0.5 * (y0 + y1), 0.0], MODEL_CENTRE_M)
+        };
+        let centre: Mat4 = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [-o[0], -o[1], -o[2], 1.0],
+        ];
+        // → the seated space (y up, -z away), scaled down and placed.
+        let place: Mat4 = [
+            [s, 0.0, 0.0, 0.0],
+            [0.0, 0.0, -s, 0.0],
+            [0.0, s, 0.0, 0.0],
+            [c[0], c[1], c[2], 1.0],
+        ];
+        let [l, r, u, dn] = pose.fov;
+        let view = mul(
+            &math::view(pose.orientation, pose.position),
+            &math::projection_reversed(l, r, u, dn, NEAR_M * 0.5),
+        );
+        let to_world = pw64_gfx::Diorama::to_world(&t.camera);
+        eye.world = mul(&mul(&mul(&to_world, &centre), &place), &view);
+        eye.hide_env = true;
+        eye.background = Some(if room {
+            MODEL_BACKGROUND_ROOM
+        } else {
+            MODEL_BACKGROUND
+        });
+        eye
     }
 
     /// The title view: how far behind and above (negative: below) the game camera, in game
@@ -1222,6 +1393,11 @@ mod real {
         chase_dirty: bool,
         /// The last stereo frame was the island model ([`diorama_eye`]).
         model: bool,
+        /// Diorama mode: the last stereo frame was a flight shown as a
+        /// model ([`table_eye`]), and the right stick's zoom
+        /// ([`TABLE_ZOOM_RANGE`]; 1 again after a menu).
+        table: bool,
+        table_zoom: f32,
         /// ...and the title screen (recentre when it starts).
         title: bool,
         /// The last game state and title phase logged.
@@ -1302,6 +1478,8 @@ mod real {
                     stick_at: Instant::now(),
                     chase_dirty: false,
                     model: false,
+                    table: false,
+                    table_zoom: 1.0,
                     title: false,
                     state: None,
                     eye_serial: 0,
@@ -1527,9 +1705,24 @@ mod real {
                 let m = (v.abs() - STICK_DEADZONE).max(0.0) / (1.0 - STICK_DEADZONE);
                 m.copysign(v)
             });
+            // Diorama mode: a flight as a model, unless the game's camera
+            // is the first-person one (R on the pad). In the player's room
+            // if the mode says so and the headset can.
+            let mode = super::diorama_mode();
+            let table = frame.table.filter(|_| {
+                frame.diorama.is_none()
+                    && mode != super::DioramaMode::Off
+                    && frame.up.is_some_and(|u| u[4] as i32 != 1)
+            });
+            let table_room = mode.passthrough() && super::passthrough_available();
+            if table.is_some() {
+                // The right stick: up = closer.
+                self.table_zoom = (self.table_zoom * (stick[1] * ZOOM_RATE * dt).exp())
+                    .clamp(TABLE_ZOOM_RANGE.0, TABLE_ZOOM_RANGE.1);
+            }
             let camera = frame
                 .up
-                .filter(|_| frame.diorama.is_none())
+                .filter(|_| frame.diorama.is_none() && table.is_none())
                 .and_then(|u| match u[4] as i32 {
                     m if CHASE_MODES.contains(&m) => Some(super::ViewKind::Chase),
                     1 => Some(super::ViewKind::FirstPerson),
@@ -1547,6 +1740,8 @@ mod real {
                         - f32::from(u8::from(b & crate::input::CONT_L != 0));
                     self.spin[2] = (self.spin[2] * (dir * ZOOM_RATE * dt).exp())
                         .clamp(ZOOM_RANGE.0, ZOOM_RANGE.1);
+                    // The next flight's model starts at its default size.
+                    self.table_zoom = 1.0;
                 }
                 _ => {}
             }
@@ -1567,9 +1762,7 @@ mod real {
             let chase_back = camera.map(|(kind, v)| super::view_offset(kind, v));
             // Horizon lock, in flight (one rotation for both eyes); the
             // fixed sights on the HUD sphere turn by it too.
-            let horizon = frame
-                .diorama
-                .is_none()
+            let horizon = (frame.diorama.is_none() && table.is_none())
                 .then(|| {
                     frame.up.filter(|u| u[3] != 1.0).and_then(|u| {
                         // (The cannonball has no lock: aiming must pitch.)
@@ -1579,13 +1772,21 @@ mod real {
                 .flatten();
             for (eye, pose) in poses.iter().enumerate() {
                 let seated = seat.seated(pose);
-                let mut matrices = match &frame.diorama {
-                    Some(d) => diorama_eye(&seated, d, self.spin),
-                    None => stereo_eye(&seated),
+                let mut matrices = match (&frame.diorama, &table) {
+                    (Some(d), _) => diorama_eye(&seated, d, self.spin),
+                    (None, Some(t)) => {
+                        table_eye(&seated, t, self.table_zoom, mode.follows(), table_room)
+                    }
+                    (None, None) => stereo_eye(&seated),
                 };
                 // p12: the island model in the player's room.
                 if matrices.clip.is_some() && super::passthrough_on() {
                     matrices.background = Some(MODEL_BACKGROUND_ROOM);
+                }
+                // Diorama mode: no flight HUD while it is on, in the model
+                // view and in the game's first-person view alike.
+                if frame.diorama.is_none() && mode != super::DioramaMode::Off {
+                    matrices.hide_hud = true;
                 }
                 // Horizon lock, in flight: the world level, the vehicle
                 // (and its cockpit, in camera space) banking around the
@@ -1610,6 +1811,8 @@ mod real {
                 src.world = Some((back, poses, self.eye_serial));
                 // w8: the kind of view, for the headset's fade on a change.
                 src.scene = match &frame.diorama {
+                    None if table.is_some() && table_room => 5,
+                    None if table.is_some() => 6,
                     None => 1,
                     Some(d) if d.title => 3,
                     Some(d) if d.celebration => 4,
@@ -1655,6 +1858,21 @@ mod real {
                 super::request_recentre();
             }
             self.title = title;
+            if table.is_some() != self.table {
+                self.table = table.is_some();
+                log(
+                    &match &table {
+                        Some(t) => format!(
+                            "diorama mode on ({}): vehicle {:?}, bounds {:?}",
+                            mode.label(),
+                            t.vehicle,
+                            t.bounds
+                        ),
+                        None => "diorama mode off".into(),
+                    },
+                    true,
+                );
+            }
             if frame.diorama.is_some() != self.model {
                 self.model = frame.diorama.is_some();
                 let what = match &frame.diorama {
@@ -2208,7 +2426,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     // late, paused, loading); the runtime reprojects.
                     eyes: world.get().map(|w| w.1),
                     // p12: the menus in the player's room.
-                    passthrough: in_room(s.scene) && super::passthrough(),
+                    passthrough: in_room(s.scene, super::passthrough()),
                 }
             };
             if super::RECENTRE.swap(false, Ordering::Relaxed) {
@@ -2741,6 +2959,70 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             assert!(apply(&r, [0.1, -1.0, 0.0])[1] > 0.99);
         }
 
+        /// Diorama mode: following, the vehicle is held at its point in
+        /// the seated space whatever the game camera does; static, the
+        /// island's middle is where the menus' model has it. The model is
+        /// the menus' size at zoom 1; no sky or sea either way.
+        #[test]
+        fn the_table_model_follows_the_vehicle_or_stands_still() {
+            use super::{MODEL_CENTRE_M, Mat4, NEAR_M, TABLE_VEHICLE_M, math};
+            use pw64_gfx::matrix::mul;
+            let pose = pw64_xr::EyePose {
+                orientation: [0.0, 0.0, 0.0, 1.0],
+                position: [0.0; 3],
+                fov: [-0.8, 0.8, 0.8, -0.8],
+            };
+            let t = pw64_gfx::Table {
+                // Looking along +y (north), level, from somewhere else.
+                camera: [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                    [300.0, -200.0, 80.0],
+                ],
+                vehicle: [310.0, -150.0, 60.0],
+                bounds: [-1000.0, -1000.0, 0.0, 1000.0, 1000.0, 300.0],
+            };
+            let apply = |m: &Mat4, p: [f32; 3]| -> [f32; 4] {
+                std::array::from_fn(|k| p[0] * m[0][k] + p[1] * m[1][k] + p[2] * m[2][k] + m[3][k])
+            };
+            let ndc = |c: [f32; 4]| [c[0] / c[3], c[1] / c[3]];
+            let same =
+                |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-4 && (a[1] - b[1]).abs() < 1e-4;
+            let [l, r, u, dn] = pose.fov;
+            let view = mul(
+                &math::view(pose.orientation, pose.position),
+                &math::projection_reversed(l, r, u, dn, NEAR_M * 0.5),
+            );
+            // In camera space (x right, y up, -z forward): the vehicle,
+            // and the island's middle at sea level (world 0, 0, 0).
+            let vehicle = [10.0, -20.0, -50.0];
+            let middle = [-300.0, -80.0, -200.0];
+            // The menus' scale: a 2000 m island is 2.6125 m.
+            let s = 2.6125 / 2000.0;
+            for zoom in [1.0f32 / 1.5, 1.0, 7.5] {
+                let c = TABLE_VEHICLE_M;
+                let eye = super::table_eye(&pose, &t, zoom, true, true);
+                assert!(same(ndc(apply(&eye.world, vehicle)), ndc(apply(&view, c))));
+                // 100 m east of the vehicle.
+                let east = [c[0] + 100.0 * s * zoom, c[1], c[2]];
+                assert!(same(
+                    ndc(apply(&eye.world, [110.0, -20.0, -50.0])),
+                    ndc(apply(&view, east))
+                ));
+                assert!(eye.hide_env && eye.clip.is_none());
+                assert_eq!(eye.background, Some([0.0; 4]));
+
+                let eye = super::table_eye(&pose, &t, zoom, false, false);
+                assert!(same(
+                    ndc(apply(&eye.world, middle)),
+                    ndc(apply(&view, MODEL_CENTRE_M))
+                ));
+                assert!(eye.hide_env && eye.clip.is_none());
+                assert_eq!(eye.background.map(|b| b[3]), Some(1.0));
+            }
+        }
+
         /// p13: the blink closes fully, then opens again and stays open.
         #[test]
         fn the_shutter_blinks_once() {
@@ -2759,8 +3041,14 @@ fn fs(v: V) -> @location(0) vec4<f32> {
         /// cutout picture is decoded unmultiplied.
         #[test]
         fn the_room_shows_behind_menus_only() {
-            assert!(super::in_room(0) && super::in_room(2));
-            assert!(!super::in_room(1) && !super::in_room(3) && !super::in_room(4));
+            assert!(super::in_room(0, true) && super::in_room(2, true));
+            assert!(!super::in_room(0, false) && !super::in_room(2, false));
+            for menus in [false, true] {
+                assert!(!super::in_room(1, menus) && !super::in_room(3, menus));
+                assert!(!super::in_room(4, menus));
+                // A flight shown as a model: in the room, or the dim one.
+                assert!(super::in_room(5, menus) && !super::in_room(6, menus));
+            }
             let cut = super::shader(true, super::PanelBlend::Cutout);
             assert!(cut.contains("p.rgb / max(p.a, 0.001)") && cut.contains("col * p.a, p.a"));
             assert!(!super::shader(true, super::PanelBlend::Opaque).contains("max(p.a"));

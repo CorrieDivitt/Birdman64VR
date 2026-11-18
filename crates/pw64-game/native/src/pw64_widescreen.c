@@ -828,6 +828,56 @@ static void pw64_vr_up_tag(const UnkStruct_80204D94* c) {
     }
 }
 
+/* Must match pw64-gfx `interp::TABLE_TAG`. */
+#define PW64_TABLE_TAG 0x544200u /* "TB" */
+
+/* Birdman64VR, diorama passthrough: what the headset needs to show a
+ * flight as a model on a table around the vehicle: the game camera's world
+ * matrix (rows right, forward, up, position; xyz), the vehicle's position
+ * and the island's bounds (min xyz, max xyz); 21 floats at the end of a
+ * flight's full-width world view. Always sent in a VR flight: the headset
+ * decides whether to use it. */
+static void pw64_vr_table_tag(const UnkStruct_80204D94* c) {
+    const Camera* player;
+    float v[21];
+    int i, k;
+    if (c->viewX0 > 16 || c->viewX1 < SCREEN_WIDTH - 16 || D_80362690 == NULL) {
+        return;
+    }
+    player = D_80362690->unkC[D_80362690->unk9C].unk70;
+    if (player == NULL || !pw64_diorama_bounds(c, &v[15])) {
+        return;
+    }
+    for (i = 0; i < 4; i++) {
+        for (k = 0; k < 3; k++) {
+            v[i * 3 + k] = c->unk110.m[i][k];
+        }
+    }
+    for (k = 0; k < 3; k++) {
+        v[12 + k] = player->unk80.m[3][k];
+    }
+    for (i = 0; i < 21; i++) {
+        union {
+            float f;
+            u32 u;
+        } bits;
+        bits.f = v[i];
+        gGfxDisplayListHead->words.w0 = ((u32)G_NOOP << 24) | PW64_TABLE_TAG | (u32)i;
+        gGfxDisplayListHead->words.w1 = bits.u;
+        gGfxDisplayListHead++;
+    }
+}
+
+/* Must match pw64-gfx `interp::ENV_TAG_ON/OFF` (G_NOOP w1). */
+#define PW64_ENV_TAG_ON 0x50574E31u  /* "PWN1" */
+#define PW64_ENV_TAG_OFF 0x50574E30u /* "PWN0" */
+
+void pw64_env_tag(int on) {
+    gGfxDisplayListHead->words.w0 = (u32)G_NOOP << 24;
+    gGfxDisplayListHead->words.w1 = on ? PW64_ENV_TAG_ON : PW64_ENV_TAG_OFF;
+    gGfxDisplayListHead++;
+}
+
 /* Birdman64VR: a HUD part moved in VR (the cannonball's gauges around the
  * heading strip, hud.c.patch hudDrawCannonball): a translation of the
  * HUD's view matrix (N64 HUD px, y up) around its uvVtx draws. Nothing
@@ -871,6 +921,7 @@ void pw64_widescreen_tag(const void* chan, int on) {
     if (!on && pw64_widescreen_aspect < 0.0f && pw64_vr_flight()) {
         pw64_vr_dash_tag(chan);
         pw64_vr_up_tag(chan);
+        pw64_vr_table_tag(chan);
     }
     gGfxDisplayListHead->words.w0 = (u32)G_NOOP << 24;
     gGfxDisplayListHead->words.w1 = on ? PW64_WIDE_TAG_ON : PW64_WIDE_TAG_OFF;

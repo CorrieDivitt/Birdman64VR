@@ -598,6 +598,48 @@ composition layer; the app never sees camera images.
 - Decided (the user): menus only. Not the paused game or the settings
   overlay in flight.
 
+## Diorama mode (p14, experiment)
+Setting on the main page under Passthrough (`Row::DioramaMode`, `[vr]
+diorama_mode`, default off): a flight in third person is a model of the
+island, with no sky and no sea. Five choices (`vr::DioramaMode`): off; on
+(the model moves so the vehicle stays in front of the player, dim blue
+room); on static (the island stands still where the menus' model does);
+passthrough and passthrough static (the same two in the player's own room;
+only offered, and only honoured, where the headset can). Round 1 was a
+single on/off "Diorama passthrough" that followed the vehicle; the user
+had meant the island to stand still, liked the following too, and asked
+for both, each with and without passthrough.
+- C: `pw64_vr_table_tag` ("TB", 21 floats at the end of a flight's
+  full-width world view: camera matrix, the vehicle's position from the
+  player camera's `unk80`, the terrain's bounds) → `Frame::table`; always
+  sent in a VR flight. `pw64_env_tag(1/0)` brackets `_uvEnvDraw` in
+  chan.c.patch ("PWN1"/"PWN0") → `DrawCall::env`: the sky dome and the
+  camera-following sea model.
+- vr.rs `table_eye(pose, table, zoom, follow, room)`: world → relative to
+  the vehicle (held at `TABLE_VEHICLE_M`, 1 m ahead, 0.25 m below eye
+  level) or to the island's middle at sea level (at `MODEL_CENTRE_M`) →
+  scaled by the menus' model scale (`MODEL_DIAMETER_M / island size`)
+  times the stick's zoom, game north away, level. Zoom: 1 at the start of
+  each flight (the menus' default size; round 1 started at their full
+  zoom, 2.5), right stick up to 7.5 (round 1: 5; the user: half as far in
+  again) and down to 1/1.5 (`TABLE_ZOOM_RANGE`). `StereoEye::hide_env`
+  drops the env draws and depthless backdrops. Background transparent
+  (`Source::scene` 5, passthrough on via `in_room`) or `MODEL_BACKGROUND`
+  (scene 6). Used when the mode is not off and the player camera's mode
+  (UP tag) is not 1: R on the pad still gives the game's first-person
+  view, full size. No horizon lock and no chase-distance stick in this
+  view; the HUD sphere stays.
+- No flight HUD while the mode is not off (the user, round 3), in the
+  model view and in the game's first-person view (R) alike:
+  `StereoEye::hide_hud` drops every draw after the world inside the game's
+  HUD bracket (`DrawCall::hud`, `pw64_hud_tag` around `hudMainRender`,
+  which also flushes the HUD's queued text), except the full-screen fades.
+  The pause menu (test_menu.c, its own frames and text flush) is outside
+  that bracket and stays; the photo blink is the headset's own.
+- Log: `diorama mode on (<choice>): vehicle …, bounds …` / `diorama mode
+  off`.
+- Open: the game still fogs and picks detail by its own chase camera.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`

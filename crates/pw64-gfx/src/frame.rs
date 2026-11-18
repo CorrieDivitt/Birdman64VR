@@ -157,6 +157,10 @@ pub struct DrawCall {
     /// options (drift + dim) apply to. Ignored when OLED care is off
     /// (default options are bit-identical).
     pub hud: bool,
+    /// Birdman64VR: part of a world view's environment (the sky dome and
+    /// the camera-following sea; `interp::ENV_TAG_ON`, `pw64_env_tag`).
+    /// Left out of an eye picture with `StereoEye::hide_env`.
+    pub env: bool,
     /// Split-screen view rect (N64 px x0, row0, x1, row1; the native game's
     /// `G_NOOP` "PWS" tags, `interp::SPLIT_TAG`); `None` = full screen.
     /// With `hud`: a HUD draw laid out into the view
@@ -282,6 +286,9 @@ pub struct Frame {
     /// horizon lock; then 1 where the lock is off (cannonball, sky diving),
     /// else 0; then the player camera's mode (camera.c, -1 unknown).
     pub up: Option<[f32; 5]>,
+    /// Birdman64VR, in flight: what a model of the flight on a table
+    /// needs (`pw64_vr_table_tag`, diorama passthrough).
+    pub table: Option<Table>,
     /// Birdman64VR: a photo was taken this frame (`pw64_vr_shutter`): the
     /// headset blinks.
     pub shutter: bool,
@@ -300,6 +307,30 @@ pub struct Dash {
 impl Dash {
     /// How many points the game sends (`PW64_DASH_POINTS`).
     pub const POINTS: usize = 2;
+}
+
+/// Birdman64VR, diorama passthrough: a flight's world view as the game
+/// reports it (`pw64_vr_table_tag`), in game units (metres, z up).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Table {
+    /// The game camera's world matrix: rows right, forward, up, position.
+    pub camera: [[f32; 3]; 4],
+    /// Where the player's vehicle is.
+    pub vehicle: [f32; 3],
+    /// The island's bounds: min x, y, z, max x, y, z.
+    pub bounds: [f32; 6],
+}
+
+impl Table {
+    /// From the 21 values in tag order.
+    pub fn from_values(v: &[f32; 21]) -> Self {
+        let r = |i: usize| [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
+        Self {
+            camera: [r(0), r(1), r(2), r(3)],
+            vehicle: r(4),
+            bounds: [v[15], v[16], v[17], v[18], v[19], v[20]],
+        }
+    }
 }
 
 /// Birdman64VR: what the game told the renderer about a world view shown

@@ -183,6 +183,16 @@ pub struct StereoEye {
     /// at. Turned on the sphere: moved in N64 pixels instead, the game
     /// clipped them at its screen's edges.
     pub sight: Option<[[f32; 3]; 3]>,
+    /// Birdman64VR, diorama passthrough: leave out the world's environment
+    /// (the sky dome and the camera-following sea, [`DrawCall::env`], and
+    /// any other backdrop drawn with neither depth test nor write), so the
+    /// background shows around the land.
+    pub hide_env: bool,
+    /// Birdman64VR, diorama mode: leave out the flight HUD (every draw in
+    /// the game's HUD bracket, [`DrawCall::hud`]: gauges, reticles and the
+    /// HUD's text). The game's full-screen fades and its pause menu (drawn
+    /// outside that bracket) stay.
+    pub hide_hud: bool,
 }
 
 /// Birdman64VR: where one HUD element sits on the dashboard
@@ -277,6 +287,18 @@ const EYE_FADE: Mat4 = [
     [0.0, 0.0, 1.0, 0.0],
     [0.0, 0.0, 0.0, 1.0],
 ];
+
+/// Birdman64VR, diorama mode ([`StereoEye::hide_hud`]): `d` is a flight-HUD
+/// draw after the world starts and not one of the game's full-screen fades
+/// (`fade`), so it is left out.
+fn hud_hidden_whole(
+    eye: &StereoEye,
+    d: &crate::frame::DrawCall,
+    fade: bool,
+    after_world: bool,
+) -> bool {
+    eye.hide_hud && after_world && d.view == 0 && d.hud && !fade
+}
 
 /// The flight HUD on the inside of a sphere around the player
 /// ([`StereoEye::hud_sphere`]): an N64 screen point `(x, y)` is seen at
@@ -1677,11 +1699,19 @@ impl Renderer {
             // its camera, so parts of it fell inside the model's cylinder
             // (a ragged piece of sky behind the island). It is the world
             // drawn with neither depth test nor depth write.
-            if eye.clip.is_some()
+            if (eye.clip.is_some() || eye.hide_env)
                 && d.view != 0
                 && !d.pipeline.depth.test
                 && !d.pipeline.depth.write
             {
+                continue;
+            }
+            // Diorama mode: no flight HUD.
+            if hud_hidden_whole(eye, d, fade, i > first_world) {
+                continue;
+            }
+            // Diorama mode: no sky and no sea at all.
+            if eye.hide_env && d.env {
                 continue;
             }
             // In flight, 3D draws outside the world view that are no HUD
@@ -2399,6 +2429,50 @@ mod tests {
         assert!(Frame::default().is_blank());
     }
 
+    /// Birdman64VR diorama mode: only the flight HUD's draws are left out,
+    /// and only when asked; fades, the world and other 2D (the pause menu)
+    /// stay.
+    #[test]
+    fn diorama_mode_hides_only_the_flight_hud() {
+        let mut eye = StereoEye {
+            world: matrix::IDENTITY,
+            hud: matrix::IDENTITY,
+            clip: None,
+            background: None,
+            hud_sphere: None,
+            hud_hidden: 0,
+            hud_dash: &[],
+            sight: None,
+            hide_env: false,
+            hide_hud: false,
+        };
+        let mut d = red_green_frame().draws[0].clone();
+        d.view = 0;
+        d.hud = true;
+        assert!(!super::hud_hidden_whole(&eye, &d, false, true));
+        eye.hide_hud = true;
+        assert!(super::hud_hidden_whole(&eye, &d, false, true));
+        assert!(
+            !super::hud_hidden_whole(&eye, &d, true, true),
+            "a fade stays"
+        );
+        assert!(
+            !super::hud_hidden_whole(&eye, &d, false, false),
+            "before the world"
+        );
+        d.hud = false;
+        assert!(
+            !super::hud_hidden_whole(&eye, &d, false, true),
+            "pause menu stays"
+        );
+        d.hud = true;
+        d.view = 1;
+        assert!(
+            !super::hud_hidden_whole(&eye, &d, false, true),
+            "the world stays"
+        );
+    }
+
     /// Birdman64VR: a world view drawn through `render_stereo` with an eye
     /// matrix that repeats the game's own projection, viewport and screen
     /// transform gives the flat picture; and a narrower eye shows the same
@@ -2522,6 +2596,8 @@ mod tests {
             hud_hidden: 0,
             hud_dash: &[],
             sight: None,
+            hide_env: false,
+            hide_hud: false,
         };
         r.render_stereo(&frame, &view, (w, h), &eye);
         let stereo = read_rgba(&device, &queue, &tex);
@@ -2647,6 +2723,7 @@ mod tests {
             vanchor: VAnchor::Middle,
             stretch_y: [0.0; 2],
             hud: false,
+            env: false,
             split: None,
             elem: 0,
             view: 0,
@@ -2664,6 +2741,7 @@ mod tests {
             dash: None,
             up: None,
             shutter: false,
+            table: None,
         }
     }
 
@@ -2983,6 +3061,7 @@ mod tests {
             scissor: [0.0, 0.0, 320.0, 240.0],
             split: Some(view),
             hud: true,
+            env: false,
             ..base.clone()
         };
         let size = (640, 480); // 2 target px per N64 px, view 20..620 × 16..230
@@ -3047,6 +3126,7 @@ mod tests {
             scissor: [0.0, 0.0, 320.0, 240.0],
             split: Some(view),
             hud: true,
+            env: false,
             ..base.clone()
         };
         let size = (640, 480);
@@ -3100,6 +3180,7 @@ mod tests {
             scissor: [10.0, 8.0, 159.0, 222.0],
             split: Some(left),
             hud: false,
+            env: false,
             ..base.clone()
         };
         let px = |s: [f32; 4], x: f32, w: f32| ((x * s[0] + s[1]) + 1.0) / 2.0 * w;
