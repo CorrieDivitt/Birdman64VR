@@ -240,7 +240,7 @@ pub fn link_args(os: Os) -> Vec<String> {
             "-export:pw64_plane,DATA",
             "-export:pw64_vr_hud_rad_per_px,DATA",
             "-export:pw64_vr_gyro_windscreen,DATA",
-            "-export:pw64_vr_cannon_flying,DATA",
+            "-export:pw64_vr_cannon_view,DATA",
             "-export:pw64_vr_flight_vehicle",
             "-export:D_802B892C,DATA",
             "-export:pw64_vmap,DATA",
@@ -738,7 +738,7 @@ const LINUX_VERSION_SCRIPT: &str = "\
   bootproc; pw64_widescreen_aspect; pw64_fill_screen;
   pw64_split; pw64_split_collide; pw64_split_layout; pw64_split_share; pw64_split_req;
   pw64_split_hint; pw64_infinite_lod; pw64_infinite_view_distance; pw64_anim_infinite; pw64_plane;
-  pw64_vr_hud_rad_per_px; pw64_vr_gyro_windscreen; pw64_vr_cannon_flying; pw64_vr_flight_vehicle;
+  pw64_vr_hud_rad_per_px; pw64_vr_gyro_windscreen; pw64_vr_cannon_view; pw64_vr_flight_vehicle;
   D_802B892C; pw64_vmap;
   local: *; };";
 

@@ -1775,12 +1775,13 @@ mod real {
                 m.copysign(v)
             });
             // Diorama mode: a flight as a model, unless the game's camera
-            // is the first-person one (R on the pad). The cannonball: the
-            // aim full size (its first-person view), the flight as a model
-            // (in VR the flight is the game's first-person camera from the
-            // pilot's head, cannonball.c.patch), the cinematic view (R in
-            // flight, camera mode 5) full size. In the player's room if the
-            // mode says so and the headset can.
+            // is the first-person one (R on the pad). The cannonball: aiming
+            // from behind the cannon as a model, down the barrel (R while
+            // aiming) full size; the flight as a model (in VR the flight is
+            // the game's first-person camera from the pilot's head,
+            // cannonball.c.patch), the cinematic view (R in flight, camera
+            // mode 5) full size. In the player's room if the mode says so
+            // and the headset can.
             let mode = super::diorama_mode();
             let cannonball = pw64_game::vr_flight_vehicle() == Some(VEHICLE_CANNONBALL);
             let table = frame.table.filter(|_| {
@@ -1789,7 +1790,12 @@ mod real {
                     && frame.up.is_some_and(|u| {
                         let cam = u[4] as i32;
                         if cannonball {
-                            pw64_game::vr_cannon_flying() && cam == 1
+                            use pw64_game::CannonView;
+                            match pw64_game::vr_cannon_view() {
+                                CannonView::AimBehind => true,
+                                CannonView::AimBarrel => false,
+                                CannonView::Flight => cam == 1,
+                            }
                         } else {
                             cam != 1
                         }

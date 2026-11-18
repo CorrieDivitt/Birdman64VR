@@ -31,7 +31,7 @@
      }
      sp2C = &cbData->unk14;
      fdr_802E65AC(&cbData->unk14, &D_80362690->terraId, &stickX, &stickY, &spE4);
-@@ -232,6 +241,24 @@
+@@ -232,6 +241,25 @@
      }
      func_802D8AF0(cbData);
      uvDobjPosm(cbData->objId, 0, sp2C);
@@ -50,13 +50,14 @@
 +    // by (pw64_vr_cannon_trail).
 +    pw64_vr_cannon_trail((pw64_widescreen_aspect < 0.0f) && (cbData->unkD4 == 1) && (gameState != GAME_STATE_RESULTS), sp2C,
 +                         D_8034F854);
-+    // Birdman64VR: the pilot is in flight (not aiming, not landed): Diorama
-+    // mode shows the flight as a model, the aim full size (vr.rs).
-+    pw64_vr_cannon_flying = (cbData->unkD4 == 1);
++    // Birdman64VR: the cannonball's view for Diorama mode (vr.rs): 0 aiming
++    // from behind the cannon, 1 aiming down the barrel (R while aiming),
++    // 2 in flight.
++    pw64_vr_cannon_view = (cbData->unkD4 == 1) ? 2 : (D_8034E9F4 ? 1 : 0);
      if (D_8034E9F4 != 0) {
          cbData->unkCC = 0.0f;
      } else {
-@@ -309,7 +336,24 @@
+@@ -309,7 +337,24 @@
          cbData->camera->unk204.z = cbData->unk1C4.z;
          cbData->camera->unk228 = cbData->unk120;
          uvMat4Copy(&cbData->camera->unk80, sp2C);
@@ -82,7 +83,7 @@
          camera_802D45C4(cbData->camera, cbData->unkB8);
      }
      if (gameState != GAME_STATE_RESULTS) {
-@@ -473,11 +517,14 @@
+@@ -473,11 +518,14 @@
      func_802D9430(cbData);
  }
  
@@ -100,7 +101,7 @@
      Camera* camera;
      f32 temp_fv0_2;
      f32 var_fv1;
-@@ -826,9 +873,10 @@
+@@ -826,9 +874,10 @@
      return sp50;
  }
  
@@ -114,7 +115,7 @@
      Unk80364210* temp_v1;
      Unk80362690_Unk0* temp_s0;
      u8 sp27;
-@@ -836,8 +884,7 @@
+@@ -836,8 +885,7 @@
  
      temp_s0 = &D_80362690->unkC[D_80362690->unk9C];
      temp_v1 = func_8032BE10();
@@ -124,7 +125,7 @@
          if (cbData->unkD5 == 2) {
              sp27 = 1;
          } else {
-@@ -875,6 +922,19 @@
+@@ -875,6 +923,19 @@
              }
          }
      }
@@ -144,7 +145,7 @@
      uvEventPost(0xC, 0);
      if (D_8034F850 < D_8034EA00) {
          cannonPilotLand(cbData);
-@@ -998,7 +1058,9 @@
+@@ -998,7 +1059,9 @@
      uvMat4Copy(&sp4C, &cbData->unk14);
      uvMat4RotateAxis(&sp4C, 1.5707961f, 'x');
      func_802EDAF0(temp_s0, &cbData->unk14, cbData->unk120, cbData->unk1D0, 0.0f, 1.0f, cbData->unk4, cbData->unk8, 0, cbData->unk11C, 5);
@@ -155,7 +156,7 @@
      return 1;
  }
  
-@@ -1015,3 +1077,242 @@
+@@ -1015,3 +1078,242 @@
          }
      }
  }

@@ -61,9 +61,10 @@ float pw64_vr_hud_rad_per_px = 0.0f;
  * from the VR HUD page, pw64_game::set_vr_gyro_windscreen). */
 int pw64_vr_gyro_windscreen = 1;
 
-/* Birdman64VR: the cannonball's pilot is in flight, not aiming or landed
- * (cannonball.c.patch sets it each frame; pw64_game::vr_cannon_flying). */
-int pw64_vr_cannon_flying = 0;
+/* Birdman64VR: the cannonball's view: 0 aiming from behind the cannon,
+ * 1 aiming down the barrel, 2 in flight (cannonball.c.patch sets it each
+ * frame; pw64_game::vr_cannon_view). */
+int pw64_vr_cannon_view = 0;
 
 /* Where a direction `down` radians below the camera's forward axis shows on
  * the HUD sphere: radians right of and below the view's centre. (The

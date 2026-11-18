@@ -821,6 +821,12 @@ the oil plant flame.
   sea in the dim room: full size around the player, level and turned like
   the model, the sea at the model's sea level (`StereoEye::env_world` for
   `DrawCall::env` draws; `table_eye`).
+- Round 2 in the headset: the flight works; the sea turned black (to look
+  at, screenshot asked for). Round 3: aiming follows the game's own R
+  switch (`D_8034E9F4`: behind the cannon / down the barrel): C
+  `pw64_vr_cannon_view` 0 behind, 1 barrel, 2 flight
+  (`pw64_game::vr_cannon_view`, `CannonView`); behind as a model, the
+  barrel full size.
 
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.

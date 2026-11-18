@@ -135,9 +135,10 @@ void pw64_vr_shutter(void);
  * first person (Rust: VR HUD page, `[vr] gyro_windscreen`). Always shown
  * from outside. */
 extern int pw64_vr_gyro_windscreen;
-/* Birdman64VR, same file: 1 = the cannonball's pilot is in flight (set by
- * cannonball.c each frame; Rust reads it: Diorama mode). */
-extern int pw64_vr_cannon_flying;
+/* Birdman64VR, same file: the cannonball's view (set by cannonball.c each
+ * frame; Rust reads it: Diorama mode): 0 aiming from behind the cannon,
+ * 1 aiming down the barrel, 2 in flight. */
+extern int pw64_vr_cannon_view;
 /* The windscreen: part 9 of all six pilots' gyrocopter models (the only
  * translucent part; pw64-extract --models, models 0x127-0x133). */
 #define PW64_GYRO_WINDSCREEN_PART 9
