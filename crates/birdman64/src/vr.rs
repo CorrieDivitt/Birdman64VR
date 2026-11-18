@@ -237,6 +237,47 @@ pub(crate) fn set_passthrough(on: bool) {
     }
 }
 
+/// The display's refresh rates, whole Hz (set by the headset thread; empty:
+/// no choice, e.g. on PC, where Quest Link sets it).
+static REFRESH_RATES: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+
+/// q6: the refresh rates the player can pick (whole Hz, lowest first).
+pub(crate) fn refresh_rates() -> Vec<u32> {
+    let mut rates = REFRESH_RATES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    rates.sort_unstable();
+    rates.dedup();
+    rates
+}
+
+/// The player's refresh rate (`[vr] refresh_rate`): 0 = not loaded yet,
+/// 1 = the headset's own, else Hz.
+static REFRESH_RATE: AtomicU32 = AtomicU32::new(0);
+
+/// The refresh rate the player picked (`None`: the headset's own, 72 Hz on
+/// a Quest 3 by default).
+pub(crate) fn refresh_rate() -> Option<u32> {
+    match REFRESH_RATE.load(Ordering::Relaxed) {
+        0 => {
+            let hz = crate::config::get().vr_refresh_rate;
+            REFRESH_RATE.store(hz.unwrap_or(1), Ordering::Relaxed);
+            hz
+        }
+        1 => None,
+        hz => Some(hz),
+    }
+}
+
+/// Sets the refresh rate (from the next headset frame) and saves it.
+pub(crate) fn set_refresh_rate(hz: Option<u32>) {
+    REFRESH_RATE.store(hz.unwrap_or(1).max(1), Ordering::Relaxed);
+    if let Err(e) = crate::config::save_vr_refresh_rate(hz) {
+        eprintln!("[vr] refresh rate not saved: {e}");
+    }
+}
+
 /// Diorama mode (p14): a flight in third person shown as a model of the
 /// island (`[vr] diorama_mode`, the settings' main page). The game's
 /// first-person view (R on the pad) stays full size.
@@ -2331,6 +2372,16 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             make(PanelBlend::Cutout),
         );
         super::PASSTHROUGH_AVAILABLE.store(xr.passthrough_available(), Ordering::Relaxed);
+        // q6: the display's refresh rates, for the settings; the wanted one
+        // is asked for below (each frame, when it changes).
+        *super::REFRESH_RATES
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = xr
+            .refresh_rates()
+            .iter()
+            .map(|r| r.round() as u32)
+            .collect();
+        let mut asked_rate: Option<Option<u32>> = None;
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("vr panel"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -2443,6 +2494,20 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             };
             if super::RECENTRE.swap(false, Ordering::Relaxed) {
                 xr.recentre();
+            }
+            // q6: the player's refresh rate (the settings), or the
+            // headset's own; the game's rate follows the frame period.
+            let want = super::refresh_rate();
+            if asked_rate != Some(want) {
+                asked_rate = Some(want);
+                let exact = want.and_then(|hz| {
+                    xr.refresh_rates()
+                        .iter()
+                        .copied()
+                        .find(|r| r.round() as u32 == hz)
+                });
+                // A saved rate this headset lacks: its own choice.
+                xr.request_refresh_rate(exact.unwrap_or(0.0));
             }
             let outcome = xr.frame(choose, Some(&pw64_gfx::QUEUE_GATE), |frame| {
                 let world = world.get();

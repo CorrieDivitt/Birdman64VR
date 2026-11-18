@@ -162,6 +162,10 @@ enum Row {
     /// (`vr::diorama_mode`), cycled with confirm or left / right; the two
     /// passthrough choices only on a headset that can.
     DioramaMode,
+    /// Main (in VR on a headset that offers a choice, under Diorama mode):
+    /// the display's refresh rate, the headset's own or one it offers
+    /// (`vr::refresh_rate`, q6), cycled with confirm or left / right.
+    RefreshRate,
     /// VR HUD page: show or hide one flight-HUD element in the headset
     /// (`hud_edit::ELEMENTS` id).
     HudShow(u8),
@@ -284,6 +288,35 @@ fn step_diorama_mode(d: i32, passthrough: bool) {
         .unwrap_or(0) as i32;
     let n = all.len() as i32;
     crate::vr::set_diorama_mode(all[(i + d.signum()).rem_euclid(n) as usize]);
+}
+
+/// Steps the refresh rate by `d` (wrapping) through `choices` and saves
+/// it.
+fn step_refresh_rate(d: i32, choices: &[Option<u32>]) {
+    if choices.is_empty() {
+        return;
+    }
+    let i = choices
+        .iter()
+        .position(|c| *c == crate::vr::refresh_rate())
+        .unwrap_or(0) as i32;
+    let n = choices.len() as i32;
+    crate::vr::set_refresh_rate(choices[(i + d.signum()).rem_euclid(n) as usize]);
+}
+
+/// The refresh rates offered: the headset's own, then `rates` (Hz).
+fn refresh_choices(rates: &[u32]) -> Vec<Option<u32>> {
+    std::iter::once(None)
+        .chain(rates.iter().map(|&hz| Some(hz)))
+        .collect()
+}
+
+/// A refresh rate's label (`None`: the headset's own).
+fn refresh_label(hz: Option<u32>) -> String {
+    match hz {
+        Some(hz) => format!("{hz} Hz"),
+        None => "headset default".into(),
+    }
 }
 
 /// The diorama modes offered ([`step_diorama_mode`]).
@@ -1893,6 +1926,15 @@ impl Overlay {
         crate::vr::passthrough_available()
     }
 
+    /// The refresh rates the headset offers (empty on PC: no row).
+    fn refresh_rates(&self) -> Vec<u32> {
+        #[cfg(test)]
+        if self.force_vr {
+            return vec![72, 80, 90, 120];
+        }
+        crate::vr::refresh_rates()
+    }
+
     /// The pages are laid out for the headset (`VR_HIDDEN_*`, VR HUD page).
     fn in_vr(&self) -> bool {
         #[cfg(test)]
@@ -1961,6 +2003,9 @@ impl Overlay {
                         next += 1;
                     }
                     rows.insert(next, Row::DioramaMode);
+                    if !self.refresh_rates().is_empty() {
+                        rows.insert(next + 1, Row::RefreshRate);
+                    }
                     rows.retain(|r| !VR_HIDDEN_MAIN.contains(r));
                 }
                 rows
@@ -2170,6 +2215,13 @@ impl Overlay {
                         ui,
                         at(Row::DioramaMode),
                         &format!("Diorama mode: {}", crate::vr::diorama_mode().label()),
+                    );
+                }
+                if rows.contains(&Row::RefreshRate) {
+                    self.text_row(
+                        ui,
+                        at(Row::RefreshRate),
+                        &format!("Refresh rate: {}", refresh_label(crate::vr::refresh_rate())),
                     );
                 }
                 // Not in VR (`rows`): `at` would panic on a missing row.
@@ -3054,6 +3106,7 @@ impl Overlay {
             Row::HorizonLock => step_horizon_lock(1),
             Row::Passthrough => crate::vr::set_passthrough(!crate::vr::passthrough()),
             Row::DioramaMode => step_diorama_mode(1, self.passthrough_offered()),
+            Row::RefreshRate => step_refresh_rate(1, &refresh_choices(&self.refresh_rates())),
             Row::GyroWindscreen => crate::vr::set_gyro_windscreen(!crate::vr::gyro_windscreen()),
             Row::DashGauges => crate::vr::set_dash_gauges(!crate::vr::dash_gauges()),
             Row::HudShow(id) => {
@@ -3346,6 +3399,7 @@ impl Overlay {
             Row::HorizonLock => step_horizon_lock(d),
             Row::Passthrough => crate::vr::set_passthrough(!crate::vr::passthrough()),
             Row::DioramaMode => step_diorama_mode(d, self.passthrough_offered()),
+            Row::RefreshRate => step_refresh_rate(d, &refresh_choices(&self.refresh_rates())),
             // Left / right flip a VR HUD row too.
             Row::GyroWindscreen => crate::vr::set_gyro_windscreen(!crate::vr::gyro_windscreen()),
             Row::DashGauges => crate::vr::set_dash_gauges(!crate::vr::dash_gauges()),
@@ -4173,6 +4227,11 @@ fn help(row: Row) -> &'static str {
              On: the land slides past under your vehicle. Static: the island stands still. \
              Passthrough: in your own room. Right stick up and down zooms. The first-person \
              view stays full size."
+        }
+        Row::RefreshRate => {
+            "How many times a second the headset's display refreshes. Higher is smoother and \
+             can feel more comfortable, but leaves less time for each picture: with Infinite \
+             LOD on, 72 or 80 Hz keep up best. 60 Hz may flicker."
         }
         Row::Passthrough => {
             "Show the menus and the island model in your own room. Off: in a dim virtual \
@@ -5212,6 +5271,14 @@ mod tests {
                 let i = main.iter().position(|r| *r == Row::VrComfortPage).unwrap();
                 assert_eq!(main[i + 1], Row::Passthrough);
                 assert_eq!(main[i + 2], Row::DioramaMode);
+                // q6: the refresh rate right under it, where offered.
+                assert_eq!(main[i + 3], Row::RefreshRate);
+                assert_eq!(
+                    refresh_choices(&[72, 90]),
+                    [None, Some(72), Some(90)].to_vec()
+                );
+                assert_eq!(refresh_label(None), "headset default");
+                assert_eq!(refresh_label(Some(90)), "90 Hz");
                 // Its passthrough choices only where the headset can.
                 use crate::vr::DioramaMode as D;
                 assert_eq!(diorama_choices(true), D::ALL.to_vec());

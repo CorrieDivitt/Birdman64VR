@@ -749,6 +749,22 @@ runtime. Infinite LOD and Infinite view distance apply at once from the
 settings (`pw64_game::set_visibility` any time, volatile writes; the game
 reads both every frame), no restart.
 
+Round 5 in the headset: CPU level 4 (1.9 GHz) held. Infinite view
+distance alone: game 72 fps (flight and Diorama mode, ~1500 draws, 6 ms
+recording). Both Infinite options: game 35-52 fps (2560 draws, 9-10 ms
+recording); the headset keeps 72 by showing eye pictures again. Decided:
+Diorama mode honours Infinite LOD as set (the detail shows). Merged to
+`main`.
+
+Refresh rate (`vr/refresh-rate`): `XR_FB_display_refresh_rate` (Quest
+only; Link sets its own). The rates the display offers are logged
+(`refresh rates: ... Hz (now ...)`) and offered on the main settings page
+under Diorama mode (`Row::RefreshRate`: headset default, then each rate;
+`[vr] refresh_rate` in Hz, removed for the default). The headset thread asks
+for it when it changes (`XrContext::request_refresh_rate`, 0 = the
+runtime's own; a saved rate the headset lacks falls back to that). The game
+follows the frame period (`HEADSET_MHZ`).
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`
