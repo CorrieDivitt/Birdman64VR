@@ -209,6 +209,10 @@ pub struct StereoEye {
     /// HUD's text). The game's full-screen fades and its pause menu (drawn
     /// outside that bracket) stay.
     pub hide_hud: bool,
+    /// Diorama mode in the dim room: the matrix for the sky and sea draws
+    /// ([`DrawCall::env`]) instead of `world`, so they surround the player
+    /// at full size around the model (`None`: `world`, like the rest).
+    pub env_world: Option<Mat4>,
 }
 
 /// Birdman64VR: where one HUD element sits on the dashboard
@@ -1908,6 +1912,13 @@ impl Renderer {
                 .iter()
                 .map(|v| crate::matrix::mul(v, &eye.world))
                 .collect();
+            let env_world: Option<Vec<Mat4>> = eye.env_world.map(|m| {
+                frame
+                    .views
+                    .iter()
+                    .map(|v| crate::matrix::mul(v, &m))
+                    .collect()
+            });
             // Sphere HUD: each movable element's centre (N64 px), from the
             // bounds of all its draws after the world starts.
             let mut elem_centres = [None::<[f32; 2]>; crate::hud::HUD_ELEMS];
@@ -2006,7 +2017,9 @@ impl Renderer {
                         continue;
                     }
                 }
-                let m = if d.view != 0 {
+                let m = if d.view != 0 && d.env && env_world.is_some() {
+                    env_world.as_ref().and_then(|w| w.get(d.view as usize - 1))
+                } else if d.view != 0 {
                     world.get(d.view as usize - 1)
                 } else if fade {
                     Some(&EYE_FADE)
@@ -2761,6 +2774,7 @@ mod tests {
             sight: None,
             hide_env: false,
             hide_hud: false,
+            env_world: None,
         };
         let mut d = red_green_frame().draws[0].clone();
         d.view = 0;
@@ -2914,6 +2928,7 @@ mod tests {
             sight: None,
             hide_env: false,
             hide_hud: false,
+            env_world: None,
         };
         r.render_stereo(&frame, &view, (w, h), &eye);
         let stereo = read_rgba(&device, &queue, &tex);

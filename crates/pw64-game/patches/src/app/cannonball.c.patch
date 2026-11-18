@@ -12,7 +12,7 @@
  // cannonMovementFrame called every frame while aiming cannon and while in flight
  void cannonMovementFrame(CannonballData* cbData, u8 gameState) {
      f32 stickX;
-@@ -176,9 +181,13 @@
+@@ -176,12 +181,16 @@
          return;
      }
  
@@ -28,7 +28,11 @@
          stickY = demoGetInputs(cbData->unk10, INPUT_AXIS_Y);
 -        spE4 = demoGetButtons(cbData->unk10);
 +        spE4 = pw64_vr_strip_c(demoGetButtons(cbData->unk10)); // Birdman64VR c11: no C-button look in VR or aiming swing
-@@ -233,3 +242,18 @@
+     }
+     sp2C = &cbData->unk14;
+     fdr_802E65AC(&cbData->unk14, &D_80362690->terraId, &stickX, &stickY, &spE4);
+@@ -232,6 +241,24 @@
+     }
      func_802D8AF0(cbData);
      uvDobjPosm(cbData->objId, 0, sp2C);
 +    // PW64 VR: in the cinematic view the pilot is drawn bigger while far
@@ -46,12 +50,17 @@
 +    // by (pw64_vr_cannon_trail).
 +    pw64_vr_cannon_trail((pw64_widescreen_aspect < 0.0f) && (cbData->unkD4 == 1) && (gameState != GAME_STATE_RESULTS), sp2C,
 +                         D_8034F854);
++    // Birdman64VR: the pilot is in flight (not aiming, not landed): Diorama
++    // mode shows the flight as a model, the aim full size (vr.rs).
++    pw64_vr_cannon_flying = (cbData->unkD4 == 1);
      if (D_8034E9F4 != 0) {
-@@ -310,5 +334,22 @@
+         cbData->unkCC = 0.0f;
+     } else {
+@@ -309,7 +336,24 @@
+         cbData->camera->unk204.z = cbData->unk1C4.z;
          cbData->camera->unk228 = cbData->unk120;
          uvMat4Copy(&cbData->camera->unk80, sp2C);
 -        camera_802D5884(cbData->camera, cbData->unkB4);
--        camera_802D45C4(cbData->camera, cbData->unkB8);
 +        // PW64 VR, in flight: first person from the pilot's head, level and
 +        // facing their way, instead of the chase view; the cinematic view
 +        // (R) is a fixed spot beside the target showing them come in.
@@ -70,9 +79,10 @@
 +        } else {
 +            camera_802D5884(cbData->camera, cbData->unkB4);
 +        }
-+        camera_802D45C4(cbData->camera, cbData->unkB8);
+         camera_802D45C4(cbData->camera, cbData->unkB8);
      }
-@@ -473,11 +514,14 @@
+     if (gameState != GAME_STATE_RESULTS) {
+@@ -473,11 +517,14 @@
      func_802D9430(cbData);
  }
  
@@ -90,7 +100,7 @@
      Camera* camera;
      f32 temp_fv0_2;
      f32 var_fv1;
-@@ -826,9 +870,10 @@
+@@ -826,9 +873,10 @@
      return sp50;
  }
  
@@ -104,7 +114,7 @@
      Unk80364210* temp_v1;
      Unk80362690_Unk0* temp_s0;
      u8 sp27;
-@@ -836,8 +881,7 @@
+@@ -836,8 +884,7 @@
  
      temp_s0 = &D_80362690->unkC[D_80362690->unk9C];
      temp_v1 = func_8032BE10();
@@ -114,7 +124,7 @@
          if (cbData->unkD5 == 2) {
              sp27 = 1;
          } else {
-@@ -875,6 +919,19 @@
+@@ -875,6 +922,19 @@
              }
          }
      }
@@ -134,7 +144,7 @@
      uvEventPost(0xC, 0);
      if (D_8034F850 < D_8034EA00) {
          cannonPilotLand(cbData);
-@@ -998,7 +1055,9 @@
+@@ -998,7 +1058,9 @@
      uvMat4Copy(&sp4C, &cbData->unk14);
      uvMat4RotateAxis(&sp4C, 1.5707961f, 'x');
      func_802EDAF0(temp_s0, &cbData->unk14, cbData->unk120, cbData->unk1D0, 0.0f, 1.0f, cbData->unk4, cbData->unk8, 0, cbData->unk11C, 5);
@@ -145,7 +155,7 @@
      return 1;
  }
  
-@@ -1015,3 +1074,242 @@
+@@ -1015,3 +1077,242 @@
          }
      }
  }

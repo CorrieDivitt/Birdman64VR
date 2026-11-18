@@ -809,6 +809,18 @@ the oil plant flame.
 - To try (the user): the two non-passthrough choices (on, on static) draw
   the game's sky and sea with the model, at its scale (`table_eye`:
   `hide_env` only in the player's room).
+- Round 1 in the headset: the sky was a bubble around the game camera at
+  the model's scale; the cannonball's aim and flight both showed full size.
+  The flight in VR is the game's first-person camera from the pilot's head
+  (mode 1, cannonball.c.patch), which Diorama mode always left full size;
+  the aim is not mode 5 (that is only its first frames).
+- Round 2: the cannonball goes by its phase: C `pw64_vr_cannon_flying`
+  (cannonball.c.patch, `cbData->unkD4 == 1` each frame; exported, read by
+  `pw64_game::vr_cannon_flying`): the flight (camera mode 1) as a model, the
+  aim and the cinematic view (R in flight, mode 5) full size. The sky and
+  sea in the dim room: full size around the player, level and turned like
+  the model, the sea at the model's sea level (`StereoEye::env_world` for
+  `DrawCall::env` draws; `table_eye`).
 
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.

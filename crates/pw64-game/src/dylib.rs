@@ -67,6 +67,9 @@ pub struct Game {
     /// `pw64_vr_gyro_windscreen` (pw64_widescreen.c): 0 = hidden in VR
     /// first person.
     pub vr_gyro_windscreen: *mut i32,
+    /// `pw64_vr_cannon_flying` (pw64_widescreen.c): 1 = the cannonball's
+    /// pilot is in flight.
+    pub vr_cannon_flying: *mut i32,
     /// `pw64_vr_flight_vehicle` (pw64_widescreen.c): the vehicle flown in
     /// VR, -1 none.
     pub vr_flight_vehicle: unsafe extern "C" fn() -> i32,
@@ -203,6 +206,7 @@ fn bind_module(h: *mut c_void, path: &Path) -> Result<(), String> {
             plane: sym(c"pw64_plane")?.cast(),
             vr_hud_rad_per_px: sym(c"pw64_vr_hud_rad_per_px")?.cast(),
             vr_gyro_windscreen: sym(c"pw64_vr_gyro_windscreen")?.cast(),
+            vr_cannon_flying: sym(c"pw64_vr_cannon_flying")?.cast(),
             vr_flight_vehicle: core::mem::transmute::<*mut c_void, unsafe extern "C" fn() -> i32>(
                 sym(c"pw64_vr_flight_vehicle")?,
             ),

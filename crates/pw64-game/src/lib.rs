@@ -67,6 +67,9 @@ unsafe extern "C" {
     /// native/src/pw64_widescreen.c: the gyrocopter's windscreen in VR
     /// first person, 0 = hidden.
     static mut pw64_vr_gyro_windscreen: i32;
+    /// native/src/pw64_widescreen.c: 1 = the cannonball's pilot is in
+    /// flight (cannonball.c sets it).
+    static mut pw64_vr_cannon_flying: i32;
     /// native/src/pw64_widescreen.c: the vehicle flown in VR, -1 none.
     fn pw64_vr_flight_vehicle() -> i32;
 
@@ -352,6 +355,18 @@ pub fn set_vr_gyro_windscreen(on: bool) {
     if let Some(g) = dylib::try_game() {
         unsafe { *g.vr_gyro_windscreen = on as i32 };
     }
+}
+
+/// Birdman64VR: the cannonball's pilot is in flight (fired, not yet
+/// landed), not aiming. Only meaningful while the cannonball is flown.
+pub fn vr_cannon_flying() -> bool {
+    // SAFETY: plain C global, read volatile (the game thread writes it).
+    #[cfg(feature = "static")]
+    let v = unsafe { core::ptr::addr_of!(pw64_vr_cannon_flying).read_volatile() };
+    // SAFETY: same global, exported by the loaded game module.
+    #[cfg(feature = "dylib")]
+    let v = dylib::try_game().map_or(0, |g| unsafe { g.vr_cannon_flying.read_volatile() });
+    v != 0
 }
 
 #[cfg(all(test, feature = "static"))]

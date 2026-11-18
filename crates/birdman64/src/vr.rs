@@ -1085,6 +1085,7 @@ mod real {
             sight: None,
             hide_env: false,
             hide_hud: false,
+            env_world: None,
         }
     }
 
@@ -1175,10 +1176,6 @@ mod real {
     /// `VEHICLE_CANNONBALL` (decomp task.h).
     const VEHICLE_CANNONBALL: u8 = 3;
 
-    /// The cannonball's camera mode while aiming (cannonball.c `unkB4` 5):
-    /// the view along the barrel, shown full size in Diorama mode.
-    const CANNON_AIM_MODE: i32 = 5;
-
     /// [`stereo_eye`] for a flight shown as a model (Diorama mode,
     /// [`pw64_gfx::Table`]): the island at the scale of the menus' model
     /// times `zoom`, game north away, level. `follow`: moved so the vehicle
@@ -1186,7 +1183,8 @@ mod real {
     /// else the island stands still where the menus' model does
     /// ([`MODEL_CENTRE_M`], its middle at sea level). In the player's room
     /// (`room`): no sky and no sea. In the dim room the game's sky and sea
-    /// are drawn too, at the model's scale (the user, to try).
+    /// around the player at full size, the sea level with the model's
+    /// (`StereoEye::env_world`; the user, to try).
     pub(super) fn table_eye(
         pose: &EyePose,
         t: &pw64_gfx::Table,
@@ -1227,6 +1225,27 @@ mod real {
         let to_world = pw64_gfx::Diorama::to_world(&t.camera);
         eye.world = mul(&mul(&mul(&to_world, &centre), &place), &view);
         eye.hide_env = room;
+        // The dim room: the game's sky and sea at full size around the
+        // player (at the model's scale they were a small bubble around the
+        // game camera), level and turned like the model, the sea at the
+        // model's sea level. Both follow the game camera, so centred on it.
+        if !room {
+            let cam = t.camera[3];
+            let sea_y = c[1] - s * o[2];
+            let around: Mat4 = [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [-cam[0], -cam[1], 0.0, 1.0],
+            ];
+            let full: Mat4 = [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, -1.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, sea_y, 0.0, 1.0],
+            ];
+            eye.env_world = Some(mul(&mul(&mul(&to_world, &around), &full), &view));
+        }
         eye.background = Some(if room {
             MODEL_BACKGROUND_ROOM
         } else {
@@ -1756,9 +1775,12 @@ mod real {
                 m.copysign(v)
             });
             // Diorama mode: a flight as a model, unless the game's camera
-            // is the first-person one (R on the pad), or the cannon's aim
-            // (the cannonball's camera mode 5, looking down the barrel). In
-            // the player's room if the mode says so and the headset can.
+            // is the first-person one (R on the pad). The cannonball: the
+            // aim full size (its first-person view), the flight as a model
+            // (in VR the flight is the game's first-person camera from the
+            // pilot's head, cannonball.c.patch), the cinematic view (R in
+            // flight, camera mode 5) full size. In the player's room if the
+            // mode says so and the headset can.
             let mode = super::diorama_mode();
             let cannonball = pw64_game::vr_flight_vehicle() == Some(VEHICLE_CANNONBALL);
             let table = frame.table.filter(|_| {
@@ -1766,7 +1788,11 @@ mod real {
                     && mode != super::DioramaMode::Off
                     && frame.up.is_some_and(|u| {
                         let cam = u[4] as i32;
-                        cam != 1 && !(cannonball && cam == CANNON_AIM_MODE)
+                        if cannonball {
+                            pw64_game::vr_cannon_flying() && cam == 1
+                        } else {
+                            cam != 1
+                        }
                     })
             });
             let table_room = mode.passthrough() && super::passthrough_available();
@@ -3132,8 +3158,19 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     ndc(apply(&eye.world, middle)),
                     ndc(apply(&view, MODEL_CENTRE_M))
                 ));
-                // The dim room keeps the sky and the sea.
+                // The dim room keeps the sky and the sea, full size: a point
+                // on the sea 1 km north of the game camera is 1 km away at
+                // the model's sea level.
                 assert!(!eye.hide_env && eye.clip.is_none());
+                let env = eye.env_world.expect("sky and sea at full size");
+                // (Camera space: the camera is 80 m up, looking north.)
+                let sea = [0.0, MODEL_CENTRE_M[1], -1000.0];
+                assert!(same(
+                    ndc(apply(&env, [0.0, -80.0, -1000.0])),
+                    ndc(apply(&view, sea))
+                ));
+                let room = super::table_eye(&pose, &t, zoom, false, true);
+                assert!(room.hide_env && room.env_world.is_none());
                 assert_eq!(eye.background.map(|b| b[3]), Some(1.0));
             }
         }
