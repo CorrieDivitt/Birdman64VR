@@ -256,11 +256,13 @@ const VR_HIDDEN_MAIN: [Row; 4] = [
 /// game), the screen-shape ones (widescreen, fill screen: the headset has its
 /// own field of view), the flat picture's scale and its filter (the eyes are
 /// drawn at the headset's own size; only the menu panel used them) and OLED
-/// care (the Quest 3 has LCD screens). Still shown: frame rate, texture
-/// packs, MSAA (the eye pictures use it), full-detail models
-/// and view distance. Texture filtering too: the N64 original filter's frame
+/// care (the Quest 3 has LCD screens), and MSAA (q6: far too slow for the
+/// eye pictures; VR always draws without it, window.rs). Still shown:
+/// texture packs, full-detail models and view distance; Frame rate becomes
+/// the headset's Refresh rate. Texture filtering too: the N64 original filter's frame
 /// rate is unsustainable in the headset, so VR always filters smoothly.
-const VR_HIDDEN_GRAPHICS: [Opt; 10] = [
+const VR_HIDDEN_GRAPHICS: [Opt; 11] = [
+    Opt::Msaa,
     Opt::DisplayMode,
     Opt::Resolution,
     Opt::Vsync,
@@ -1995,6 +1997,10 @@ impl Overlay {
                 // No touch controls (no touchscreen) and no split-screen
                 // (VR is single-player) in the headset.
                 if self.in_vr() {
+                    // Display & graphics first, above the VR pages.
+                    rows.retain(|r| *r != Row::Graphics);
+                    rows.insert(at + 1, Row::Graphics);
+                    let at = at + 1;
                     rows.insert(at + 1, Row::VrHudPage);
                     rows.insert(at + 2, Row::VrComfortPage);
                     let mut next = at + 3;
@@ -2203,6 +2209,11 @@ impl Overlay {
                 if rows.contains(&Row::HudLayout) {
                     self.text_row(ui, at(Row::HudLayout), "Move HUD");
                 }
+                // In VR, Display & graphics comes before the VR pages (`rows`).
+                let vr_rows = rows.contains(&Row::VrHudPage);
+                if vr_rows {
+                    self.text_row(ui, at(Row::Graphics), "Display & graphics \u{203a}");
+                }
                 if rows.contains(&Row::VrHudPage) {
                     self.text_row(ui, at(Row::VrHudPage), "VR HUD \u{203a}");
                 }
@@ -2228,7 +2239,9 @@ impl Overlay {
                 if rows.contains(&Row::SplitScreen) {
                     self.text_row(ui, at(Row::SplitScreen), "Split-screen \u{203a}");
                 }
-                self.text_row(ui, at(Row::Graphics), "Display & graphics \u{203a}");
+                if !vr_rows {
+                    self.text_row(ui, at(Row::Graphics), "Display & graphics \u{203a}");
+                }
                 self.text_row(ui, at(Row::PerfPage), "Performance overlay \u{203a}");
                 self.opt_row(ui, at(Row::Opt(Opt::Volume)), Opt::Volume);
                 self.opt_row(ui, at(Row::Opt(Opt::PauseBackground)), Opt::PauseBackground);
@@ -3447,7 +3460,11 @@ impl Overlay {
     /// V-Sync, display mode) apply right away, restart ones (MSAA,
     /// widescreen, fill screen) become pending as usual.
     fn reset_graphics(&mut self) {
-        self.msaa = 1;
+        // In VR the flat game's MSAA is not shown (always off there): kept,
+        // so no restart for a hidden row.
+        if !self.in_vr() {
+            self.msaa = 1;
+        }
         self.infinite_lod = false;
         self.infinite_view_distance = false;
         // S8: the D3 default is the monitor's aspect (Off on a 4:3 one);
@@ -5280,6 +5297,9 @@ mod tests {
                 assert_eq!(main[i + 1], Row::Passthrough);
                 assert_eq!(main[i + 2], Row::DioramaMode);
                 assert!(!main.contains(&Row::RefreshRate), "on the Graphics page");
+                // Display & graphics right above VR HUD.
+                assert_eq!(main[i - 2], Row::Graphics);
+                assert_eq!(main[i - 1], Row::VrHudPage);
                 assert_eq!(
                     refresh_choices(&[72, 90]),
                     [None, Some(72), Some(90)].to_vec()
@@ -5294,7 +5314,8 @@ mod tests {
             o.page = Page::Graphics;
             assert_eq!(o.rows().contains(&Row::Opt(Opt::Widescreen)), !vr);
             assert_eq!(o.rows().contains(&Row::Opt(Opt::TexFilter)), !vr);
-            assert!(o.rows().contains(&Row::Opt(Opt::Msaa)));
+            // q6: no MSAA in the headset.
+            assert_eq!(o.rows().contains(&Row::Opt(Opt::Msaa)), !vr);
             // q6: in VR the headset's refresh rate replaces Frame rate.
             let graphics = o.rows();
             assert_eq!(graphics.contains(&Row::Opt(Opt::Fps)), !vr);

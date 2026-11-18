@@ -769,6 +769,11 @@ Headset (round 1, on the main page): 72, 80, 90, 120 Hz offered; each
 change applied at once; normal flights 90 game fps at 90 Hz; Infinite LOD +
 view distance does not keep up at 90 or 120 (46-48 game fps). Moved to the
 Graphics page on request.
+Round 2: works. Then: Display & graphics moved above VR HUD on the main
+page in VR, and no MSAA in VR at all (the row hidden, `VR_HIDDEN_GRAPHICS`;
+the renderer made with 1 sample when VR runs, window.rs; Reset graphics
+leaves the hidden value alone): turning it on in the headset was far too
+slow. The flat game keeps its MSAA setting.
 
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
