@@ -848,6 +848,26 @@ the oil plant flame.
   is not drawn the same way on every level (the own-view test caught the
   sea on the big ones and missed their sky). Tracker After 1.0, x1.
 
+## Diorama sea and sky (x1): what each level draws (log only)
+
+Round 1 measures before anything changes. `env.c.patch` (`_uvEnvDraw`) adds
+`G_NOOP` tags: "EH" + index, 26 floats (chan, environment id, model count,
+clear on and RGBA, fog on, min, max and RGB, the chan's camera matrix), then
+"EM" + the model's index before each model (w1 = model id << 16 | flag byte;
+0xFF before the callback). The interpreter (`ENV_HEAD_TAG`, `ENV_MODEL_TAG`)
+fills `Frame::env_log` with one `EnvLog` per `_uvEnvDraw` and, per model,
+counts the environment's draw runs (`Interpreter::env_stats`): first view
+index and whether it changes, depth state, cull, shader mode, textured runs,
+average shade and alpha (the fog factor with fog on), and the vertex extents
+in camera space and in the world (through the camera matrix in the head).
+Nothing is drawn differently; draws and their merging are unchanged.
+
+vr.rs `env_report` logs it (`env:` lines) the first time each level is seen
+in each view kind (full size, flight as a model, menus island model) and
+height band (vehicle height, else the camera's: marks 10, 25, 50, 100, 200,
+400, 800 m), with the land's view index (the most common view of the
+non-environment world draws) to compare against.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`

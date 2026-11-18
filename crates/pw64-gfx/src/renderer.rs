@@ -3198,6 +3198,7 @@ mod tests {
             dash: None,
             up: None,
             shutter: false,
+            env_log: Vec::new(),
             table: None,
         }
     }

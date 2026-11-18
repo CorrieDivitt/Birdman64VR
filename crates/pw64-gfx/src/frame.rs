@@ -292,6 +292,114 @@ pub struct Frame {
     /// Birdman64VR: a photo was taken this frame (`pw64_vr_shutter`): the
     /// headset blinks.
     pub shutter: bool,
+    /// Birdman64VR, for the log only (tracker x1): each `_uvEnvDraw` this
+    /// frame, model by model (env.c.patch, `interp::ENV_HEAD_TAG`).
+    pub env_log: Vec<EnvLog>,
+}
+
+/// Birdman64VR, for the log only (x1): one `_uvEnvDraw` call, the level's
+/// environment (sky, sea, clear colour, fog) as the game drew it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnvLog {
+    /// The values in tag order: chan, environment id, model count, clear
+    /// on, clear RGBA, fog on, fog min, fog max, fog RGB, then the
+    /// chan's camera world matrix (rows right, forward, up, position).
+    pub head: [f32; EnvLog::HEAD],
+    /// What was drawn, in order: the screen clear (index
+    /// [`EnvModel::CLEAR`]), each model, the environment's callback
+    /// ([`EnvModel::CALLBACK`]).
+    pub models: Vec<EnvModel>,
+}
+
+impl EnvLog {
+    pub const HEAD: usize = 26;
+
+    pub fn new(head: [f32; EnvLog::HEAD]) -> Self {
+        Self {
+            head,
+            models: vec![EnvModel::new(EnvModel::CLEAR, 0, 0)],
+        }
+    }
+
+    /// The chan's camera world matrix (rows right, forward, up, position;
+    /// as [`Diorama::camera`]).
+    pub fn camera(&self) -> [[f32; 3]; 4] {
+        let r = |i: usize| {
+            [
+                self.head[14 + i * 3],
+                self.head[15 + i * 3],
+                self.head[16 + i * 3],
+            ]
+        };
+        [r(0), r(1), r(2), r(3)]
+    }
+}
+
+/// Birdman64VR, for the log only (x1): the draws of one environment model.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnvModel {
+    /// Index in the environment's model table, or [`EnvModel::CLEAR`] /
+    /// [`EnvModel::CALLBACK`].
+    pub index: u8,
+    /// Model id and the environment's flag byte for it (1 depth bits kept,
+    /// 2 own projection and view, 4 fogged, 8 follows the camera in x/y).
+    pub id: u16,
+    pub flag: u8,
+    /// Draw runs and vertices.
+    pub runs: u32,
+    pub vertices: u32,
+    /// Runs with a texture, runs that are 3D.
+    pub textured: u32,
+    pub runs_3d: u32,
+    /// [`DrawCall::view`] of the first run, and whether a later run had
+    /// another.
+    pub view: u16,
+    pub view_mixed: bool,
+    /// Depth state and cull of the first run, and whether a later run had
+    /// another depth state.
+    pub depth: Option<crate::rdp::DepthState>,
+    pub depth_mixed: bool,
+    pub cull: u8,
+    pub mode: Option<ShaderMode>,
+    /// Vertex extents in camera space (x right, y up, -z forward) and in
+    /// the game world (z up), game units; only for runs with a view.
+    pub cam_min: [f32; 3],
+    pub cam_max: [f32; 3],
+    pub world_min: [f32; 3],
+    pub world_max: [f32; 3],
+    /// Sum of the vertex shade colours (RGBA; alpha is the fog factor
+    /// with fog on), and the alpha's min / max.
+    pub color_sum: [f32; 4],
+    pub alpha: [f32; 2],
+}
+
+impl EnvModel {
+    pub const CLEAR: u8 = 0xFE;
+    pub const CALLBACK: u8 = 0xFF;
+
+    pub fn new(index: u8, id: u16, flag: u8) -> Self {
+        Self {
+            index,
+            id,
+            flag,
+            runs: 0,
+            vertices: 0,
+            textured: 0,
+            runs_3d: 0,
+            view: 0,
+            view_mixed: false,
+            depth: None,
+            depth_mixed: false,
+            cull: 0,
+            mode: None,
+            cam_min: [f32::INFINITY; 3],
+            cam_max: [f32::NEG_INFINITY; 3],
+            world_min: [f32::INFINITY; 3],
+            world_max: [f32::NEG_INFINITY; 3],
+            color_sum: [0.0; 4],
+            alpha: [f32::INFINITY, f32::NEG_INFINITY],
+        }
+    }
 }
 
 /// Birdman64VR: points on the vehicle's dashboard, one per dashboard gauge
