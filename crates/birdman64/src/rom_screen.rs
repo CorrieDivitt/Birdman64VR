@@ -41,6 +41,10 @@ pub struct Screen {
     /// arrived yet, android/rom_picker.rs).
     #[cfg(target_os = "android")]
     picking: bool,
+    /// Birdman64VR: the controllers' last state (the ROM screen in the
+    /// headset, where there is no touchscreen): A = Choose a game file,
+    /// Start = check the rom/ folder again.
+    prev_pad: crate::input::Pad,
 }
 
 /// The folder the `pi::load_rom(None)` scan covers that a player can put a
@@ -83,6 +87,8 @@ impl Screen {
             shot: false,
             #[cfg(target_os = "android")]
             picking: false,
+            // What is held now, so a held button doesn't act at once.
+            prev_pad: crate::input::overlay_pad(),
         }
     }
 
@@ -97,6 +103,32 @@ impl Screen {
             KeyCode::Enter | KeyCode::NumpadEnter => self.check = true,
             KeyCode::Escape => self.quit = true,
             _ => {}
+        }
+    }
+
+    /// Birdman64VR, in the headset (window.rs, every repaint): the
+    /// controllers' buttons, edge-triggered. A opens the file picker
+    /// (Android), Start checks the rom/ folder again.
+    pub fn pad(&mut self, pad: crate::input::Pad) {
+        let prev = std::mem::replace(&mut self.prev_pad, pad);
+        let edge = |bit: u16| pad.button & bit != 0 && prev.button & bit == 0;
+        if edge(crate::input::CONT_A) {
+            self.choose_file();
+        }
+        if edge(crate::input::CONT_START) {
+            self.check = true;
+        }
+    }
+
+    /// "Choose a game file": the system file picker (Android; nothing
+    /// elsewhere, where the screen has its own buttons).
+    fn choose_file(&mut self) {
+        // Non-blocking: the result lands in try_load via take_picked.
+        // Reopening (the button stays live) replaces the old picker.
+        #[cfg(target_os = "android")]
+        {
+            crate::android::rom_picker::start_pick();
+            self.picking = true;
         }
     }
 
@@ -342,10 +374,11 @@ impl Screen {
             )
             .clicked()
         {
-            // Non-blocking: the result lands in try_load via take_picked.
-            // Reopening (the button stays live) replaces the old picker.
-            crate::android::rom_picker::start_pick();
-            self.picking = true;
+            self.choose_file();
+        }
+        if crate::vr::active() {
+            ui.add_space(6.0);
+            ui.label("Press A to choose a game file.");
         }
         if self.picking {
             ui.add_space(6.0);
@@ -364,7 +397,7 @@ impl Screen {
         ui.label(
             egui::RichText::new(
                 "Or put a ROM into the app's rom/ folder (adb push) and \
-                 choose Check again.",
+                 press Start to check again.",
             )
             .weak()
             .size(12.0),

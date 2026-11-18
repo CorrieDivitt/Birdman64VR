@@ -615,8 +615,8 @@ struct App {
     /// The setup screen while it is up (the game thread isn't running).
     #[cfg(feature = "first-run")]
     setup: Option<crate::firstrun::Screen>,
-    /// Next setup-screen repaint (progress bar animation between reports).
-    #[cfg(feature = "first-run")]
+    /// Next setup-screen repaint (progress bar animation between reports);
+    /// also the ROM screen's in the headset (its pad is polled per repaint).
     setup_frame: Instant,
     /// No ROM yet and no file dialog on this system: the ROM screen while it
     /// is up (before the setup screen / game).
@@ -726,7 +726,6 @@ pub fn run(setup: bool, ask_rom: bool) -> ! {
         setup_needed: setup,
         #[cfg(feature = "first-run")]
         setup: None,
-        #[cfg(feature = "first-run")]
         setup_frame: Instant::now(),
         rom_screen: ask_rom.then(crate::rom_screen::Screen::new),
         toast: crate::toast::Toast::new(),
@@ -1326,21 +1325,42 @@ impl App {
     /// Draws the ROM screen instead of a game frame; on a loaded ROM it
     /// closes and the setup screen or game follows.
     fn redraw_rom_screen(&mut self) {
+        let headless = self.vr.is_some() && crate::vr::headless();
         let (Some(g), Some(s)) = (&mut self.gpu, &mut self.rom_screen) else {
             return;
         };
-        if !g.surface_ready() {
-            g.window.request_redraw();
-            return;
-        }
-        let Some(tex) = g.acquire() else { return };
-        let view = tex.texture.create_view(&Default::default());
-        let (next, shot) = s.render(g, &view);
-        if shot && g.config.usage.contains(wgpu::TextureUsages::COPY_SRC) {
-            crate::hle::shot_png(&g.device, &g.queue, &tex.texture, "tmp/win_setup_rom.png");
-        }
-        g.window.pre_present_notify();
-        present(tex);
+        let next = if headless {
+            // Birdman64VR on the Quest: the headset only shows the VR
+            // panel, so the screen is drawn there, and the controllers
+            // stand in for the touchscreen.
+            let Some(vr) = &mut self.vr else { return };
+            let Some(view) = vr.target(
+                &g.device,
+                g.config.format,
+                (g.config.width, g.config.height),
+            ) else {
+                return;
+            };
+            s.pad(crate::input::overlay_pad());
+            let (next, _) = s.render(g, &view);
+            vr.publish();
+            crate::vr::panel_updated(None);
+            next
+        } else {
+            if !g.surface_ready() {
+                g.window.request_redraw();
+                return;
+            }
+            let Some(tex) = g.acquire() else { return };
+            let view = tex.texture.create_view(&Default::default());
+            let (next, shot) = s.render(g, &view);
+            if shot && g.config.usage.contains(wgpu::TextureUsages::COPY_SRC) {
+                crate::hle::shot_png(&g.device, &g.queue, &tex.texture, "tmp/win_setup_rom.png");
+            }
+            g.window.pre_present_notify();
+            present(tex);
+            next
+        };
         match next {
             crate::rom_screen::Next::Stay => {}
             // Nothing is running yet.
@@ -1359,9 +1379,26 @@ impl App {
     /// false when the player chose Quit.
     #[cfg(feature = "first-run")]
     fn redraw_setup(&mut self) -> bool {
+        let headless = self.vr.is_some() && crate::vr::headless();
         let (Some(g), Some(s)) = (&mut self.gpu, &mut self.setup) else {
             return true;
         };
+        // Birdman64VR on the Quest: drawn into the VR panel (the headset
+        // shows nothing else); its error screen already takes the pad.
+        if headless {
+            let Some(vr) = &mut self.vr else { return true };
+            let Some(view) = vr.target(
+                &g.device,
+                g.config.format,
+                (g.config.width, g.config.height),
+            ) else {
+                return true;
+            };
+            let (keep, _) = s.render(g, &view);
+            vr.publish();
+            crate::vr::panel_updated(None);
+            return keep;
+        }
         if !g.surface_ready() {
             g.window.request_redraw();
             return true;
@@ -2099,10 +2136,16 @@ impl ApplicationHandler<UserEvent> for App {
 
     /// First run: repaint the setup screen ~10×/s between progress reports
     /// (the bar animates; a download reports nothing for seconds).
-    #[cfg(feature = "first-run")]
+    /// Birdman64VR on the Quest: the ROM screen too, since its pad input
+    /// (no touchscreen in a headset) is read on each repaint.
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
         use winit::event_loop::ControlFlow;
-        if self.setup.is_none() {
+        #[cfg(feature = "first-run")]
+        let setup = self.setup.is_some();
+        #[cfg(not(feature = "first-run"))]
+        let setup = false;
+        let vr_rom = self.rom_screen.is_some() && self.vr.is_some() && crate::vr::headless();
+        if !setup && !vr_rom {
             el.set_control_flow(ControlFlow::Wait);
             return;
         }
