@@ -1,7 +1,6 @@
 # Birdman64VR
 
-**Pilotwings 64 in VR.** Fly the hang glider, rocket belt, gyrocopter and
-the rest in stereo 3D with head tracking, seated, on a **Meta Quest 3 with
+**Pilotwings 64 in VR.** Experience your favorite flight sim in stereo 3D with head tracking, seated, on a **Meta Quest 3 with
 no PC**, or on a PC VR headset through OpenXR. An unofficial fork of
 [Birdman64](https://github.com/NoahVl/Birdman64), the native PC port of
 Pilotwings 64.
@@ -36,21 +35,17 @@ better flat game, and this fork follows it.
 
 ## What's new compared to Birdman64
 
-Everything Birdman64 does still works on a monitor. On top of that:
+Everything Birdman64 does still works. On top of that:
 
 - **Stereo world with head tracking.** The whole flight is in 3D around you;
-  you look around with your head. The game no longer hides what is outside
-  its original camera view.
 - **Runs natively on the Quest 3.** A standalone Quest app (no PC, no
-  Quest Link), with the Touch controllers working as a gamepad.
+  Quest Link), with the Touch controllers working as a gamepad and full controller support.
 - **VR cameras for every vehicle.** First-person views from the pilot's
-  eyes (hang glider, rocket belt, sky diving with the chute open, the
-  cannonball in flight) and the gyrocopter's cockpit with its pilot and
+  eyes and the gyrocopter's cockpit with its pilot and
   dashboard. Chase cameras tuned for VR. The game's own swooping cameras
-  (crashes, landings, menus, the title) are replaced by still or slowly
-  turning views, because being flown around makes people queasy.
+  are replaced by still or slowly turning views so you don't get sick.
 - **Horizon lock.** The world stays level and your vehicle banks around you.
-- **A VR HUD.** The gauges float on a curved band in front of you. Distance,
+- **A VR HUD.** The gauges float in front of you. Distance,
   spread and size are adjustable, and each gauge can be hidden. In the
   gyrocopter the throttle and map can sit on the dashboard.
 - **Menus with the island as a model.** File select, level select and
@@ -59,8 +54,8 @@ Everything Birdman64 does still works on a monitor. On top of that:
   watch your vehicle fly over a tabletop island, in a dim virtual room or in
   your own room through passthrough on the Quest.
 - **Passthrough.** On the Quest, the menus can float in your real room.
-- **Refresh rate**, **Animation distance**, and **Infinite LOD** and
-  **Infinite view distance** that apply instantly (see
+- **Refresh rate**, **Animation distance**, **Infinite LOD** and
+  **Infinite view distance** all apply instantly (see
   [Performance](#performance)).
 - **Comfort details.** Short fades when the view changes, no black flashes
   between screens, a shutter blink when you take a photo, and a recentre
@@ -212,9 +207,7 @@ celebrations stay fully virtual.
 
 ## Performance
 
-We measured on a Quest 3 running standalone. The game draws everything for
-each eye, so what costs little on a monitor can cost a lot in a headset.
-In short:
+We measured on a Quest 3 running standalone. 
 
 - **Normal flights run smoothly.** They hold 72 fps at the default 72 Hz
   with plenty of headroom, and 90 fps at 90 Hz. 72 or 90 Hz is the sweet
