@@ -270,9 +270,9 @@ fn welcome_to_birdman64(stale_rom: bool) -> bool {
     };
     // What the player started, as they see it in their file manager.
     let program = if cfg!(windows) {
-        "Birdman64.exe"
+        "Birdman64VR.exe"
     } else if std::env::var_os("APPIMAGE").is_some() {
-        "the Birdman64 AppImage"
+        "the Birdman64VR AppImage"
     } else {
         "the birdman64 program"
     };

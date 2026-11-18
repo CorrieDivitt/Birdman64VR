@@ -20,3 +20,6 @@ decomp-manifest.txt text eol=lf
 *.png binary
 *.ico binary
 *.zip binary
+
+# Windows batch files need CRLF.
+*.cmd text eol=crlf

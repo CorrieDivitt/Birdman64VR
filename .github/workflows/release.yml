@@ -1,8 +1,9 @@
 # Release builds ("build on first run", docs/notes/first-run-build.md):
 # a workflow_dispatch artifact, GitHub release assets on `v*` tags.
 #
-# Windows: Birdman64.exe (no console, no game C; the game module is built on
-# the player's machine) + the bundled zig compiler + licence notices.
+# Windows: Birdman64VR.exe (no console, no game C; the game module is built on
+# the player's machine) + the bundled zig compiler + the Khronos OpenXR loader
+# (Birdman64VR, r1) + "Start in VR.cmd" + licence notices.
 # Linux: the same as an AppImage and a tar.gz. Both run a smoke test:
 # `--build-game` downloads the pinned decomp and compiles it in CI, and the
 # dylib test runs against the result (an absolute PW64_GAME_DLL is required:
@@ -11,7 +12,7 @@
 # The jobs are independent: a failed one never blocks the others' uploads.
 #
 # The zip carries READ ME FIRST.txt; the debug symbols asset
-# is renamed Birdman64-windows-x64-debug-symbols.pdb; the release body comes
+# is renamed Birdman64VR-windows-x64-debug-symbols.pdb; the release body comes
 # from packaging/release-notes.md (all jobs pass the same body_path). Tags
 # with a `-` (e.g. v1.5.2-pre1) publish as prereleases.
 #
@@ -36,6 +37,11 @@ env:
   ZIG_WIN_SHA256: 68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e
   ZIG_LINUX_URL: https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz
   ZIG_LINUX_SHA256: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
+  # Birdman64VR: the Khronos OpenXR loader (Apache-2.0), x64/bin of the
+  # OpenXR-SDK-Source release zip; the same version as the Quest APK's
+  # (packaging/android/build-apk.sh). It ships next to the exe with its licence.
+  OPENXR_WIN_URL: https://github.com/KhronosGroup/OpenXR-SDK-Source/releases/download/release-1.1.54/openxr_loader_windows-1.1.54.zip
+  OPENXR_WIN_SHA256: 925b9ddab4d0b795d8900d2ef95feebc89c44d5fc03acf6e495ff0c19ca8cfb8
   LLVM_LICENSE_URL: https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-21.1.0/llvm/LICENSE.TXT
   # appimagetool 1.9.1 (stable, static x86_64 build).
   APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
@@ -60,7 +66,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - name: build Birdman64.exe (first-run flavour, no console)
+      - name: build Birdman64VR.exe (first-run flavour, no console)
         run: cargo build --release -p birdman64 --no-default-features --features first-run,gui-subsystem
 
       # B6: the runners have the VC++ runtime installed, so a smoke run can't
@@ -83,32 +89,44 @@ jobs:
           $h = (Get-FileHash tmp/zig.zip -Algorithm SHA256).Hash.ToLower()
           if ($h -ne $env:ZIG_WIN_SHA256) { throw "zig sha256 mismatch: $h" }
           Expand-Archive tmp/zig.zip -DestinationPath tmp/zigdl
-          New-Item -ItemType Directory -Force dist/Birdman64/toolchain/zig | Out-Null
-          Copy-Item tmp/zigdl/zig-x86_64-windows-0.16.0/zig.exe dist/Birdman64/toolchain/zig/
-          Copy-Item tmp/zigdl/zig-x86_64-windows-0.16.0/LICENSE dist/Birdman64/toolchain/zig/LICENSE
-          & dist/Birdman64/toolchain/zig/zig.exe version
+          New-Item -ItemType Directory -Force dist/Birdman64VR/toolchain/zig | Out-Null
+          Copy-Item tmp/zigdl/zig-x86_64-windows-0.16.0/zig.exe dist/Birdman64VR/toolchain/zig/
+          Copy-Item tmp/zigdl/zig-x86_64-windows-0.16.0/LICENSE dist/Birdman64VR/toolchain/zig/LICENSE
+          & dist/Birdman64VR/toolchain/zig/zig.exe version
+
+      - name: download + verify the OpenXR loader (Birdman64VR)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force tmp, dist/Birdman64VR/licenses | Out-Null
+          Invoke-WebRequest -Uri $env:OPENXR_WIN_URL -OutFile tmp/openxr.zip
+          $h = (Get-FileHash tmp/openxr.zip -Algorithm SHA256).Hash.ToLower()
+          if ($h -ne $env:OPENXR_WIN_SHA256) { throw "OpenXR loader sha256 mismatch: $h" }
+          Expand-Archive tmp/openxr.zip -DestinationPath tmp/openxr
+          Copy-Item tmp/openxr/x64/bin/openxr_loader.dll dist/Birdman64VR/
+          Copy-Item tmp/openxr/share/doc/openxr/LICENSE dist/Birdman64VR/licenses/OpenXR-loader-LICENSE.txt
 
       - name: LLVM licence (zig bundles clang/LLD)
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist/Birdman64/licenses | Out-Null
-          Invoke-WebRequest -Uri $env:LLVM_LICENSE_URL -OutFile dist/Birdman64/licenses/LLVM-LICENSE.txt
+          New-Item -ItemType Directory -Force dist/Birdman64VR/licenses | Out-Null
+          Invoke-WebRequest -Uri $env:LLVM_LICENSE_URL -OutFile dist/Birdman64VR/licenses/LLVM-LICENSE.txt
 
       - name: THIRD_PARTY_LICENSES.html (cargo-about)
         shell: pwsh
         run: |
           cargo install cargo-about --locked --version 0.9.2 --features cli
-          cargo about generate about.hbs --output-file dist/Birdman64/THIRD_PARTY_LICENSES.html
+          cargo about generate about.hbs --output-file dist/Birdman64VR/THIRD_PARTY_LICENSES.html
 
       - name: assemble the zip
         shell: pwsh
         run: |
-          Copy-Item target/release/birdman64.exe dist/Birdman64/Birdman64.exe
-          Copy-Item packaging/DECOMP-LICENSE-NOTE.txt dist/Birdman64/
-          Copy-Item 'packaging/READ ME FIRST.txt' dist/Birdman64/
-          Copy-Item README.md, LICENSE, CHANGELOG.md dist/Birdman64/
-          Compress-Archive -Path dist/Birdman64 -DestinationPath Birdman64-windows-x64.zip
-          Copy-Item target/release/birdman64.pdb Birdman64-windows-x64-debug-symbols.pdb
+          Copy-Item target/release/birdman64.exe dist/Birdman64VR/Birdman64VR.exe
+          Copy-Item 'packaging/windows/Start in VR.cmd' dist/Birdman64VR/
+          Copy-Item packaging/DECOMP-LICENSE-NOTE.txt dist/Birdman64VR/
+          Copy-Item 'packaging/READ ME FIRST.txt' dist/Birdman64VR/
+          Copy-Item README.md, LICENSE, CHANGELOG.md dist/Birdman64VR/
+          Compress-Archive -Path dist/Birdman64VR -DestinationPath Birdman64VR-windows-x64.zip
+          Copy-Item target/release/birdman64.pdb Birdman64VR-windows-x64-debug-symbols.pdb
 
       # Smoke test: the real first-run path on a clean data dir. No ROM is
       # given, so it builds the module from the network decomp and exits 0.
@@ -124,7 +142,7 @@ jobs:
           # A windows-subsystem exe: `&` would not wait for it and its
           # stdout/stderr go nowhere, so start it explicitly, wait, and
           # print the captured output.
-          $p = Start-Process -FilePath dist/Birdman64/Birdman64.exe -ArgumentList '--build-game' `
+          $p = Start-Process -FilePath dist/Birdman64VR/Birdman64VR.exe -ArgumentList '--build-game' `
             -Wait -PassThru -NoNewWindow `
             -RedirectStandardOutput tmp/build-game.out -RedirectStandardError tmp/build-game.err
           Get-Content tmp/build-game.out, tmp/build-game.err
@@ -143,9 +161,9 @@ jobs:
       - name: SHA256SUMS
         shell: pwsh
         run: |
-          $h1 = (Get-FileHash Birdman64-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
-          $h2 = (Get-FileHash Birdman64-windows-x64-debug-symbols.pdb -Algorithm SHA256).Hash.ToLower()
-          "$h1  Birdman64-windows-x64.zip`n$h2  Birdman64-windows-x64-debug-symbols.pdb" |
+          $h1 = (Get-FileHash Birdman64VR-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
+          $h2 = (Get-FileHash Birdman64VR-windows-x64-debug-symbols.pdb -Algorithm SHA256).Hash.ToLower()
+          "$h1  Birdman64VR-windows-x64.zip`n$h2  Birdman64VR-windows-x64-debug-symbols.pdb" |
             Out-File SHA256SUMS-windows.txt -Encoding ascii
 
       # Build provenance for the released zip (verifiable with
@@ -155,14 +173,14 @@ jobs:
       - uses: actions/attest-build-provenance@v2
         if: ${{ !github.event.repository.private }}
         with:
-          subject-path: Birdman64-windows-x64.zip
+          subject-path: Birdman64VR-windows-x64.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Birdman64-windows-x64
+          name: Birdman64VR-windows-x64
           path: |
-            Birdman64-windows-x64.zip
-            Birdman64-windows-x64-debug-symbols.pdb
+            Birdman64VR-windows-x64.zip
+            Birdman64VR-windows-x64-debug-symbols.pdb
             SHA256SUMS-windows.txt
       - name: github release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -171,8 +189,8 @@ jobs:
           body_path: packaging/release-notes.md
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
-            Birdman64-windows-x64.zip
-            Birdman64-windows-x64-debug-symbols.pdb
+            Birdman64VR-windows-x64.zip
+            Birdman64VR-windows-x64-debug-symbols.pdb
             SHA256SUMS-windows.txt
 
   # Android arm64 APK, release flavour (docs/notes/android.md): attached to
