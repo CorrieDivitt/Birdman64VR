@@ -172,6 +172,8 @@ pub struct Interpreter {
     /// Inside a world view's environment draws (`ENV_TAG_ON/OFF`); reset
     /// per run.
     backdrop: bool,
+    /// The environment model being drawn is a sky ([`DrawCall::sky`]).
+    env_sky: bool,
     /// Birdman64VR: the dashboard's values as their tags arrive.
     dash_in: [f32; (crate::Dash::POINTS + 1) * 3],
     /// [`UP_TAG`] values so far.
@@ -372,6 +374,7 @@ impl Interpreter {
             table_in: [0.0; 21],
             env_head_in: [0.0; crate::EnvLog::HEAD],
             backdrop: false,
+            env_sky: false,
             dash_in: [0.0; (crate::Dash::POINTS + 1) * 3],
             up_in: [0.0; 5],
             split: None,
@@ -589,6 +592,8 @@ impl Interpreter {
                 }
             }
             op::G_NOOP if w0 & 0xFF_FF00 == ENV_MODEL_TAG => {
+                // A sky: own view (2) or following the camera (8).
+                self.env_sky = w0 as u8 != crate::EnvModel::CALLBACK && w1 & 0x0A != 0;
                 if let Some(log) = self.frame.env_log.last_mut() {
                     log.models
                         .push(crate::EnvModel::new(w0 as u8, (w1 >> 16) as u16, w1 as u8));
@@ -1247,6 +1252,7 @@ impl Interpreter {
             && last.vanchor == self.vanchor
             && last.hud == self.hud
             && last.env == self.backdrop
+            && last.sky == (self.backdrop && self.env_sky)
             && last.split == self.split
             && last.elem == self.elem
             && last.view == view
@@ -1271,6 +1277,7 @@ impl Interpreter {
             stretch_y,
             hud: self.hud,
             env: self.backdrop,
+            sky: self.backdrop && self.env_sky,
             split: self.split,
             elem: self.elem,
             view,
@@ -1748,6 +1755,8 @@ mod tests {
                 (crate::EnvModel::CALLBACK, 0, 0, 0, 0)
             ]
         );
+        // Flag 9 follows the camera: a sky draw.
+        assert!(!f.draws.is_empty() && f.draws.iter().all(|d| d.env && d.sky));
         let dl = mem.push_words(&words(&[(0xB800_0000, 0)]));
         assert!(Interpreter::new().run(&mem, dl).env_log.is_empty());
     }

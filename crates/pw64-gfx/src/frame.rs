@@ -161,6 +161,11 @@ pub struct DrawCall {
     /// the camera-following sea; `interp::ENV_TAG_ON`, `pw64_env_tag`).
     /// Left out of an eye picture with `StereoEye::hide_env`.
     pub env: bool,
+    /// Birdman64VR: an environment draw of a sky model: one the
+    /// environment draws with its own view (flag 2) or moved with the
+    /// camera (flag 8; env.c.patch "EM" tags). The sea (flag 0, a flat
+    /// square at sea level) is not. Left out with `StereoEye::hide_sky`.
+    pub sky: bool,
     /// Split-screen view rect (N64 px x0, row0, x1, row1; the native game's
     /// `G_NOOP` "PWS" tags, `interp::SPLIT_TAG`); `None` = full screen.
     /// With `hud`: a HUD draw laid out into the view

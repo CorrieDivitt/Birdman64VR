@@ -1217,6 +1217,7 @@ mod real {
             sight: None,
             hide_env: false,
             hide_hud: false,
+            hide_sky: false,
         }
     }
 
@@ -1329,8 +1330,9 @@ mod real {
     /// times `zoom`, level, game north away turned by `spin` radians. `follow`: moved so the vehicle
     /// stays at [`TABLE_VEHICLE_M`] and the land slides past below it;
     /// else the island stands still where the menus' model does
-    /// ([`MODEL_CENTRE_M`], its middle at sea level). No sky and no sea;
-    /// around it the player's room (`room`) or the dim one.
+    /// ([`MODEL_CENTRE_M`], its middle at sea level). In the player's room
+    /// (`room`): no sky and no sea. In the dim room the game's sea with the
+    /// model, and no sky (x1 round 2).
     pub(super) fn table_eye(
         pose: &EyePose,
         t: &pw64_gfx::Table,
@@ -1380,10 +1382,13 @@ mod real {
         ];
         let to_world = pw64_gfx::Diorama::to_world(&t.camera);
         eye.world = mul(&mul(&mul(&mul(&to_world, &centre), &turn), &place), &view);
-        // No sky and no sea (tried: the game's sea is a patch following its
-        // camera, sized per level, and its sky a bubble around it; neither
-        // fits a model island; tracker After 1.0).
-        eye.hide_env = true;
+        // x1 round 2: the dim room keeps the game's sea at the model's scale
+        // (a flat 24.6 km square at sea level on every flight level) and
+        // leaves out its sky (the dome following the game camera, told
+        // apart by its environment flag, `DrawCall::sky`). The player's
+        // room: neither.
+        eye.hide_env = room;
+        eye.hide_sky = !room;
         eye.background = Some(if room {
             MODEL_BACKGROUND_ROOM
         } else {
@@ -3403,7 +3408,10 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     ndc(apply(&eye.world, middle)),
                     ndc(apply(&view, MODEL_CENTRE_M))
                 ));
-                assert!(eye.hide_env && eye.clip.is_none());
+                // The dim room keeps the sea, not the sky.
+                assert!(!eye.hide_env && eye.hide_sky && eye.clip.is_none());
+                let room = super::table_eye(&pose, &t, zoom, 0.0, false, true);
+                assert!(room.hide_env && !room.hide_sky);
                 assert_eq!(eye.background.map(|b| b[3]), Some(1.0));
             }
         }

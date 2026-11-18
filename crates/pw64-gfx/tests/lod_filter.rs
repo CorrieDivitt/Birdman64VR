@@ -129,6 +129,7 @@ fn frame(
         stretch_y: [0.0; 2],
         hud: false,
         env: false,
+        sky: false,
         split: None,
         elem: 0,
         view: 0,

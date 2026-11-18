@@ -868,6 +868,23 @@ height band (vehicle height, else the camera's: marks 10, 25, 50, 100, 200,
 400, 800 m), with the land's view index (the most common view of the
 non-environment world draws) to compare against.
 
+Round 1 in the headset (log `sea-sky-1.txt`): on every flight level seen
+(environments 2, 3, 16, 18) the environment is two models, both drawn with
+neither depth test nor depth write: #0 the sky dome (ids 352, 354, 356;
+flag 8, follows the camera: 3.4 x 3.6 km, 1.3-1.5 km high, its base at sea
+level) and #1 the sea (ids 353, 360, 361; flag 0: a flat 24.6 km square at
+z 0, fixed). No flight level uses flag 2; only the title's environment (23,
+one dome, id 362) does. Whether the environment's view index equals the
+land's changes by level and frame (2: equal; 3 and 16: not; 18: both), so
+the old own-view test (round 3 of vr/diorama-cannon) kept or dropped the
+wrong ones.
+
+Round 2 (water only, dim room): `DrawCall::sky` (environment draws of a
+model with flag 2 or 8, from the "EM" tag) left out with
+`StereoEye::hide_sky`; the sea stays at the model's scale. `table_eye`:
+`hide_env = room`, `hide_sky = !room` (the passthrough choices unchanged:
+neither). The `env:` lines stay.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`
