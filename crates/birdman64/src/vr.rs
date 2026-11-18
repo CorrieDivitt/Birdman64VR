@@ -1843,10 +1843,13 @@ mod real {
                 self.described = Instant::now() - Duration::from_secs(60);
                 log(
                     &format!(
-                        "stereo world on: {} draws, {} world views, eye {:?}",
+                        "stereo world on: {} draws, {} world views, eye {:?}, MSAA {}, flat \
+                         picture {:?} (its world left out)",
                         frame.draws.len(),
                         frame.views.len(),
-                        self.eye_size
+                        self.eye_size,
+                        renderer.options.msaa,
+                        renderer.fb_size()
                     ),
                     true,
                 );
@@ -2708,6 +2711,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 let (_, age_avg, age_max) = super::PANEL_AGE.take();
                 let (_, ahead_avg, ahead_max) = super::AHEAD.take();
                 let idle = std::mem::take(&mut not_shown);
+                let gpu = pw64_gfx::stats::take();
                 log(
                     &format!(
                         "{}t {:.0} s: headset {:.0} fps (frame {period_ms:.1} ms, longest gap \
@@ -2716,7 +2720,9 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                          {to_panel_max:.1} ms, age when the headset draws it avg {age_avg:.1} \
                          max {age_max:.1} ms, then shown {ahead_avg:.1} (max {ahead_max:.1}) ms \
                          later; headset frames not shown {idle}; stereo: {} new eye pictures, \
-                         {} shown again, lead {:.1} ms; longest, ms: {}",
+                         {} shown again, lead {:.1} ms; longest, ms: {}; compiled {} \
+                         pipelines ({:.0} ms, longest {:.0}), {} new textures ({:.0} ms); \
+                         eye draws avg {:.0} max {}",
                         if hitch { "hitch, " } else { "" },
                         started.elapsed().as_secs_f64(),
                         shown as f64 / secs,
@@ -2725,7 +2731,14 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                         std::mem::take(&mut eyes_new),
                         std::mem::take(&mut eyes_repeated),
                         lead().as_secs_f64() * 1e3,
-                        detail.join(", ")
+                        detail.join(", "),
+                        gpu.pipelines,
+                        gpu.pipeline_ms,
+                        gpu.pipeline_max_ms,
+                        gpu.textures,
+                        gpu.texture_ms,
+                        gpu.eye_draws_avg,
+                        gpu.eye_draws_max
                     ),
                     hitch,
                 );

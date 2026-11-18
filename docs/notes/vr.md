@@ -640,6 +640,44 @@ for both, each with and without passthrough.
   off`.
 - Open: the game still fogs and picks detail by its own chase camera.
 
+## Performance on the Quest 3 (q6)
+
+Measured 2026-11-17 on `main` (6430427) with logcat `-s birdman64 VrApi`
+(VrApi prints one line per second: `App` = the app's GPU time per frame,
+`GPU%`, `CPU%` with the busiest core as `W`, `CPU4/GPU` = clock levels,
+`Stale` = frames not delivered in time). Eye pictures 1680 x 1760, 72 Hz.
+
+| Scene | Headset fps | App (GPU) | GPU% | GPU level | Draws |
+|---|---|---|---|---|---|
+| Holiday Island hang glider | 72 | 7-10 ms | 60-80 | 2 | 320-380 |
+| Big island, chase + first person | 72 | 7-10 ms | 60-83 | 2 | 420-470 |
+| Diorama mode | 72 | 7-9 ms | 56-74 | 2 | 320 |
+| Infinite LOD + view distance | 10-60 | 12-89 ms | 94-95 | 4 | 2561 |
+
+- The CPU is never the limit (busiest core under 50 %; the game thread
+  keeps 72 fps). Normal play fits at the lowest GPU clock the headset uses.
+- Infinite LOD + view distance is GPU-bound on the number of draws: the
+  Adreno draws by tiles (bins), each draw goes through every bin, and 4x
+  MSAA multiplies the bins.
+- Hitches (one lost headset frame every 10-30 s in flight; 0.4-0.7 s at the
+  first menus) are single window-thread calls (`eye pictures`, `game draw`)
+  of 35-670 ms: pipelines and shader modules are made on first use
+  (`Renderer::pipeline`, no pipeline cache).
+
+Round 1 (`vr/perf-1`):
+- One render pass per eye: the game's depth clears between the world's
+  parts and before the panel are a full-screen draw (`DEPTH_CLEAR_WGSL`,
+  `depth_clear_pipeline`) instead of a new pass; depth, stencil and the
+  multisampled picture are not stored (`StoreOp::Discard`), only the
+  resolve. The flat picture's pass discards depth and its multisampled
+  picture too (`prepare_persistent` reloads it from the target).
+- While the stereo world is on, the flat picture's world draws are left
+  out (`Renderer::set_skip_world`, window.rs `drain`): the panel is cleared
+  and never shows them, on PC too.
+- Log: `pw64_gfx::stats` (pipelines compiled and their time, new textures,
+  eye draws) at the end of the 5 s line; MSAA and the flat picture size on
+  the `stereo world on` line.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`

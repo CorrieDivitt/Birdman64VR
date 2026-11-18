@@ -1441,9 +1441,15 @@ impl App {
             crate::vr::note(crate::vr::Stage::Eyes, timing.elapsed());
         }
         let timing = Instant::now();
+        // Birdman64VR: while the stereo world is on, the panel is cleared
+        // and never shows the flat picture's world (below): leave it out,
+        // a third world picture the GPU drew for nothing.
+        g.renderer
+            .set_skip_world(self.vr.as_ref().is_some_and(|vr| vr.stereo()));
         for op in &q.ops {
             g.renderer.fb_apply(op);
         }
+        g.renderer.set_skip_world(false);
         crate::vr::note(crate::vr::Stage::Drain, timing.elapsed());
         if q.show.is_some() {
             self.shown = q.show;

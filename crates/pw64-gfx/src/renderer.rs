@@ -117,6 +117,21 @@ impl Default for RenderOptions {
 
 const UNIFORM_STRIDE: u64 = 512;
 
+/// Birdman64VR: a full-screen triangle at the far depth (0, reversed), no
+/// colour: clears depth inside an eye's render pass.
+const DEPTH_CLEAR_WGSL: &str = r#"
+@vertex
+fn vs_clear(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+    let uv = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u));
+    return vec4<f32>(uv * 2.0 - 1.0, 0.0, 1.0);
+}
+
+@fragment
+fn fs_clear() -> @location(0) vec4<f32> {
+    return vec4<f32>(0.0);
+}
+"#;
+
 /// Depth + stencil format: stencil marks the pixels a [`ShaderMode::DepthImage`]
 /// draw passed the depth test on. Float depth when the device has it (see
 /// [`crate::device_descriptor`]).
@@ -386,6 +401,13 @@ pub struct Renderer {
     /// Per texture key: the opaque texels' UV rect (`None` = fully
     /// transparent), for tight HUD element bounds (`opaque_part`).
     opaque: HashMap<u64, Option<[f32; 4]>>,
+    /// Birdman64VR: leave out the world view's draws in [`Self::draw_frame`]
+    /// (the stereo world is on: the headset shows the eye pictures, and the
+    /// flat picture's world is never seen).
+    skip_world: bool,
+    /// Birdman64VR: the full-screen depth (and stencil) clear between the
+    /// passes of an eye picture, for its MSAA sample count.
+    depth_clear: Option<(u32, wgpu::RenderPipeline)>,
 }
 
 /// Gives fully transparent texels the color of their opaque neighbours, so
@@ -560,6 +582,8 @@ impl Renderer {
             shaders: HashMap::new(),
             pipelines: HashMap::new(),
             depth_format: depth_format(device),
+            skip_world: false,
+            depth_clear: None,
             textures: HashMap::new(),
             samplers: HashMap::new(),
             bind_groups: HashMap::new(),
@@ -605,6 +629,7 @@ impl Renderer {
     fn pipeline(&mut self, key: &PipelineKey, step: Step, clip: bool) {
         let filter = self.options.filter;
         if !self.pipelines.contains_key(&(*key, step, filter, clip)) {
+            let started = std::time::Instant::now();
             let module = self
                 .shaders
                 .entry((key.shader, filter, clip))
@@ -732,6 +757,7 @@ impl Renderer {
                     multiview: None,
                     cache: None,
                 });
+            crate::stats::pipeline(started.elapsed());
             self.pipelines.insert((*key, step, filter, clip), pipeline);
         }
     }
@@ -1414,7 +1440,9 @@ impl Renderer {
     fn upload_textures(&mut self, frame: &Frame) {
         for (key, img) in &frame.textures {
             if !self.textures.contains_key(key) {
+                let started = std::time::Instant::now();
                 self.upload_texture(*key, img);
+                crate::stats::texture(started.elapsed());
             }
         }
         for (key, levels) in &frame.chains {
@@ -1424,7 +1452,9 @@ impl Renderer {
                     .map(|k| frame.textures.get(k).map(|m| &**m))
                     .collect();
                 if let Some(imgs) = imgs {
+                    let started = std::time::Instant::now();
                     self.upload_chain(*key, &imgs);
+                    crate::stats::texture(started.elapsed());
                 }
             }
         }
@@ -1554,14 +1584,23 @@ impl Renderer {
                     resolve_target: resolve,
                     ops: wgpu::Operations {
                         load: color_load,
-                        store: wgpu::StoreOp::Store,
+                        // Resolved into `target`: the multisampled picture
+                        // is not needed afterwards (the next frame reloads it
+                        // from `target`, `prepare_persistent`). Kept on the
+                        // GPU's tiles instead of written out to memory.
+                        store: if resolve.is_some() {
+                            wgpu::StoreOp::Discard
+                        } else {
+                            wgpu::StoreOp::Store
+                        },
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &t.depth,
+                    // Cleared by every pass: never written out.
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(0.0),
-                        store: wgpu::StoreOp::Store,
+                        store: wgpu::StoreOp::Discard,
                     }),
                     stencil_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(0),
@@ -1575,7 +1614,7 @@ impl Renderer {
             pass.set_stencil_reference(1);
             for (i, d) in frame.draws.iter().enumerate() {
                 let [x, y, w, h] = scissors[i];
-                if w == 0 || h == 0 || d.vertex_count == 0 {
+                if w == 0 || h == 0 || d.vertex_count == 0 || (self.skip_world && d.view != 0) {
                     continue;
                 }
                 let bkey: BindKey = (
@@ -1594,6 +1633,90 @@ impl Renderer {
             }
         }
         crate::submit(&self.queue, [enc.finish()]);
+    }
+
+    /// Birdman64VR: leave the world view's draws out of the flat picture
+    /// (window.rs, while the stereo world is on and the panel never shows
+    /// it). Its 2D draws (HUD, fades, the photo) are still drawn.
+    pub fn set_skip_world(&mut self, skip: bool) {
+        self.skip_world = skip;
+    }
+
+    /// The full-screen draw that clears depth (to the far value, 0: depth
+    /// is reversed) and stencil inside an eye's render pass, made for the
+    /// current MSAA sample count.
+    fn depth_clear_pipeline(&mut self) {
+        let samples = self.options.msaa;
+        if self
+            .depth_clear
+            .as_ref()
+            .is_some_and(|(n, _)| *n == samples)
+        {
+            return;
+        }
+        let started = std::time::Instant::now();
+        let module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("pw64 depth clear"),
+                source: wgpu::ShaderSource::Wgsl(DEPTH_CLEAR_WGSL.into()),
+            });
+        let layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("pw64 depth clear"),
+                bind_group_layouts: &[],
+                push_constant_ranges: &[],
+            });
+        let zero = wgpu::StencilFaceState {
+            compare: wgpu::CompareFunction::Always,
+            fail_op: wgpu::StencilOperation::Zero,
+            depth_fail_op: wgpu::StencilOperation::Zero,
+            pass_op: wgpu::StencilOperation::Zero,
+        };
+        let pipeline = self
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("pw64 depth clear"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_clear"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: self.depth_format,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Always,
+                    stencil: wgpu::StencilState {
+                        front: zero,
+                        back: zero,
+                        read_mask: 0xff,
+                        write_mask: 0xff,
+                    },
+                    bias: Default::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: samples,
+                    ..Default::default()
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_clear"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::empty(),
+                    })],
+                }),
+                multiview: None,
+                cache: None,
+            });
+        crate::stats::pipeline(started.elapsed());
+        self.depth_clear = Some((samples, pipeline));
     }
 
     /// Birdman64VR: one eye of a frame that [`Frame::has_world`], into
@@ -1863,48 +1986,59 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("pw64 eye"),
             });
+        passes.push(panel);
+        crate::stats::eye(passes.iter().map(Vec::len).sum());
+        self.depth_clear_pipeline();
         let ub = self.ubuf.as_ref().unwrap();
         let t = &self.targets[&size];
-        passes.push(panel);
-        let last = passes.len() - 1;
-        for (pass_no, draws) in passes.iter().enumerate() {
-            // With MSAA every pass draws into the multisampled attachment
-            // and the last one resolves it.
-            let (view, resolve) = match &t.msaa {
-                Some(m) => (m, (pass_no == last).then_some(target)),
-                None => (target, None),
-            };
-            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("pw64 eye"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    depth_slice: None,
-                    resolve_target: resolve,
-                    ops: wgpu::Operations {
-                        load: if pass_no == 0 {
-                            wgpu::LoadOp::Clear(clear)
-                        } else {
-                            wgpu::LoadOp::Load
-                        },
-                        store: wgpu::StoreOp::Store,
+        let depth_clear = &self.depth_clear.as_ref().unwrap().1;
+        // One render pass for the whole eye, so the picture stays on the
+        // GPU's tiles (Quest: every pass break wrote the multisampled
+        // picture and the depth out to memory and read them back). Between
+        // the world's parts and before the panel, a full-screen draw clears
+        // depth and stencil instead of a new pass.
+        // With MSAA the pass resolves into `target`; the multisampled
+        // picture and the depth are not needed afterwards.
+        let (view, resolve) = match &t.msaa {
+            Some(m) => (m, Some(target)),
+            None => (target, None),
+        };
+        let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("pw64 eye"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: resolve,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(clear),
+                    store: if resolve.is_some() {
+                        wgpu::StoreOp::Discard
+                    } else {
+                        wgpu::StoreOp::Store
                     },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &t.depth,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(0.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(0),
-                        store: wgpu::StoreOp::Discard,
-                    }),
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &t.depth,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(0.0),
+                    store: wgpu::StoreOp::Discard,
                 }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            pass.set_vertex_buffer(0, self.vbuf.as_ref().unwrap().0.slice(..));
-            pass.set_stencil_reference(1);
+                stencil_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(0),
+                    store: wgpu::StoreOp::Discard,
+                }),
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_vertex_buffer(0, self.vbuf.as_ref().unwrap().0.slice(..));
+        pass.set_stencil_reference(1);
+        for (pass_no, draws) in passes.iter().enumerate() {
+            if pass_no > 0 {
+                pass.set_pipeline(depth_clear);
+                pass.draw(0..3, 0..1);
+            }
             for &i in draws {
                 let d = &frame.draws[i];
                 let bkey: BindKey = (
@@ -1921,6 +2055,7 @@ impl Renderer {
                 }
             }
         }
+        drop(pass);
         crate::submit(&self.queue, [enc.finish()]);
     }
 
@@ -2619,6 +2754,48 @@ mod tests {
         let zoomed = read_rgba(&device, &queue, &tex);
         assert_eq!(px(&zoomed, 14, 24), [255, 0, 0]);
         assert_eq!(px(&zoomed, 6, 24), [0, 0, 0]);
+
+        // A depth clear between two parts of the world (the game clears
+        // depth after drawing the sky): inside the eye's one render pass
+        // (a full-screen draw, `depth_clear_pipeline`), so the farther red
+        // quad drawn after it covers the nearer green one. With and
+        // without MSAA.
+        let mut cleared = frame.clone();
+        assert_eq!(cleared.draws.len(), 1, "green, then red, in one draw");
+        let both = cleared.draws[0].clone();
+        assert_eq!(both.vertex_count, 12, "two quads");
+        let (mut green, mut red, mut dc) = (both.clone(), both.clone(), both);
+        green.vertex_count = 6;
+        red.first_vertex += 6;
+        red.vertex_count = 6;
+        dc.pipeline.shader.mode = ShaderMode::DepthClear;
+        dc.vertex_count = 0;
+        cleared.draws = vec![green, dc, red];
+        let flat_eye = StereoEye {
+            world: same,
+            ..eye
+        };
+        for msaa in [1, 4] {
+            let mut r = Renderer::new(
+                &device,
+                &queue,
+                wgpu::TextureFormat::Rgba8Unorm,
+                RenderOptions {
+                    msaa,
+                    fill_view: false,
+                    ..Default::default()
+                },
+            );
+            r.render_stereo(&cleared, &view, (w, h), &flat_eye);
+            let img = read_rgba(&device, &queue, &tex);
+            assert_eq!(px(&img, 38, 24), [255, 0, 0], "msaa {msaa}: red over green");
+            assert_eq!(px(&img, 26, 24), [255, 0, 0], "msaa {msaa}");
+            assert_eq!(px(&img, 4, 24), [0, 0, 0], "msaa {msaa}");
+            // Without the clear, the nearer green quad stays in front.
+            r.render_stereo(&frame, &view, (w, h), &flat_eye);
+            let img = read_rgba(&device, &queue, &tex);
+            assert_eq!(px(&img, 38, 24), [0, 255, 0], "msaa {msaa}: depth tested");
+        }
 
         // A gauge on the cockpit's dashboard (`DashPanel`): a blue HUD
         // element (id 3) put at the frame's dashboard point, depth tested

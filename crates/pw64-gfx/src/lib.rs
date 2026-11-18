@@ -20,6 +20,7 @@ pub mod pixels;
 pub mod rdp;
 pub mod renderer;
 pub mod shader;
+pub mod stats;
 pub mod texture;
 
 pub use frame::{Anchor, Dash, Diorama, Frame, N64_HEIGHT, N64_WIDTH, Table, Wide};
