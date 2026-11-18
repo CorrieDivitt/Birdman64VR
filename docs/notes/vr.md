@@ -838,6 +838,16 @@ the oil plant flame.
   model about the vehicle or its middle (`Vr::table_spin`, `table_eye`
   `spin`; reset with the zoom in the menus), as in the menus.
 
+- Zoom (vr/diorama-zoom): fully zoomed in, the player is 20 game metres
+  away on every island (`TABLE_NEAREST_GAME_M`, `table_zoom_max` from the
+  island's bounds; at least the old 7.5, which was about 100 m on the
+  smallest island and further on the big ones).
+- Sea and sky (the user, after round 4 in the headset): back to none in
+  every Diorama choice. The game's sea is a patch following its camera,
+  sized per level, black above some height on the smallest island; the sky
+  is not drawn the same way on every level (the own-view test caught the
+  sea on the big ones and missed their sky). Tracker After 1.0, x1.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`
