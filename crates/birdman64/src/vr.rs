@@ -1420,7 +1420,8 @@ mod real {
         pub(crate) fn connect(window: &Arc<Window>) -> Result<(GpuContext, Self), String> {
             // The optional features pw64-gfx asks for (`device_descriptor`).
             let features = wgpu::Features::DEPTH32FLOAT_STENCIL8
-                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                | wgpu::Features::PIPELINE_CACHE;
             #[cfg(not(target_os = "android"))]
             let xr = XrContext::new(features, Panel::default());
             #[cfg(target_os = "android")]
@@ -1770,7 +1771,8 @@ mod real {
                     })
                 })
                 .flatten();
-            for (eye, pose) in poses.iter().enumerate() {
+            let mut eyes = Vec::with_capacity(poses.len());
+            for pose in &poses {
                 let seated = seat.seated(pose);
                 let mut matrices = match (&frame.diorama, &table) {
                     (Some(d), _) => diorama_eye(&seated, d, self.spin),
@@ -1803,8 +1805,15 @@ mod real {
                     t[3][2] = -back;
                     matrices.world = pw64_gfx::matrix::mul(&t, &matrices.world);
                 }
-                renderer.render_stereo(frame, &views[back][eye], self.eye_size, &matrices);
+                eyes.push(matrices);
             }
+            // q6: both eyes in one call (one upload, one submit).
+            let targets: Vec<_> = eyes
+                .iter()
+                .enumerate()
+                .map(|(eye, m)| (&views[back][eye], m))
+                .collect();
+            renderer.render_stereo_eyes(frame, self.eye_size, &targets);
             self.eye_serial += 1;
             {
                 let mut src = self.source.lock().unwrap_or_else(|e| e.into_inner());
@@ -1843,10 +1852,13 @@ mod real {
                 self.described = Instant::now() - Duration::from_secs(60);
                 log(
                     &format!(
-                        "stereo world on: {} draws, {} world views, eye {:?}",
+                        "stereo world on: {} draws, {} world views, eye {:?}, MSAA {}, flat \
+                         picture {:?} (its world left out)",
                         frame.draws.len(),
                         frame.views.len(),
-                        self.eye_size
+                        self.eye_size,
+                        renderer.options.msaa,
+                        renderer.fb_size()
                     ),
                     true,
                 );
@@ -2708,6 +2720,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 let (_, age_avg, age_max) = super::PANEL_AGE.take();
                 let (_, ahead_avg, ahead_max) = super::AHEAD.take();
                 let idle = std::mem::take(&mut not_shown);
+                let gpu = pw64_gfx::stats::take();
                 log(
                     &format!(
                         "{}t {:.0} s: headset {:.0} fps (frame {period_ms:.1} ms, longest gap \
@@ -2716,7 +2729,12 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                          {to_panel_max:.1} ms, age when the headset draws it avg {age_avg:.1} \
                          max {age_max:.1} ms, then shown {ahead_avg:.1} (max {ahead_max:.1}) ms \
                          later; headset frames not shown {idle}; stereo: {} new eye pictures, \
-                         {} shown again, lead {:.1} ms; longest, ms: {}",
+                         {} shown again, lead {:.1} ms; longest, ms: {}; compiled {} \
+                         pipelines ({:.0} ms, longest {:.0}; {} new shaders, {:.0} ms), {} \
+                         new textures ({:.0} ms); eye draws avg {:.0} max {} ({:.0} more joined into \
+                         them); {} stereo draws, \
+                         CPU avg {:.1} ms preparing, {:.1} ms recording, {:.1} ms submitting; \
+                         all submits waited {:.0} ms for the queue (longest {:.1}); not joined: {}",
                         if hitch { "hitch, " } else { "" },
                         started.elapsed().as_secs_f64(),
                         shown as f64 / secs,
@@ -2725,7 +2743,24 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                         std::mem::take(&mut eyes_new),
                         std::mem::take(&mut eyes_repeated),
                         lead().as_secs_f64() * 1e3,
-                        detail.join(", ")
+                        detail.join(", "),
+                        gpu.pipelines,
+                        gpu.pipeline_ms,
+                        gpu.pipeline_max_ms,
+                        gpu.shaders,
+                        gpu.shader_ms,
+                        gpu.textures,
+                        gpu.texture_ms,
+                        gpu.eye_draws_avg,
+                        gpu.eye_draws_max,
+                        gpu.merged_avg,
+                        gpu.eye_calls,
+                        gpu.eye_prep_ms,
+                        gpu.eye_encode_ms,
+                        gpu.eye_submit_ms,
+                        gpu.gate_ms,
+                        gpu.gate_max_ms,
+                        gpu.misses
                     ),
                     hitch,
                 );

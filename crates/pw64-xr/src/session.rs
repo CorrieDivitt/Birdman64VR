@@ -370,6 +370,9 @@ impl XrContext {
         // is): the room behind the menus. Quest offers it only to apps
         // whose manifest has the PASSTHROUGH feature.
         enabled.fb_passthrough = cfg!(target_os = "android") && available.fb_passthrough;
+        // Optional, standalone headsets only: the CPU's clock level (q6).
+        enabled.ext_performance_settings =
+            cfg!(target_os = "android") && available.ext_performance_settings;
         // Optional: the runtime's clock, to see how far ahead it predicts
         // (`FrameTime::ahead_ns`).
         #[cfg(windows)]
@@ -452,6 +455,31 @@ impl XrContext {
             );
             None
         };
+        // q6: the Quest picks the CPU clock by how busy the cores are; the
+        // window thread prepares both eye pictures in one go and stays
+        // under the bar, so the CPU often ran at 1.4 GHz (level 2) and the
+        // game fell to 35-50 fps with Infinite LOD. Sustained high asks for
+        // a higher clock it can hold without overheating; the GPU stays on
+        // the runtime's own choice.
+        if enabled.ext_performance_settings {
+            let level = xr::sys::PerfSettingsLevelEXT::SUSTAINED_HIGH;
+            log.push(
+                match instance.exts().ext_performance_settings.map(|p| {
+                    // SAFETY: the extension is enabled; a live session handle.
+                    unsafe {
+                        (p.perf_settings_set_performance_level)(
+                            session.as_raw(),
+                            xr::sys::PerfSettingsDomainEXT::CPU,
+                            level,
+                        )
+                    }
+                }) {
+                    Some(r) if r.into_raw() >= 0 => "performance: CPU level sustained high".into(),
+                    Some(r) => format!("performance: CPU level not set ({r:?})"),
+                    None => "performance: XR_EXT_performance_settings not loaded".into(),
+                },
+            );
+        }
         let controllers = match crate::controllers::Controllers::new(&instance, &session) {
             Ok(c) => Some(c),
             Err(e) => {

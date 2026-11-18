@@ -33,6 +33,7 @@ mod pad_art;
 mod pad_sprites;
 mod paths;
 mod perf;
+mod pipeline_cache;
 // rfd has no Android or iOS backend: log-only stand-ins with the same API
 // (Android: dialogs need JNI there, TODO with the SAF ROM picker; iOS v1
 // has no picker at all — the ROM is dropped into the Documents folder).

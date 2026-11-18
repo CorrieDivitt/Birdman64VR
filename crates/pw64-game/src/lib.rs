@@ -70,23 +70,28 @@ unsafe extern "C" {
 
 }
 
-/// Infinite LOD (models always at their most detailed level) and infinite
-/// view distance (far plane covering the whole island, no distance haze)
-/// for the C side (pw64_visibility.c). Call before `bootproc`, on the
-/// thread that runs the game.
+/// Infinite LOD and infinite view distance (pw64_visibility.c). The game
+/// reads both every frame (the LOD pick in dobj.c / sobj.c, the far plane in
+/// chan.c), so this may be called any time: before boot, and live from the
+/// settings (q6). Before the game module loads (dylib): nothing to set, the
+/// boot call sets them.
 pub fn set_visibility(infinite_lod: bool, infinite_view_distance: bool) {
-    // SAFETY: plain C globals; the game (the only reader) runs on this
-    // thread and hasn't started yet.
+    // SAFETY: plain C globals, written volatile (the game thread reads them;
+    // a whole aligned int, so a read sees the old or the new value).
     #[cfg(feature = "static")]
     unsafe {
-        pw64_infinite_lod = infinite_lod as i32;
-        pw64_infinite_view_distance = infinite_view_distance as i32;
+        core::ptr::addr_of_mut!(pw64_infinite_lod).write_volatile(infinite_lod as i32);
+        core::ptr::addr_of_mut!(pw64_infinite_view_distance)
+            .write_volatile(infinite_view_distance as i32);
     }
     // SAFETY: same globals, exported by the loaded game module.
     #[cfg(feature = "dylib")]
-    unsafe {
-        *dylib::game().infinite_lod = infinite_lod as i32;
-        *dylib::game().infinite_view_distance = infinite_view_distance as i32;
+    if let Some(g) = dylib::try_game() {
+        unsafe {
+            g.infinite_lod.write_volatile(infinite_lod as i32);
+            g.infinite_view_distance
+                .write_volatile(infinite_view_distance as i32);
+        }
     }
 }
 

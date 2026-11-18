@@ -20,6 +20,7 @@ pub mod pixels;
 pub mod rdp;
 pub mod renderer;
 pub mod shader;
+pub mod stats;
 pub mod texture;
 
 pub use frame::{Anchor, Dash, Diorama, Frame, N64_HEIGHT, N64_WIDTH, Table, Wide};
@@ -41,7 +42,8 @@ pub fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'sta
     wgpu::DeviceDescriptor {
         required_features: adapter.features()
             & (wgpu::Features::DEPTH32FLOAT_STENCIL8
-                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES),
+                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                | wgpu::Features::PIPELINE_CACHE),
         ..Default::default()
     }
 }
@@ -61,7 +63,9 @@ pub fn submit<I: IntoIterator<Item = wgpu::CommandBuffer>>(
     queue: &wgpu::Queue,
     commands: I,
 ) -> wgpu::SubmissionIndex {
+    let waiting = std::time::Instant::now();
     let _gate = QUEUE_GATE.lock().unwrap_or_else(|e| e.into_inner());
+    stats::gate_wait(waiting.elapsed());
     queue.submit(commands)
 }
 

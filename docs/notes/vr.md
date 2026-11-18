@@ -640,6 +640,115 @@ for both, each with and without passthrough.
   off`.
 - Open: the game still fogs and picks detail by its own chase camera.
 
+## Performance on the Quest 3 (q6)
+
+Measured 2026-11-17 on `main` (6430427) with logcat `-s birdman64 VrApi`
+(VrApi prints one line per second: `App` = the app's GPU time per frame,
+`GPU%`, `CPU%` with the busiest core as `W`, `CPU4/GPU` = clock levels,
+`Stale` = frames not delivered in time). Eye pictures 1680 x 1760, 72 Hz.
+
+| Scene | Headset fps | App (GPU) | GPU% | GPU level | Draws |
+|---|---|---|---|---|---|
+| Holiday Island hang glider | 72 | 7-10 ms | 60-80 | 2 | 320-380 |
+| Big island, chase + first person | 72 | 7-10 ms | 60-83 | 2 | 420-470 |
+| Diorama mode | 72 | 7-9 ms | 56-74 | 2 | 320 |
+| Infinite LOD + view distance | 10-60 | 12-89 ms | 94-95 | 4 | 2561 |
+
+- The CPU is never the limit (busiest core under 50 %; the game thread
+  keeps 72 fps). Normal play fits at the lowest GPU clock the headset uses.
+- Infinite LOD + view distance is GPU-bound on the number of draws: the
+  Adreno draws by tiles (bins), each draw goes through every bin, and 4x
+  MSAA multiplies the bins.
+- Hitches (one lost headset frame every 10-30 s in flight; 0.4-0.7 s at the
+  first menus) are single window-thread calls (`eye pictures`, `game draw`)
+  of 35-670 ms: pipelines and shader modules are made on first use
+  (`Renderer::pipeline`, no pipeline cache).
+
+Round 1 (`vr/perf-1`):
+- One render pass per eye: the game's depth clears between the world's
+  parts and before the panel are a full-screen draw (`DEPTH_CLEAR_WGSL`,
+  `depth_clear_pipeline`) instead of a new pass; depth, stencil and the
+  multisampled picture are not stored (`StoreOp::Discard`), only the
+  resolve. The flat picture's pass discards depth and its multisampled
+  picture too (`prepare_persistent` reloads it from the target).
+- While the stereo world is on, the flat picture's world draws are left
+  out (`Renderer::set_skip_world`, window.rs `drain`): the panel is cleared
+  and never shows them, on PC too.
+- Log: `pw64_gfx::stats` (pipelines compiled and their time, new textures,
+  eye draws) at the end of the 5 s line; MSAA and the flat picture size on
+  the `stereo world on` line.
+
+Round 1 in the headset (MSAA 1x, render scale 1.5: flat picture 2160 x
+1620): flights 4-6 ms GPU (from 7-10); Infinite LOD + view distance 72 fps
+at 7-10 ms GPU (from 10-60 fps at up to 89 ms), game ~48 fps: now the
+window thread's CPU (eye pictures ~15 ms, flat picture ~5 ms with 2550
+draws). Each new pipeline 25-38 ms; 15-38 of them at the first menus and
+at each flight's start (0.4-0.9 s), 1-4 at a time in flight (the lost
+frames). Textures: under 1 ms for dozens. The pipelines compile again in
+every run.
+
+Round 2 (`vr/perf-1`, second commit):
+- Driver pipeline cache on disk (`pipeline_cache.rs`: `<data dir>/
+  pipeline-cache/<wgpu::util::pipeline_cache_key>`, loaded at start, saved
+  at most every 5 s after new pipelines and when the app is suspended;
+  `Renderer::use_pipeline_cache` / `take_pipeline_cache_data`,
+  `Features::PIPELINE_CACHE` asked for where offered: Vulkan). Log
+  `[gpu] pipeline cache: ... loaded / saved`.
+- Both eyes in one call (`render_stereo_eyes`): textures and vertices
+  uploaded once, both eyes' uniforms in one buffer, one submit; the same
+  pipeline or textures as the draw before not set again.
+- The flat picture with its world left out skips the world draws' uniforms,
+  binds and pipelines too, and uploads only the vertices it draws.
+- Log: shader modules made and their time (of the pipeline time), stereo
+  calls per 5 s and their CPU time preparing and recording.
+
+Round 2 in the headset (looks the same): from the second run the cached
+pipelines take 1-6 ms each (44 at the first menus: 85 ms, was about 1 s);
+shader modules about 1 ms each. New pipelines are still 25-35 ms the first
+time they are ever needed. Infinite LOD + view distance: game ~50 fps, both
+eyes 2.9 ms CPU preparing and 8.9 ms recording (2550 draws each), GPU 8-11
+ms. Diorama mode with Infinite LOD + view distance: GPU 36-43 ms (whole
+island at full detail; the game still picks detail by its own camera).
+
+Round 3 (`vr/perf-1`, third commit): `merge_runs` issues neighbouring draws
+that change nothing (same view, pipeline, textures, uniform bytes, vertices
+following on, one step) as one draw call. Log: draws joined per eye.
+
+Round 3 in the headset: 0 draws joined (something differs between every
+two neighbouring draws); Infinite LOD + view distance unchanged (game ~50
+fps, recording 9 ms). Diorama mode with Infinite view distance only (LOD
+off): 1450 draws, GPU 6-8 ms, game 58 fps; recording still ~8.7 ms for
+fewer draws, so the time is probably not per draw.
+
+What the two options do (decomp `uvDobjGetLODIndex`, `uvSobjGetLODIndex`,
+`_uvDobjsDraw`, `uvSobj` draw): each model has up to a few detail levels,
+each its own mesh (`lodTable`, some a flat billboard), picked by distance
+from the camera against `lodRadius`; past the last radius the model is not
+drawn. Infinite LOD: always level 0, the full mesh (no billboards). Infinite
+view distance: models past their last radius drawn (at their last level, or
+level 0 with Infinite LOD) and the terrain's far plane reaching the whole
+island (`pw64_visibility_far`). Drawing only: game logic and animation do
+not read the level.
+
+Round 4 (log only): why neighbouring draws are not joined (the first
+difference: vertices, view, pipeline, textures or the uniform row), the
+eye pictures' submit time and every submit's wait for the queue lock (the
+headset thread holds it from begin frame to end frame).
+
+Round 4 in the headset (choppy, audio lagging: the game at 35-40 fps):
+the queue lock is not it (submits 0.3 ms, waits about 30 ms per 5 s in
+all). Neighbouring draws differ in pipeline (~1490 per eye) or textures
+(~1060): nothing to join. Recording took 12-14 ms instead of 9 because the
+CPU ran at 1382 MHz (level 2) instead of 2208 (round 3): the Quest sets the
+CPU clock by how busy the cores are, and the busiest core stayed near 70 %.
+The game's audio follows the game's frame rate.
+
+Round 5: `XR_EXT_performance_settings` CPU level sustained high (Quest
+only; log `performance: CPU level sustained high`), GPU left to the
+runtime. Infinite LOD and Infinite view distance apply at once from the
+settings (`pw64_game::set_visibility` any time, volatile writes; the game
+reads both every frame), no restart.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`

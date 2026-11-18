@@ -267,7 +267,8 @@ pub fn fill_screen() -> bool {
 }
 
 /// Infinite LOD: models always at their most detailed level. Env
-/// `PW64_INFINITE_LOD` > config > off; read once before boot (restart-only).
+/// `PW64_INFINITE_LOD` > config > off; read at boot, then the settings set
+/// it live (`pw64_game::set_visibility`).
 pub fn infinite_lod() -> bool {
     precedence(
         env_opt("PW64_INFINITE_LOD", "use 0 or 1", parse_vsync),
@@ -277,7 +278,8 @@ pub fn infinite_lod() -> bool {
 }
 
 /// Infinite view distance: the whole island in view. Env
-/// `PW64_INFINITE_VIEW_DISTANCE` > config > off; read once before boot.
+/// `PW64_INFINITE_VIEW_DISTANCE` > config > off; read at boot, then live
+/// from the settings.
 pub fn infinite_view_distance() -> bool {
     precedence(
         env_opt("PW64_INFINITE_VIEW_DISTANCE", "use 0 or 1", parse_vsync),

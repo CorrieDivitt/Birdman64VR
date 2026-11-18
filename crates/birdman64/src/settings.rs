@@ -1656,6 +1656,19 @@ impl Overlay {
 
     /// Pushes the live options to the window.
     fn apply_live(&mut self, gpu: &mut Gpu) {
+        // q6: Infinite LOD and view distance apply at once (the game reads
+        // them every frame); the running values follow, so no restart mark.
+        let visibility = (self.infinite_lod, self.infinite_view_distance);
+        if visibility
+            != (
+                self.running.infinite_lod,
+                self.running.infinite_view_distance,
+            )
+        {
+            pw64_game::set_visibility(visibility.0, visibility.1);
+            self.running.infinite_lod = visibility.0;
+            self.running.infinite_view_distance = visibility.1;
+        }
         if std::mem::take(&mut self.apply_display_mode) {
             gpu.set_display_mode(self.display_mode_choice());
             // The monitor (refresh) may change with the mode: re-read the
@@ -4018,12 +4031,11 @@ fn help(row: Row) -> &'static str {
                  Needs a restart."
             }
             Opt::InfiniteLod => {
-                "Draws every model at full detail, however far away. Off = original look. \
-                 Needs a restart."
+                "Draws every model at full detail, however far away. Off = original look."
             }
             Opt::InfiniteViewDistance => {
                 "Lets you see the whole island instead of the haze about 2 km out. Can lower \
-                 the frame rate, more so with split-screen. Needs a restart."
+                 the frame rate, more so with split-screen."
             }
             Opt::Fps => {
                 "How smoothly the game runs. Match display is best; pick 60 if the game \
