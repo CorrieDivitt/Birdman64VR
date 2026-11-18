@@ -56,6 +56,8 @@ unsafe extern "C" {
     static mut pw64_infinite_lod: i32;
     /// native/src/pw64_visibility.c: whole-island view distance, 0 = off.
     static mut pw64_infinite_view_distance: i32;
+    /// native/src/pw64_visibility.c: Animation distance infinite, 0 = off.
+    static mut pw64_anim_infinite: i32;
     /// native/src/pw64_plane.c: the plane the gyrocopter slot flies,
     /// `PLANE_*` (0 = off).
     static mut pw64_plane: i32;
@@ -92,6 +94,25 @@ pub fn set_visibility(infinite_lod: bool, infinite_view_distance: bool) {
             g.infinite_view_distance
                 .write_volatile(infinite_view_distance as i32);
         }
+    }
+}
+
+/// Animation distance (pw64_visibility.c): `true` = the ambient moving
+/// objects (theme-park and village toys, boats, the ferry, the ski lift,
+/// gliders, planes) animate at any distance instead of only near the camera;
+/// triggered ones (whales, Missi, the shuttle, ...) are unchanged. Read every
+/// frame: may be called any time (before the module loads: nothing to set,
+/// the boot call sets it).
+pub fn set_anim_distance(infinite: bool) {
+    // SAFETY: plain C global, written volatile (the game thread reads it).
+    #[cfg(feature = "static")]
+    unsafe {
+        core::ptr::addr_of_mut!(pw64_anim_infinite).write_volatile(infinite as i32);
+    }
+    // SAFETY: same global, exported by the loaded game module.
+    #[cfg(feature = "dylib")]
+    if let Some(g) = dylib::try_game() {
+        unsafe { g.anim_infinite.write_volatile(infinite as i32) };
     }
 }
 

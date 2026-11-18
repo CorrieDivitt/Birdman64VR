@@ -470,5 +470,10 @@ int pw64_text_encode_style(const char* ascii, short* out, int max, int bold);
 extern int pw64_infinite_lod;
 extern int pw64_infinite_view_distance;
 float pw64_visibility_far(const void* chan, float far);
+/* Animation distance (pw64_visibility.c): 1 = ambient proximity
+ * animations (marked with pw64_prox_ambient_set) run at any distance. */
+extern int pw64_anim_infinite;
+void pw64_prox_ambient_set(int prox_id, int ambient);
+int pw64_prox_always(int prox_id);
 
 #endif

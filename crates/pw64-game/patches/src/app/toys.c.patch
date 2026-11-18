@@ -1,6 +1,6 @@
 --- a/src/app/toys.c
 +++ b/src/app/toys.c
-@@ -172,7 +172,7 @@ STATIC_FUNC s32 toyProxEventCb(s32 proxId, s32 eventType, s32 clientData) {
+@@ -172,7 +172,7 @@
      switch (eventType) {
      case 0:
          prox = proxAnimGetHandle(proxId);
@@ -9,7 +9,7 @@
              return -1;
          }
          break;
-@@ -187,7 +187,7 @@ STATIC_FUNC s32 toyProxAnimCb(s32 proxId, UNUSED f32 timeout, s32 clientData) {
+@@ -187,7 +187,7 @@
      Toy* toy;
      s32 res;
  
@@ -18,12 +18,13 @@
      res = 0;
      if ((proxAnimGetRange(proxId) > 100.0f) && (toy->toyType != TOY_MOUNT_RUSHMORE)) {
          res = 2;
-@@ -206,7 +206,7 @@ void toyLoad(LevelTOYS* lvlToy) {
+@@ -206,7 +206,8 @@
      }
  
      toy = &sToys[sToyCount];
 -    sToys[sToyCount].unk0 = proxAnimAddCallback(toyProxAnimCb, toyProxEventCb, lvlToy->pos, 100.0f, 0.0f, (s32)toy);
 +    sToys[sToyCount].unk0 = proxAnimAddCallback(toyProxAnimCb, toyProxEventCb, lvlToy->pos, 100.0f, 0.0f, (s32)PW64_U32(toy));
++    pw64_prox_ambient_set(sToys[sToyCount].unk0, 1); // PW64: Animation distance
      if (sToys[sToyCount].unk250 == 1.0f) {
          uvSobjModel(toy->terraId, MODEL_STONE_WARIO_HEAD);
      }

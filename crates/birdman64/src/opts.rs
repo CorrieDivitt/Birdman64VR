@@ -288,6 +288,13 @@ pub fn infinite_view_distance() -> bool {
     )
 }
 
+/// Animation distance infinite: the ambient moving objects animate at any
+/// distance (`pw64_game::set_anim_distance`). Config > off; read at boot,
+/// then live from the settings.
+pub fn infinite_animation_distance() -> bool {
+    crate::config::get().graphics.infinite_animation_distance
+}
+
 /// What the gyrocopter slot flies (experimental plane variant; the C
 /// `pw64_plane` value, latched at each test start; plane runs save nothing).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

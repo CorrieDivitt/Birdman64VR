@@ -1,6 +1,6 @@
 --- a/src/app/glider_toys.c
 +++ b/src/app/glider_toys.c
-@@ -99,6 +99,25 @@ STATIC_FUNC void gliderToyModelLookup(s32 idx) {
+@@ -99,6 +99,24 @@
  STATIC_FUNC s32 gliderToyModelLookup(s32 idx) {
      Unk80362690_Unk0* unkC;
      unkC = &D_80362690->unkC[D_80362690->unk9C];
@@ -25,3 +25,35 @@
      switch (unkC->pilot) {
      case PILOT_LARK:
          switch (idx) {
+@@ -230,6 +248,7 @@
+                 break;
+             }
+             glider->proxId = proxAnimAddCallback(gliderToyProxAnimCb, gliderToyProxEventCb, glider->pos, 2500.0f, 0.0f, i);
++            pw64_prox_ambient_set(glider->proxId, 1); // PW64: Animation distance
+             gliderToyUpdate(i);
+         }
+     }
+@@ -286,6 +305,7 @@
+                 break;
+             }
+             glider->proxId = proxAnimAddCallback(gliderToyProxAnimCb, gliderToyProxEventCb, glider->pos, 2500.0f, 0.0f, i);
++            pw64_prox_ambient_set(glider->proxId, 1); // PW64: Animation distance
+             gliderToyUpdate(i);
+         }
+     }
+@@ -333,6 +353,7 @@
+                 break;
+             }
+             glider->proxId = proxAnimAddCallback(gliderToyProxAnimCb, gliderToyProxEventCb, glider->pos, 2500.0f, 0.0f, i);
++            pw64_prox_ambient_set(glider->proxId, 1); // PW64: Animation distance
+             gliderToyUpdate(i);
+         }
+     }
+@@ -380,6 +401,7 @@
+                 break;
+             }
+             glider->proxId = proxAnimAddCallback(gliderToyProxAnimCb, gliderToyProxEventCb, glider->pos, 2500.0f, 0.0f, i);
++            pw64_prox_ambient_set(glider->proxId, 1); // PW64: Animation distance
+             gliderToyUpdate(i);
+         }
+     }

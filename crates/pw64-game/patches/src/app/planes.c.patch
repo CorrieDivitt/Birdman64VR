@@ -1,0 +1,10 @@
+--- a/src/app/planes.c
++++ b/src/app/planes.c
+@@ -210,6 +210,7 @@
+             envSnd.unk0.m[3][2] = pos.z;
+             envSoundLoad(&envSnd);
+             sPlanes[i].unk8 = proxAnimAddCallback(planesProxAnimCb, planesProxEventCb, pos, 4000.0f, 0.0f, i);
++            pw64_prox_ambient_set(sPlanes[i].unk8, 1); // PW64: Animation distance
+             planesUpdate(i);
+         }
+     }
