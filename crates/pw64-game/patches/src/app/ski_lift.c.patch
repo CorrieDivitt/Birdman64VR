@@ -8,7 +8,7 @@
  
  typedef struct {
      s32 objId;
-@@ -21,7 +22,7 @@ STATIC_FUNC void skiLiftUpdate(void) {
+@@ -21,7 +22,7 @@
  
      for (i = 0; i < ARRAY_COUNT(sSkiLift); i++) {
          if (sSkiLift[i].objId != 0xFFFF) {
@@ -17,3 +17,11 @@
              if (sSkiLift[i].interval >= 100.0f) {
                  sSkiLift[i].interval -= 100.0f;
              }
+@@ -86,6 +87,7 @@
+ 
+     sSkiLiftSpathId = spathLoadFile(4);
+     sSkiLiftProxId = proxAnimAddCallback(skiLiftProxAnimCb, skiLiftProxEventCb, pos, 1500.0f, 0.0f, 0);
++    pw64_prox_ambient_set(sSkiLiftProxId, 1); // PW64: Animation distance
+     for (i = 0; i < ARRAY_COUNT(sSkiLift); i++) {
+         sSkiLift[i].objId = uvDobjAllocIdx();
+         if (sSkiLift[i].objId != 0xFFFF) {

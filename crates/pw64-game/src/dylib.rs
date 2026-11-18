@@ -57,6 +57,9 @@ pub struct Game {
     pub infinite_lod: *mut i32,
     /// `pw64_infinite_view_distance` (pw64_visibility.c): 0 = off.
     pub infinite_view_distance: *mut i32,
+    /// `pw64_anim_infinite` (pw64_visibility.c): 1 = Animation distance
+    /// infinite.
+    pub anim_infinite: *mut i32,
     /// `pw64_plane` (pw64_plane.c): gyrocopter plane variant, `PLANE_*`.
     pub plane: *mut i32,
     /// `pw64_vr_hud_rad_per_px` (pw64_widescreen.c): VR HUD sphere scale.
@@ -196,6 +199,7 @@ fn bind_module(h: *mut c_void, path: &Path) -> Result<(), String> {
             split_hint: sym(c"pw64_split_hint")?.cast(),
             infinite_lod: sym(c"pw64_infinite_lod")?.cast(),
             infinite_view_distance: sym(c"pw64_infinite_view_distance")?.cast(),
+            anim_infinite: sym(c"pw64_anim_infinite")?.cast(),
             plane: sym(c"pw64_plane")?.cast(),
             vr_hud_rad_per_px: sym(c"pw64_vr_hud_rad_per_px")?.cast(),
             vr_gyro_windscreen: sym(c"pw64_vr_gyro_windscreen")?.cast(),

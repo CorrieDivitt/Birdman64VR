@@ -32,3 +32,28 @@ float pw64_visibility_far(const void* chan, float far) {
     dz = MAX(FABS(t->unk0.unk8 - c->unk1D8), FABS(t->unk0.unk14 - c->unk1D8));
     return MAX(far, uvSqrtF(SQ(dx) + SQ(dy) + SQ(dz)) + t->unk24 + 1000.0f);
 }
+
+/* Animation distance (Graphics page): the game animates objects through
+ * proximity slots (proxanim.c) only while the camera is within each one's
+ * range: 100 m for the toys (Ferris wheel, merry-go-round, water wheel,
+ * pump jacks), 1.2-4 km for boats, the ferry, the ski lift, gliders and
+ * planes. Infinite: those ambient ones (marked by their files when they
+ * register, proxAnimAddCallback) count as always in range
+ * (proxAnimGetRange). Triggered ones stay as they are: the whales, Missi,
+ * the shuttle's launch, the fountain, the oil gusher, the oil plant flame.
+ * Set any time by pw64_game::set_anim_distance; read every frame. */
+int pw64_anim_infinite = 0;
+
+#define PW64_PROX_SLOTS 40 /* sProxAnimSlots (proxanim.c) */
+static unsigned char pw64_prox_ambient[PW64_PROX_SLOTS];
+
+void pw64_prox_ambient_set(int prox_id, int ambient) {
+    if (prox_id >= 0 && prox_id < PW64_PROX_SLOTS) {
+        pw64_prox_ambient[prox_id] = ambient != 0;
+    }
+}
+
+int pw64_prox_always(int prox_id) {
+    return pw64_anim_infinite && prox_id >= 0 && prox_id < PW64_PROX_SLOTS &&
+           pw64_prox_ambient[prox_id];
+}

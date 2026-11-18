@@ -775,6 +775,30 @@ the renderer made with 1 sample when VR runs, window.rs; Reset graphics
 leaves the hidden value alone): turning it on in the headset was far too
 slow. The flat game keeps its MSAA setting.
 
+## Animation distance (Graphics page)
+
+The game animates moving objects through proximity slots (`proxanim.c`,
+40 of them): each registers a range and runs only while the player's
+camera is inside it (`proxAnimGetRange`, from the camera matrix). Ranges:
+toys (`toys.c`: Ferris wheel, merry-go-round, water wheel, pump jacks) 100
+m, and their callback stops past 100 m; fountain 350; whale 450; Missi and
+the oil plant flame 500; shuttle 750; ferry 1200; boats and ski lift 1500;
+whale pod 1750; gliders 2500; planes 4000. Wind turbines (`wind_objects.c`)
+are not in it: they update every frame and spin with the wind at their spot
+(`env_802E1754`: local wind zones, thermals and the level's wind), so some
+turn and some barely do.
+
+Setting `Opt::AnimDistance` (Original / Infinite, live,
+`[graphics] infinite_animation_distance`, `pw64_game::set_anim_distance` →
+C `pw64_anim_infinite`, exported like the visibility options). Infinite:
+the ambient slots count as always in range. They are marked when they
+register (`pw64_prox_ambient_set`, patched into toys.c, boats.c, ferry.c,
+ski_lift.c, glider_toys.c, planes.c; proxAnimAddCallback clears the mark)
+and proxanim.c's `proxAnimGetRange` returns 0 for them (`pw64_prox_always`).
+Not marked, as triggers or arrival effects (decided with the user): whales,
+the whale pod, Missi, the shuttle launch, the fountain, the oil gusher and
+the oil plant flame.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`

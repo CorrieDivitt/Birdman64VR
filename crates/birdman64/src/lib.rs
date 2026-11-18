@@ -527,6 +527,7 @@ pub fn run_game(
     });
     pw64_game::set_fill_screen(opts::fill_screen() && !vr::active());
     pw64_game::set_visibility(opts::infinite_lod(), opts::infinite_view_distance());
+    pw64_game::set_anim_distance(opts::infinite_animation_distance());
     // Split-screen spike: with it on the game draws a second camera on
     // kernel channel 1 (splitscreen.md).
     pw64_game::set_split(u8::from(input::splitscreen_enabled()));

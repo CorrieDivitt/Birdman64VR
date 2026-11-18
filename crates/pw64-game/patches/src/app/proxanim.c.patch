@@ -1,10 +1,27 @@
 --- a/src/app/proxanim.c
 +++ b/src/app/proxanim.c
-@@ -119,4 +119,17 @@
+@@ -56,6 +56,7 @@
+     prox->timeout = timeout;
+     prox->clientData = arg;
+     prox->pos = pos;
++    pw64_prox_ambient_set(idx, 0); // PW64: marked by the caller if ambient
+     return idx;
+ }
+ 
+@@ -115,10 +116,29 @@
+         _uvDebugPrintf("Proxanim: Bad id %d passed to panm_getrange\n", proxId);
+         return 0.0f;
+     }
++    // PW64: Animation distance infinite: ambient animations (toys, boats,
++    // the ferry, planes, gliders, the ski lift) are always in range;
++    // triggered ones (whales, Missi, the shuttle, ...) are not marked.
++    if (pw64_prox_always(proxId)) {
++        return 0.0f;
++    }
+ 
      dx = temp_v1->unk2C.m[3][0] - prox->pos.x;
      dy = temp_v1->unk2C.m[3][1] - prox->pos.y;
      dz = temp_v1->unk2C.m[3][2] - prox->pos.z;
--    return uvLength3D(dx, dy, dz);
 +    // PW64 split-screen: proximity effects (the oil plant's flame, which a
 +    // Shutter Bug photo needs, fountains, ...) woke only near the live
 +    // player (player 1 in proxAnimUpdate): use the nearest player.
@@ -18,4 +35,6 @@
 +        }
 +        return d;
 +    }
-+    return uvLength3D(dx, dy, dz);
+     return uvLength3D(dx, dy, dz);
+ }
+ 

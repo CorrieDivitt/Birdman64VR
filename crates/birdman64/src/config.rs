@@ -25,6 +25,7 @@
 //! texture_pack = "hd"      # folder name in the data dir's `packs/` (`PW64_TEX_PACKS` wins)
 //! infinite_lod = false     # models at full detail at any distance (`PW64_INFINITE_LOD`)
 //! infinite_view_distance = false # the whole island in view (`PW64_INFINITE_VIEW_DISTANCE`)
+//! infinite_animation_distance = false # ambient moving objects animate at any distance
 //! display_mode = "windowed" # "windowed", "borderless" or "exclusive" (`PW64_DISPLAY_MODE`)
 //! fullscreen_resolution = "1920x1080@60" # exclusive video mode WxH[@Hz] (`PW64_FULLSCREEN_RES`)
 //! linux_window = "auto"    # Linux: "auto", "wayland" or "x11" (`PW64_LINUX_WINDOW`)
@@ -233,6 +234,9 @@ pub struct Graphics {
     pub infinite_lod: bool,
     /// Whole island in view (`PW64_INFINITE_VIEW_DISTANCE`).
     pub infinite_view_distance: bool,
+    /// Ambient moving objects animate at any distance (Animation distance:
+    /// infinite; `pw64_game::set_anim_distance`).
+    pub infinite_animation_distance: bool,
     /// How the window goes fullscreen, "windowed" / "borderless" /
     /// "exclusive" (`opts::parse_display_mode`).
     pub display_mode: Option<String>,
@@ -262,6 +266,7 @@ impl Default for Graphics {
             texture_pack: None,
             infinite_lod: false,
             infinite_view_distance: false,
+            infinite_animation_distance: false,
             display_mode: None,
             fullscreen_resolution: None,
             linux_window: None,
@@ -598,6 +603,13 @@ fn from_table(table: &toml::Table) -> Config {
                     g,
                     "infinite_view_distance",
                     "graphics.infinite_view_distance",
+                    &mut ignored,
+                    false,
+                );
+                cfg.graphics.infinite_animation_distance = bool_of(
+                    g,
+                    "infinite_animation_distance",
+                    "graphics.infinite_animation_distance",
                     &mut ignored,
                     false,
                 );
@@ -1388,6 +1400,9 @@ pub struct SavedSettings {
     pub infinite_lod: Option<bool>,
     /// Infinite view distance (None = leave as-is; off removes the key).
     pub infinite_view_distance: Option<bool>,
+    /// Animation distance infinite (None = leave as-is; off removes the
+    /// key).
+    pub infinite_animation_distance: Option<bool>,
     /// How the window goes fullscreen ("windowed" / "borderless" /
     /// "exclusive"); None = leave as-is.
     pub display_mode: Option<&'static str>,
@@ -1566,7 +1581,9 @@ fn builtin_default(section: &str, key: &str, low_end: bool) -> Option<toml::Valu
             })
         }
         ("graphics", "vsync") => Some(opts::VSYNC_DEFAULT.into()),
-        ("graphics", "infinite_lod" | "infinite_view_distance") => Some(false.into()),
+        ("graphics", "infinite_lod" | "infinite_view_distance" | "infinite_animation_distance") => {
+            Some(false.into())
+        }
         ("graphics", "display_mode") => Some(opts::DISPLAY_MODE_DEFAULT.into()),
         ("graphics", "volume") => Some(float(Graphics::default().volume)),
         // U25: the title shows the frame rate only when the player asked.
@@ -1687,6 +1704,9 @@ pub(crate) fn apply(
         }
         if let Some(v) = u.infinite_view_distance {
             put("infinite_view_distance", v.into());
+        }
+        if let Some(v) = u.infinite_animation_distance {
+            put("infinite_animation_distance", v.into());
         }
         if let Some(v) = u.display_mode {
             put("display_mode", v.into());
@@ -2779,6 +2799,10 @@ mod tests {
             parse("[graphics]\ninfinite_lod = \"yes\"\ninfinite_view_distance = 2\n").unwrap();
         assert!(!invalid.graphics.infinite_lod);
         assert!(!invalid.graphics.infinite_view_distance);
+        // Animation distance: a plain bool, off by default.
+        assert!(!parse("").unwrap().graphics.infinite_animation_distance);
+        let c = parse("[graphics]\ninfinite_animation_distance = true\n").unwrap();
+        assert!(c.graphics.infinite_animation_distance);
     }
 
     #[test]

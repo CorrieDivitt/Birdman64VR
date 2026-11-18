@@ -236,6 +236,7 @@ pub fn link_args(os: Os) -> Vec<String> {
             "-export:pw64_split_hint,DATA",
             "-export:pw64_infinite_lod,DATA",
             "-export:pw64_infinite_view_distance,DATA",
+            "-export:pw64_anim_infinite,DATA",
             "-export:pw64_plane,DATA",
             "-export:pw64_vr_hud_rad_per_px,DATA",
             "-export:pw64_vr_gyro_windscreen,DATA",
@@ -735,7 +736,7 @@ const LINUX_VERSION_SCRIPT: &str = "\
 { global: pw64_dll_bind; pw64_dll_abi; pw64_dll_range;
   bootproc; pw64_widescreen_aspect; pw64_fill_screen;
   pw64_split; pw64_split_collide; pw64_split_layout; pw64_split_share; pw64_split_req;
-  pw64_split_hint; pw64_infinite_lod; pw64_infinite_view_distance; pw64_plane;
+  pw64_split_hint; pw64_infinite_lod; pw64_infinite_view_distance; pw64_anim_infinite; pw64_plane;
   pw64_vr_hud_rad_per_px; pw64_vr_gyro_windscreen; pw64_vr_flight_vehicle; D_802B892C; pw64_vmap;
   local: *; };";
 
@@ -1020,7 +1021,11 @@ mod tests {
     #[test]
     fn module_exports_visibility_options_on_both_platforms() {
         let windows = link_args(Os::Windows);
-        for symbol in ["pw64_infinite_lod", "pw64_infinite_view_distance"] {
+        for symbol in [
+            "pw64_infinite_lod",
+            "pw64_infinite_view_distance",
+            "pw64_anim_infinite",
+        ] {
             assert!(windows.contains(&format!("-export:{symbol},DATA")));
             assert!(LINUX_VERSION_SCRIPT.contains(&format!("{symbol};")));
         }

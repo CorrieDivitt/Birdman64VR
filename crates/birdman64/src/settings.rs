@@ -415,6 +415,9 @@ enum Opt {
     FillScreen,
     InfiniteLod,
     InfiniteViewDistance,
+    /// Animation distance: original (moving objects only near the camera)
+    /// or infinite (the ambient ones always), live.
+    AnimDistance,
     Fps,
     Vsync,
     DisplayMode,
@@ -674,6 +677,8 @@ pub struct Overlay {
     /// U26 (live): pause when the window loses focus / the last pad
     /// disconnects (Main page row).
     pause_background: bool,
+    /// Animation distance infinite (live; `pw64_game::set_anim_distance`).
+    anim_infinite: bool,
     /// Staged gyrocopter plane variant (live from the next test start).
     plane: opts::PlaneMode,
     /// Switch 2 pads over BLE (live: `ble::set_enabled` on change).
@@ -866,6 +871,7 @@ impl Overlay {
             show_fps: opts::show_fps(),
             perf: crate::perf::cfg(),
             pause_background: opts::pause_in_background(),
+            anim_infinite: opts::infinite_animation_distance(),
             plane: opts::live_plane(),
             ble: crate::ble::is_on(),
             saved_toast: None,
@@ -1750,6 +1756,7 @@ impl Overlay {
         gpu.show_fps = self.show_fps;
         crate::perf::set_cfg(self.perf_cfg());
         gpu.pause_background = self.pause_background;
+        pw64_game::set_anim_distance(self.anim_infinite);
         // Frame rate and V-Sync are live: the window recomputes the present
         // rate + mode (`present_dirty` → `App::apply_present`).
         if gpu.fps != self.fps[self.fps_sel] || gpu.vsync != self.vsync {
@@ -2030,6 +2037,7 @@ impl Overlay {
                     Row::Opt(Opt::Msaa),
                     Row::Opt(Opt::InfiniteLod),
                     Row::Opt(Opt::InfiniteViewDistance),
+                    Row::Opt(Opt::AnimDistance),
                     // OLED care (O3): live, no restart.
                     Row::Opt(Opt::OledDrift),
                     Row::Opt(Opt::OledBrightness),
@@ -2358,6 +2366,7 @@ impl Overlay {
                     Opt::Msaa,
                     Opt::InfiniteLod,
                     Opt::InfiniteViewDistance,
+                    Opt::AnimDistance,
                     Opt::OledDrift,
                     Opt::OledBrightness,
                 ] {
@@ -2929,6 +2938,16 @@ impl Overlay {
                 },
                 "",
             ),
+            Opt::AnimDistance => (
+                "Animation distance",
+                if self.anim_infinite {
+                    "Infinite"
+                } else {
+                    "Original"
+                }
+                .into(),
+                "",
+            ),
             Opt::PauseBackground => (
                 "Pause when in the background",
                 if self.pause_background { "On" } else { "Off" }.into(),
@@ -3380,6 +3399,7 @@ impl Overlay {
                 Opt::PerfCorner if self.perf.pos.is_some() => self.perf.pos = None,
                 Opt::PerfCorner => self.perf.corner = self.perf.corner.step(d),
                 Opt::PauseBackground => self.pause_background = !self.pause_background,
+                Opt::AnimDistance => self.anim_infinite = !self.anim_infinite,
                 Opt::Plane => {
                     // Gyrocopter, Small plane, Big plane (wrapping).
                     self.plane = self.plane.step(d);
@@ -3467,6 +3487,7 @@ impl Overlay {
         }
         self.infinite_lod = false;
         self.infinite_view_distance = false;
+        self.anim_infinite = false;
         // S8: the D3 default is the monitor's aspect (Off on a 4:3 one);
         // saved by removing the key, so the file keeps following the display.
         let widescreen = opts::widescreen_default();
@@ -3552,6 +3573,7 @@ impl Overlay {
             show_fps: Some(self.show_fps),
             perf: Some(self.perf),
             pause_in_background: Some(self.pause_background),
+            infinite_animation_distance: Some(self.anim_infinite),
             // BLE pads (live). An env-set value can't change here, so it is
             // never saved (`changed_since`).
             ble: Some(self.ble),
@@ -3910,6 +3932,10 @@ fn changed_since(s: config::SavedSettings, snap: &config::SavedSettings) -> conf
         vsync: keep(s.vsync, &snap.vsync),
         infinite_lod: keep(s.infinite_lod, &snap.infinite_lod),
         infinite_view_distance: keep(s.infinite_view_distance, &snap.infinite_view_distance),
+        infinite_animation_distance: keep(
+            s.infinite_animation_distance,
+            &snap.infinite_animation_distance,
+        ),
         fill_screen: if fill_changed { s.fill_screen } else { None },
         texture_pack: keep(s.texture_pack, &snap.texture_pack),
         display_mode: keep(s.display_mode, &snap.display_mode),
@@ -4115,6 +4141,12 @@ fn help(row: Row) -> &'static str {
             Opt::InfiniteViewDistance => {
                 "Lets you see the whole island instead of the haze about 2 km out. Can lower \
                  the frame rate, more so with split-screen."
+            }
+            Opt::AnimDistance => {
+                "Original: the Ferris wheel, merry-go-round, water wheels, pump jacks, boats, \
+                 the ferry, the ski lift, gliders and planes only move once you are near them \
+                 (100 m for the fairground). Infinite: they always move. Things that happen \
+                 when you arrive (whales, the shuttle launch) are unchanged."
             }
             Opt::Fps => {
                 "How smoothly the game runs. Match display is best; pick 60 if the game \
@@ -4811,6 +4843,7 @@ mod tests {
             texture_pack: Some(Some("hd".into())),
             infinite_lod: Some(true),
             infinite_view_distance: Some(true),
+            infinite_animation_distance: None,
             display_mode: Some("exclusive"),
             fullscreen_resolution: Some(Some("640x480".into())),
             volume: Some(0.35),
@@ -4855,6 +4888,7 @@ mod tests {
             texture_pack: Some(None),
             infinite_lod: Some(false),
             infinite_view_distance: Some(false),
+            infinite_animation_distance: None,
             display_mode: Some("windowed"),
             fullscreen_resolution: Some(None),
             volume: Some(1.0),
@@ -5083,29 +5117,30 @@ mod tests {
         o.back();
         assert_eq!(o.rows()[o.sel], Row::PerfPage);
         // Confirm on Display & graphics opens the Graphics page: the
-        // ten graphics options, the texture-pack rows (pack + folder), the two
+        // eleven graphics options, the texture-pack rows (pack + folder), the two
         // OLED care rows, Reset to defaults, and Back (no restart-pending
         // change yet, so no banner row, U16).
         o.sel = 4;
         o.confirm();
         assert_eq!(o.page, Page::Graphics);
         let rows = o.rows();
-        assert_eq!(rows.len(), 18);
+        assert_eq!(rows.len(), 19);
         assert_eq!(rows[0], Row::Opt(Opt::DisplayMode));
         assert_eq!(rows[9], Row::Opt(Opt::TexturePack));
         assert_eq!(rows[10], Row::OpenPacksFolder);
         assert_eq!(rows[11], Row::Opt(Opt::Msaa));
         assert_eq!(rows[12], Row::Opt(Opt::InfiniteLod));
         assert_eq!(rows[13], Row::Opt(Opt::InfiniteViewDistance));
-        assert_eq!(rows[14], Row::Opt(Opt::OledDrift));
-        assert_eq!(rows[15], Row::Opt(Opt::OledBrightness));
-        assert_eq!(rows[16], Row::ResetGraphics);
-        assert_eq!(rows[17], Row::Back);
+        assert_eq!(rows[14], Row::Opt(Opt::AnimDistance));
+        assert_eq!(rows[15], Row::Opt(Opt::OledDrift));
+        assert_eq!(rows[16], Row::Opt(Opt::OledBrightness));
+        assert_eq!(rows[17], Row::ResetGraphics);
+        assert_eq!(rows[18], Row::Back);
         // Stage a restart-only change: the banner's "Restart now" row (U16)
         // appears first, right under the banner.
         o.msaa = 4;
         let rows = o.rows();
-        assert_eq!(rows.len(), 19);
+        assert_eq!(rows.len(), 20);
         assert_eq!(rows[0], Row::RestartNow);
         // Back (B / Escape / the Back row) returns to Main, selection on
         // the row that opened it.
