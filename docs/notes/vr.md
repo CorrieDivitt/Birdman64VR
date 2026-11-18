@@ -799,6 +799,17 @@ Not marked, as triggers or arrival effects (decided with the user): whales,
 the whale pod, Missi, the shuttle launch, the fountain, the oil gusher and
 the oil plant flame.
 
+## Diorama mode and the cannonball; sky and sea (vr/diorama-cannon)
+
+- The cannon's aim (cannonball camera mode 5, `cannonball.c` `unkB4`)
+  showed the model too: Diorama mode now leaves it full size, like the
+  first-person view (`CANNON_AIM_MODE`, `VEHICLE_CANNONBALL`, vr.rs).
+- The cannonball keeps its HUD in Diorama mode (the other vehicles have
+  none there).
+- To try (the user): the two non-passthrough choices (on, on static) draw
+  the game's sky and sea with the model, at its scale (`table_eye`:
+  `hide_env` only in the player's room).
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`

@@ -1172,13 +1172,21 @@ mod real {
     /// far in again).
     const TABLE_ZOOM_RANGE: (f32, f32) = (1.0 / 1.5, 7.5);
 
+    /// `VEHICLE_CANNONBALL` (decomp task.h).
+    const VEHICLE_CANNONBALL: u8 = 3;
+
+    /// The cannonball's camera mode while aiming (cannonball.c `unkB4` 5):
+    /// the view along the barrel, shown full size in Diorama mode.
+    const CANNON_AIM_MODE: i32 = 5;
+
     /// [`stereo_eye`] for a flight shown as a model (Diorama mode,
     /// [`pw64_gfx::Table`]): the island at the scale of the menus' model
     /// times `zoom`, game north away, level. `follow`: moved so the vehicle
     /// stays at [`TABLE_VEHICLE_M`] and the land slides past below it;
     /// else the island stands still where the menus' model does
-    /// ([`MODEL_CENTRE_M`], its middle at sea level). No sky and no sea;
-    /// around it the player's room (`room`) or the dim one.
+    /// ([`MODEL_CENTRE_M`], its middle at sea level). In the player's room
+    /// (`room`): no sky and no sea. In the dim room the game's sky and sea
+    /// are drawn too, at the model's scale (the user, to try).
     pub(super) fn table_eye(
         pose: &EyePose,
         t: &pw64_gfx::Table,
@@ -1218,7 +1226,7 @@ mod real {
         );
         let to_world = pw64_gfx::Diorama::to_world(&t.camera);
         eye.world = mul(&mul(&mul(&to_world, &centre), &place), &view);
-        eye.hide_env = true;
+        eye.hide_env = room;
         eye.background = Some(if room {
             MODEL_BACKGROUND_ROOM
         } else {
@@ -1748,13 +1756,18 @@ mod real {
                 m.copysign(v)
             });
             // Diorama mode: a flight as a model, unless the game's camera
-            // is the first-person one (R on the pad). In the player's room
-            // if the mode says so and the headset can.
+            // is the first-person one (R on the pad), or the cannon's aim
+            // (the cannonball's camera mode 5, looking down the barrel). In
+            // the player's room if the mode says so and the headset can.
             let mode = super::diorama_mode();
+            let cannonball = pw64_game::vr_flight_vehicle() == Some(VEHICLE_CANNONBALL);
             let table = frame.table.filter(|_| {
                 frame.diorama.is_none()
                     && mode != super::DioramaMode::Off
-                    && frame.up.is_some_and(|u| u[4] as i32 != 1)
+                    && frame.up.is_some_and(|u| {
+                        let cam = u[4] as i32;
+                        cam != 1 && !(cannonball && cam == CANNON_AIM_MODE)
+                    })
             });
             let table_room = mode.passthrough() && super::passthrough_available();
             if table.is_some() {
@@ -1827,8 +1840,9 @@ mod real {
                     matrices.background = Some(MODEL_BACKGROUND_ROOM);
                 }
                 // Diorama mode: no flight HUD while it is on, in the model
-                // view and in the game's first-person view alike.
-                if frame.diorama.is_none() && mode != super::DioramaMode::Off {
+                // view and in the game's first-person view alike; the
+                // cannonball keeps it (aiming needs its gauges).
+                if frame.diorama.is_none() && mode != super::DioramaMode::Off && !cannonball {
                     matrices.hide_hud = true;
                 }
                 // Horizon lock, in flight: the world level, the vehicle
@@ -3118,7 +3132,8 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                     ndc(apply(&eye.world, middle)),
                     ndc(apply(&view, MODEL_CENTRE_M))
                 ));
-                assert!(eye.hide_env && eye.clip.is_none());
+                // The dim room keeps the sky and the sea.
+                assert!(!eye.hide_env && eye.clip.is_none());
                 assert_eq!(eye.background.map(|b| b[3]), Some(1.0));
             }
         }
