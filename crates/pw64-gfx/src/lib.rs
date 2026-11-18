@@ -63,7 +63,9 @@ pub fn submit<I: IntoIterator<Item = wgpu::CommandBuffer>>(
     queue: &wgpu::Queue,
     commands: I,
 ) -> wgpu::SubmissionIndex {
+    let waiting = std::time::Instant::now();
     let _gate = QUEUE_GATE.lock().unwrap_or_else(|e| e.into_inner());
+    stats::gate_wait(waiting.elapsed());
     queue.submit(commands)
 }
 

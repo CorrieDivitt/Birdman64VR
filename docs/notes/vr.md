@@ -714,6 +714,27 @@ Round 3 (`vr/perf-1`, third commit): `merge_runs` issues neighbouring draws
 that change nothing (same view, pipeline, textures, uniform bytes, vertices
 following on, one step) as one draw call. Log: draws joined per eye.
 
+Round 3 in the headset: 0 draws joined (something differs between every
+two neighbouring draws); Infinite LOD + view distance unchanged (game ~50
+fps, recording 9 ms). Diorama mode with Infinite view distance only (LOD
+off): 1450 draws, GPU 6-8 ms, game 58 fps; recording still ~8.7 ms for
+fewer draws, so the time is probably not per draw.
+
+What the two options do (decomp `uvDobjGetLODIndex`, `uvSobjGetLODIndex`,
+`_uvDobjsDraw`, `uvSobj` draw): each model has up to a few detail levels,
+each its own mesh (`lodTable`, some a flat billboard), picked by distance
+from the camera against `lodRadius`; past the last radius the model is not
+drawn. Infinite LOD: always level 0, the full mesh (no billboards). Infinite
+view distance: models past their last radius drawn (at their last level, or
+level 0 with Infinite LOD) and the terrain's far plane reaching the whole
+island (`pw64_visibility_far`). Drawing only: game logic and animation do
+not read the level.
+
+Round 4 (log only): why neighbouring draws are not joined (the first
+difference: vertices, view, pipeline, textures or the uniform row), the
+eye pictures' submit time and every submit's wait for the queue lock (the
+headset thread holds it from begin frame to end frame).
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`

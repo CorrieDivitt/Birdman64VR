@@ -1848,16 +1848,31 @@ impl Renderer {
                     let d = &frame.draws[i];
                     if let Some((j, first, count)) = runs.last_mut() {
                         let p = &frame.draws[*j];
-                        if *first + *count == d.first_vertex
-                            && p.view == d.view
-                            && keys[*j] == keys[i]
-                            && Self::steps(&keys[i]).len() == 1
-                            && textures(p) == textures(d)
-                            && uniforms(*j) == uniforms(i)
-                        {
-                            *count += d.vertex_count;
-                            merged += 1;
-                            continue;
+                        // Why not (the first reason found; for the log).
+                        let miss = if *first + *count != d.first_vertex {
+                            Some(crate::stats::Miss::Vertices)
+                        } else if p.view != d.view {
+                            Some(crate::stats::Miss::View)
+                        } else if keys[*j] != keys[i] {
+                            Some(crate::stats::Miss::Pipeline)
+                        } else if Self::steps(&keys[i]).len() != 1 {
+                            Some(crate::stats::Miss::Steps)
+                        } else if textures(p) != textures(d) {
+                            Some(crate::stats::Miss::Textures)
+                        } else {
+                            let (a, b) = (uniforms(*j), uniforms(i));
+                            a.iter()
+                                .zip(b)
+                                .position(|(x, y)| x != y)
+                                .map(|at| crate::stats::Miss::Uniform(at / 16))
+                        };
+                        match miss {
+                            None => {
+                                *count += d.vertex_count;
+                                merged += 1;
+                                continue;
+                            }
+                            Some(m) => crate::stats::miss(m),
                         }
                     }
                     runs.push((i, d.first_vertex, d.vertex_count));
@@ -2219,8 +2234,10 @@ impl Renderer {
             }
             drop(pass);
         }
-        crate::submit(&self.queue, [enc.finish()]);
-        crate::stats::eye_cpu(prepared, started.elapsed() - prepared);
+        let commands = enc.finish();
+        let recorded = started.elapsed();
+        crate::submit(&self.queue, [commands]);
+        crate::stats::eye_cpu(prepared, recorded - prepared, started.elapsed() - recorded);
     }
 
     /// Renders offscreen and reads the result back as tightly packed RGBA8

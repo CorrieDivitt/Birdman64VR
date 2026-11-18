@@ -2733,7 +2733,8 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                          pipelines ({:.0} ms, longest {:.0}; {} new shaders, {:.0} ms), {} \
                          new textures ({:.0} ms); eye draws avg {:.0} max {} ({:.0} more joined into \
                          them); {} stereo draws, \
-                         CPU avg {:.1} ms preparing, {:.1} ms recording",
+                         CPU avg {:.1} ms preparing, {:.1} ms recording, {:.1} ms submitting; \
+                         all submits waited {:.0} ms for the queue (longest {:.1}); not joined: {}",
                         if hitch { "hitch, " } else { "" },
                         started.elapsed().as_secs_f64(),
                         shown as f64 / secs,
@@ -2755,7 +2756,11 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                         gpu.merged_avg,
                         gpu.eye_calls,
                         gpu.eye_prep_ms,
-                        gpu.eye_encode_ms
+                        gpu.eye_encode_ms,
+                        gpu.eye_submit_ms,
+                        gpu.gate_ms,
+                        gpu.gate_max_ms,
+                        gpu.misses
                     ),
                     hitch,
                 );
