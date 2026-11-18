@@ -139,6 +139,9 @@ extern int pw64_vr_gyro_windscreen;
  * frame; Rust reads it: Diorama mode): 0 aiming from behind the cannon,
  * 1 aiming down the barrel, 2 in flight. */
 extern int pw64_vr_cannon_view;
+/* Birdman64VR, same file: 1 = Diorama mode is on (Rust sets it; the
+ * cannonball's R in flight then gives first person). */
+extern int pw64_vr_table_on;
 /* The windscreen: part 9 of all six pilots' gyrocopter models (the only
  * translucent part; pw64-extract --models, models 0x127-0x133). */
 #define PW64_GYRO_WINDSCREEN_PART 9

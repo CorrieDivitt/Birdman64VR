@@ -70,6 +70,8 @@ pub struct Game {
     /// `pw64_vr_cannon_view` (pw64_widescreen.c): the cannonball's view, 0
     /// aiming from behind, 1 down the barrel, 2 in flight.
     pub vr_cannon_view: *mut i32,
+    /// `pw64_vr_table_on` (pw64_widescreen.c): 1 = Diorama mode on.
+    pub vr_table_on: *mut i32,
     /// `pw64_vr_flight_vehicle` (pw64_widescreen.c): the vehicle flown in
     /// VR, -1 none.
     pub vr_flight_vehicle: unsafe extern "C" fn() -> i32,
@@ -207,6 +209,7 @@ fn bind_module(h: *mut c_void, path: &Path) -> Result<(), String> {
             vr_hud_rad_per_px: sym(c"pw64_vr_hud_rad_per_px")?.cast(),
             vr_gyro_windscreen: sym(c"pw64_vr_gyro_windscreen")?.cast(),
             vr_cannon_view: sym(c"pw64_vr_cannon_view")?.cast(),
+            vr_table_on: sym(c"pw64_vr_table_on")?.cast(),
             vr_flight_vehicle: core::mem::transmute::<*mut c_void, unsafe extern "C" fn() -> i32>(
                 sym(c"pw64_vr_flight_vehicle")?,
             ),

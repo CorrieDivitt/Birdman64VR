@@ -4282,7 +4282,8 @@ fn help(row: Row) -> &'static str {
         Row::DioramaMode => {
             "Fly in third person over a small model of the island, with no sky and no sea. \
              On: the land slides past under your vehicle. Static: the island stands still. \
-             Passthrough: in your own room. Right stick up and down zooms. The first-person \
+             Passthrough: in your own room. Right stick up and down zooms, left and right turns \
+             the island. The first-person \
              view stays full size."
         }
         Row::RefreshRate => {

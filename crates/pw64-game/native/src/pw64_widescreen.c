@@ -66,6 +66,10 @@ int pw64_vr_gyro_windscreen = 1;
  * frame; pw64_game::vr_cannon_view). */
 int pw64_vr_cannon_view = 0;
 
+/* Birdman64VR: Diorama mode is on (pw64_game::set_vr_table_on, every
+ * frame from vr.rs). */
+int pw64_vr_table_on = 0;
+
 /* Where a direction `down` radians below the camera's forward axis shows on
  * the HUD sphere: radians right of and below the view's centre. (The
  * horizon lock turns the sight on the sphere itself, pw64-gfx

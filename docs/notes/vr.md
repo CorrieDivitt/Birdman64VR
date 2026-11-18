@@ -827,6 +827,16 @@ the oil plant flame.
   `pw64_vr_cannon_view` 0 behind, 1 barrel, 2 flight
   (`pw64_game::vr_cannon_view`, `CannonView`); behind as a model, the
   barrel full size.
+- Round 4 (the user): back to the sea at the model's scale, no sky:
+  `StereoEye::hide_sky` skips environment draws whose view is not the
+  land's (the sky dome has its own projection and view, `_uvEnvDraw` model
+  flag 2); `env_world` removed. Full-size sky: after 1.0 (tracker). The
+  cannonball in flight: R gives first person (full size) instead of the
+  cinematic view while Diorama mode is on (C `pw64_vr_table_on`, set by
+  vr.rs every frame; cannonball.c.patch; view 3, `CannonView::FlightAlt`),
+  HUD kept, no enlarged pilot. Right stick left / right turns the island
+  model about the vehicle or its middle (`Vr::table_spin`, `table_eye`
+  `spin`; reset with the zoom in the menus), as in the menus.
 
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
