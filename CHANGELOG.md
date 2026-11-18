@@ -1,11 +1,77 @@
 # Changelog
 
-All notable changes to Birdman64 are documented in this file.
+All notable changes to Birdman64VR are documented in this file. Birdman64VR
+is a fork of [Birdman64](https://github.com/NoahVl/Birdman64); Birdman64's own
+history up to the fork is kept below.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0] - 2026-11-18
+
+The first release of Birdman64VR: Pilotwings 64 in VR, standalone on the
+Meta Quest 3, built on Birdman64 1.5.1 and the changes on Birdman64's main
+branch at the time of the fork (listed below under Birdman64).
+
+### Added
+
+- A native Meta Quest 3 app (no PC needed): the game is built on the headset
+  from your own ROM on first start; the ROM comes from the system file picker
+  or over USB.
+- The world in stereo 3D with head tracking for every vehicle; the game no
+  longer leaves out what is outside its original camera view.
+- VR cameras: first person from the pilot's eyes for the hang glider, rocket
+  belt, sky diving (chute open) and the cannonball in flight; the gyrocopter's
+  cockpit with its pilot and dashboard; chase cameras tuned for VR. R switches
+  between chase and first person.
+- Comfortable camera moves: crashes, landings, badge celebrations and the title
+  snap and then hold still or turn slowly instead of flying you around; short
+  fades when the view changes; no black flashes between screens.
+- Horizon lock (VR Comfort page): bank (default), bank and pitch, or off.
+- A VR HUD: the gauges on a curved band in front of you, with their distance,
+  spread and size adjustable and each gauge shown or hidden; in the gyrocopter
+  the throttle and map can sit on the dashboard, and the windscreen can be
+  turned off. The page only shows the gauges your vehicle has.
+- Menus with the island as a model on a table below them (file select, level
+  select, results, replays).
+- Diorama mode: third-person flights as a model of the island, following your
+  vehicle or standing still, in a dim room with the game's sea around it, or
+  in your own room through passthrough (Quest). The right stick zooms and
+  turns it.
+- Passthrough (Quest): the menus and the island model in your own room.
+- Touch controllers as a gamepad (a Bluetooth pad works alongside them);
+  right stick press recentres the view, left stick press opens the settings.
+  The right stick moves the chase camera nearer or further and the
+  first-person eye forward or back, and turns the island model in the menus.
+- Refresh rate (Quest): headset default, 72, 80, 90 or 120 Hz.
+- Animation distance: Original, or Infinite to keep the Ferris wheel, boats,
+  ferry, ski lift, planes and other ambient animations moving at any distance.
+- A shutter blink in the headset when you take a photo.
+- An experimental PC VR version for Windows (OpenXR; tested over Meta Quest
+  Link): the zip carries the OpenXR loader and "Start in VR.cmd".
+
+### Changed
+
+- Infinite LOD and Infinite view distance apply at once, without a restart.
+- Saves and settings live in their own folder (`%APPDATA%\Birdman64VR` on
+  Windows), separate from Birdman64's; the Quest app is `app.birdman64vr`.
+- In VR the settings only show what applies in a headset: window modes,
+  widescreen, MSAA, render scale, OLED care, split-screen, touch controls and
+  Move HUD are hidden. The C buttons no longer turn the camera in VR.
+- Faster frames in the headset: one render pass per eye, both eyes prepared
+  together, and compiled shader pipelines saved to disk, so stutters on first
+  use only happen once.
+
+### Known issues
+
+- Infinite LOD is too heavy for the Quest 3 (the game drops to 35-52 fps);
+  Diorama mode with Infinite LOD falls to 20-57 fps.
+- No sky around the island model in Diorama mode yet.
+- PC VR is experimental and unsupported; over Virtual Desktop the passthrough
+  stays on.
+- Single player only in VR.
+
+## Birdman64, unreleased at the time of the fork
 
 ### Added
 
