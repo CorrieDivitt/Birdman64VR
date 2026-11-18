@@ -735,6 +735,20 @@ difference: vertices, view, pipeline, textures or the uniform row), the
 eye pictures' submit time and every submit's wait for the queue lock (the
 headset thread holds it from begin frame to end frame).
 
+Round 4 in the headset (choppy, audio lagging: the game at 35-40 fps):
+the queue lock is not it (submits 0.3 ms, waits about 30 ms per 5 s in
+all). Neighbouring draws differ in pipeline (~1490 per eye) or textures
+(~1060): nothing to join. Recording took 12-14 ms instead of 9 because the
+CPU ran at 1382 MHz (level 2) instead of 2208 (round 3): the Quest sets the
+CPU clock by how busy the cores are, and the busiest core stayed near 70 %.
+The game's audio follows the game's frame rate.
+
+Round 5: `XR_EXT_performance_settings` CPU level sustained high (Quest
+only; log `performance: CPU level sustained high`), GPU left to the
+runtime. Infinite LOD and Infinite view distance apply at once from the
+settings (`pw64_game::set_visibility` any time, volatile writes; the game
+reads both every frame), no restart.
+
 ## Quest (native, Android)
 - **APK:** `packaging/android/build-apk.sh --quest` → `birdman64-quest.apk`.
   The manifest's `QUEST` blocks are switched on (`com.oculus.intent.category.VR`
