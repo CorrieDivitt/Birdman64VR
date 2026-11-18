@@ -2,10 +2,12 @@ READ ME FIRST - Birdman64VR
 
 Pilotwings 64 in VR, built on Birdman64 by NoahVl and its contributors.
 
-PLAY IN VR: start your headset's OpenXR runtime first (Meta Quest Link
+PLAY IN VR (experimental on PC; the Quest 3 app is the main version):
+start your headset's OpenXR runtime first (Meta Quest Link
 with Meta set as the active OpenXR runtime, or SteamVR), then
 double-click "Start in VR.cmd". Birdman64VR.exe on its own starts the
 normal flat game (as does "Start in VR.cmd" when no runtime is running).
+Known issue: over Virtual Desktop the passthrough stays on.
 
 ROM: Birdman64VR needs your own copy of the Pilotwings 64 (US) ROM: a
 .z64, .n64 or .v64 file, or a .zip containing one. It cannot give you

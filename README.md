@@ -1,7 +1,7 @@
 # Birdman64VR
 
 **Pilotwings 64 in VR.** Experience your favorite flight sim in stereo 3D with head tracking, seated, on a **Meta Quest 3 with
-no PC**, or on a PC VR headset through OpenXR. An unofficial fork of
+no PC**, or (experimental) on a PC VR headset through OpenXR. An unofficial fork of
 [Birdman64](https://github.com/NoahVl/Birdman64), the native PC port of
 Pilotwings 64.
 
@@ -79,7 +79,11 @@ Everything Birdman64 does still works. On top of that:
 
 A newer APK installs over the old one and keeps your saves.
 
-### PC VR (Windows)
+### PC VR (Windows, experimental)
+
+PC VR is experimental and unsupported in 1.0: the Quest 3 standalone app is
+the main way to play. It was tested over Meta Quest Link; over Virtual
+Desktop passthrough stays on (see [Known issues](#known-issues)).
 
 1. Download `Birdman64VR-windows-x64.zip` from the
    [Releases](https://github.com/CorrieDivitt/Birdman64VR/releases) page and
@@ -87,9 +91,9 @@ A newer APK installs over the old one and keeps your saves.
    folder next to the exe).
 2. Start your headset's OpenXR runtime: Meta Quest Link with Meta set as
    the active OpenXR runtime (tested), or SteamVR (untested).
-3. Run `Birdman64VR.exe --vr` (a shortcut with `--vr` added to its target
-   works, or set `PW64_VR=1`). Without `--vr`, or without a running OpenXR
-   runtime, it starts as the normal flat game.
+3. Double-click **Start in VR.cmd** (it runs `Birdman64VR.exe --vr`). The
+   exe on its own, or without a running OpenXR runtime, starts the normal
+   flat game.
 4. First start: pick your ROM, and wait for the one-time build (about a
    minute, internet needed once), as in Birdman64.
 
@@ -270,9 +274,10 @@ texture packs and troubleshooting works as described in
   own chase camera.
 - Infinite LOD is too heavy for the Quest (see [Performance](#performance)).
 - Single player only in VR (split-screen stays in the flat game).
-- Tested on a Meta Quest 3 standalone and over Quest Link. Other headsets,
-  Air Link, Virtual Desktop and SteamVR have not been tested yet; reports
-  are welcome.
+- PC VR is experimental and unsupported. Over Virtual Desktop the
+  passthrough stays on, mixing your room into the game. Tested on a Meta
+  Quest 3 standalone and over Quest Link; other headsets, Air Link and
+  SteamVR have not been tested.
 
 ## Building from source
 
