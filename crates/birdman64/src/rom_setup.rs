@@ -279,9 +279,9 @@ fn welcome_to_birdman64(stale_rom: bool) -> bool {
     let ok = rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Info)
         .set_buttons(rfd::MessageButtons::OkCancel)
-        .set_title("Welcome to Birdman64")
+        .set_title("Welcome to Birdman64VR")
         .set_description(format!(
-            "{stale_note}Birdman64 plays your own copy of Pilotwings 64. Choose the game file \
+            "{stale_note}Birdman64VR plays your own copy of Pilotwings 64. Choose the game file \
              (the ROM) you made from your cartridge: a .z64, .n64 or .v64 file, or a .zip \
              containing one. Only the US version works.\n\nTip: put the file next to \
              {program} and it is found automatically."

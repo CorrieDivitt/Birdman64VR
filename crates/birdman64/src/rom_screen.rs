@@ -247,7 +247,7 @@ impl Screen {
                 ui.set_max_width(560.0);
                 ui.add_space((ui.available_height() * 0.18).max(8.0));
                 ui.label(
-                    egui::RichText::new("Welcome to Birdman64")
+                    egui::RichText::new("Welcome to Birdman64VR")
                         .size(26.0)
                         .strong(),
                 );
