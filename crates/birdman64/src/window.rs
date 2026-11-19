@@ -455,6 +455,12 @@ impl Gpu {
     /// The next surface texture, or `None` (no surface, or a failed acquire:
     /// logged, and reconfigured unless it only timed out).
     fn acquire(&mut self) -> Option<wgpu::SurfaceTexture> {
+        // Birdman64VR on the Quest: the surface is never configured
+        // (`configure_surface`), and asking it for a texture panics in wgpu.
+        // Everything goes to the VR panel instead.
+        if crate::vr::headless() {
+            return None;
+        }
         match self.surface.as_ref()?.get_current_texture() {
             Ok(t) => Some(t),
             Err(e) => {

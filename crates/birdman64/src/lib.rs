@@ -80,7 +80,7 @@ static HEAP: pw64_game::high_heap::HighHeap = pw64_game::high_heap::HighHeap;
 /// (`PW64_GIT_HASH`); "unknown" when git was unavailable at build time.
 pub fn version_line() -> String {
     format!(
-        "Birdman64 {} ({})",
+        "Birdman64VR {} ({})",
         env!("CARGO_PKG_VERSION"),
         option_env!("PW64_GIT_HASH").unwrap_or("unknown")
     )
@@ -123,10 +123,16 @@ pub(crate) fn start(first: Option<&std::ffi::OsStr>, rom_arg: Option<std::path::
     install_panic_hook();
     // pw64-gfx logs unimplemented opcodes / TMEM errors through `log`;
     // `RUST_LOG` filters them (default level: warn).
-    env_logger::Builder::new()
+    // `try_init`: on Android a new activity can start the app again in the
+    // same process (after a crash, or the activity being recreated), and a
+    // second `init` panicked there.
+    let _ = env_logger::Builder::new()
         .filter_level(log::LevelFilter::Warn)
         .parse_env(env_logger::Env::default())
-        .init();
+        .try_init();
+    // One line, every launch: which build this is (logs from testers say
+    // which APK or zip they came from).
+    eprintln!("{}", version_line());
     // One line, every launch: where pw64.toml / pw64.eep / crash.log live
     // (dev builds: the cwd; see paths.rs for the full rule order).
     eprintln!("[paths] data dir: {}", paths::data_dir().display());
