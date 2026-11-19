@@ -4453,6 +4453,34 @@ fn value_labels(value: &str, one: fn(&str) -> String) -> String {
 /// `Toast::show_card`. The keys and buttons come from the live bindings,
 /// so rebinds show.
 pub(crate) fn welcome_card() -> (String, Vec<String>) {
+    welcome_card_for(crate::vr::active())
+}
+
+/// [`welcome_card`] for the headset (`vr`: the Touch controllers' layout,
+/// xr_pad.rs, and the VR-only stick presses) or the monitor (keyboard).
+fn welcome_card_for(vr: bool) -> (String, Vec<String>) {
+    const TITLE: &str = "Welcome to Birdman64VR";
+    let family = input::active_pad().map_or(input::PadFamily::Generic, |p| p.family);
+    if vr {
+        let mut lines = vec![
+            "Touch controllers: left stick steers \u{b7} A = A \u{b7} B or X = B \u{b7} \
+             left trigger = Z \u{b7} Menu = Start"
+                .to_string(),
+            "Right trigger or right grip (R): chase view or first person".to_string(),
+            "Right stick: camera nearer or further \u{b7} in the menus it turns the island"
+                .to_string(),
+            "Press the right stick to recentre the view, the left stick for settings".to_string(),
+        ];
+        // A Bluetooth pad works alongside, with the Xbox layout.
+        if let Some(pad) = input::active_pad() {
+            lines.push(format!(
+                "Controller: {}. Same layout; {} opens the settings.",
+                pad.name,
+                input::button_name(pad_button(), family)
+            ));
+        }
+        return (TITLE.to_string(), lines);
+    }
     let keyboard = |slot: &str| {
         input::keyboard_binding_rows()
             .iter()
@@ -4482,13 +4510,12 @@ pub(crate) fn welcome_card() -> (String, Vec<String>) {
     ));
     lines.push("C buttons (camera): I J K L \u{b7} F11: fullscreen".to_string());
     // The settings triggers, as configured (the pad button named family-style).
-    let family = input::active_pad().map_or(input::PadFamily::Generic, |p| p.family);
     let f10 = key_label(config::get().input.settings.key.as_deref().unwrap_or("F10"));
     lines.push(format!(
         "Esc, {f10} or {}: settings, controls and quit",
         input::button_name(pad_button(), family)
     ));
-    ("Welcome to Birdman64".to_string(), lines)
+    (TITLE.to_string(), lines)
 }
 
 /// Splits camel case for display: "ArrowUp" → "Arrow Up", "F10" stays.
@@ -4540,8 +4567,8 @@ mod tests {
     /// lines; with the default bindings the keys read player-style.
     #[test]
     fn welcome_card_lines() {
-        let (title, lines) = welcome_card();
-        assert_eq!(title, "Welcome to Birdman64");
+        let (title, lines) = welcome_card_for(false);
+        assert_eq!(title, "Welcome to Birdman64VR");
         let find = |start: &str| {
             lines
                 .iter()
@@ -4558,6 +4585,25 @@ mod tests {
             "C buttons (camera): I J K L \u{b7} F11: fullscreen"
         );
         assert!(find("Esc, ").ends_with(": settings, controls and quit"));
+    }
+
+    /// In the headset the card shows the Touch controllers and the stick
+    /// presses instead of the keyboard.
+    #[test]
+    fn welcome_card_in_vr() {
+        let (title, lines) = welcome_card_for(true);
+        assert_eq!(title, "Welcome to Birdman64VR");
+        assert!(
+            lines[0].starts_with("Touch controllers: left stick steers"),
+            "{lines:?}"
+        );
+        assert!(lines.iter().any(|l| l.contains("recentre")), "{lines:?}");
+        assert!(
+            !lines
+                .iter()
+                .any(|l| l.contains("Keyboard") || l.contains("F11")),
+            "{lines:?}"
+        );
     }
 
     #[test]
